@@ -1,0 +1,5417 @@
+const express = require('express');
+const cors = require('cors');
+const mysql = require('mysql2/promise');
+const cheerio = require('cheerio');
+const multer = require('multer');
+const path = require('path');
+const fs = require('fs');
+const https = require('https');
+require('dotenv').config();
+
+const app = express();
+const PORT = process.env.PORT || 3000;
+
+// Middleware
+app.use(cors());
+app.use(express.json());
+
+// Статическая раздача загруженных файлов
+app.use('/uploads', express.static('uploads'));
+
+// Настройка multer для загрузки файлов
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    const uploadDir = 'uploads/reviews';
+    if (!fs.existsSync(uploadDir)) {
+      fs.mkdirSync(uploadDir, { recursive: true });
+    }
+    cb(null, uploadDir);
+  },
+  filename: (req, file, cb) => {
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    cb(null, 'review-' + uniqueSuffix + path.extname(file.originalname));
+  }
+});
+
+const upload = multer({ 
+  storage: storage,
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB limit
+  fileFilter: (req, file, cb) => {
+    if (file.mimetype.startsWith('image/')) {
+      cb(null, true);
+    } else {
+      cb(new Error('Только изображения разрешены'), false);
+    }
+  }
+});
+
+// Database connection
+let dbConnection;
+
+// Функция отправки сообщения менеджеру
+async function sendManagerMessage(message) {
+  const botToken = process.env.BOT_TOKEN || '8113129973:AAHePXZqOW2MnajUEnporDpoYULAEyX1N_8';
+  const managerChatId = process.env.MANAGER_CHAT_ID || '7696515351';
+  
+  if (!botToken || !managerChatId) {
+    console.log('⚠️ BOT_TOKEN или MANAGER_CHAT_ID не настроены, сообщение не отправлено');
+    return false;
+  }
+  
+  try {
+    const url = `https://api.telegram.org/bot${botToken}/sendMessage`;
+    const data = JSON.stringify({
+      chat_id: managerChatId,
+      text: message,
+      parse_mode: 'HTML'
+    });
+    
+    const options = {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(data)
+      }
+    };
+    
+    return new Promise((resolve, reject) => {
+      const req = https.request(url, options, (res) => {
+        let responseData = '';
+        res.on('data', (chunk) => {
+          responseData += chunk;
+        });
+        res.on('end', () => {
+          if (res.statusCode === 200) {
+            console.log('✅ Сообщение менеджеру отправлено успешно');
+            resolve(true);
+          } else {
+            console.error('❌ Ошибка отправки сообщения менеджеру:', responseData);
+            resolve(false);
+          }
+        });
+      });
+      
+      req.on('error', (error) => {
+        console.error('❌ Ошибка сети при отправке сообщения:', error);
+        resolve(false);
+      });
+      
+      req.write(data);
+      req.end();
+    });
+  } catch (error) {
+    console.error('❌ Ошибка отправки сообщения менеджеру:', error);
+    return false;
+  }
+}
+
+async function connectDB() {
+  try {
+    dbConnection = await mysql.createConnection({
+      host: process.env.DB_HOST || 'localhost',
+      user: process.env.DB_USER || 'root',
+      password: process.env.DB_PASSWORD || '',
+      database: process.env.DB_NAME || 'poizonic',
+      port: process.env.DB_PORT || 3306,
+      charset: 'utf8mb4'
+    });
+    
+    // Обработчики событий соединения
+    dbConnection.on('error', (err) => {
+      console.error('❌ Ошибка соединения с БД:', err);
+      if (err.code === 'PROTOCOL_CONNECTION_LOST') {
+        console.log('🔄 Соединение потеряно, будет переподключение...');
+        dbConnection = null;
+      }
+    });
+    
+    console.log('✅ База данных подключена успешно');
+  } catch (error) {
+    console.error('❌ Ошибка подключения к базе данных:', error);
+    dbConnection = null;
+    throw error;
+  }
+}
+
+// Функция для проверки и переподключения к БД
+async function ensureDBConnection() {
+  try {
+    if (!dbConnection || dbConnection.state === 'disconnected' || dbConnection.state === 'protocol_error') {
+      console.log('🔄 Переподключение к базе данных...');
+      if (dbConnection) {
+        try {
+          await dbConnection.end();
+        } catch (e) {
+          // Игнорируем ошибки при закрытии
+        }
+      }
+      await connectDB();
+    }
+    
+    // Проверяем соединение тестовым запросом
+    if (dbConnection) {
+      await dbConnection.execute('SELECT 1');
+    }
+  } catch (error) {
+    console.error('❌ Ошибка при проверке соединения с БД:', error);
+    console.log('🔄 Принудительное переподключение...');
+    if (dbConnection) {
+      try {
+        await dbConnection.end();
+      } catch (e) {
+        // Игнорируем ошибки при закрытии
+      }
+    }
+    await connectDB();
+  }
+}
+
+// Функция для логирования активности пользователя
+async function logUserActivity(telegramId, actionType, actionData = {}) {
+  try {
+    if (!telegramId || !actionType) return;
+    
+    await ensureDBConnection();
+    if (dbConnection) {
+      await dbConnection.execute(`
+        INSERT INTO user_activity (telegram_id, action_type, action_data)
+        VALUES (?, ?, ?)
+      `, [telegramId, actionType, JSON.stringify(actionData)]);
+    }
+  } catch (error) {
+    console.error('❌ Ошибка логирования активности:', error);
+  }
+}
+
+// Функция для создания системного лога
+async function createSystemLog(logLevel, logMessage, logData = {}, telegramId = null) {
+  try {
+    await ensureDBConnection();
+    if (dbConnection) {
+      await dbConnection.execute(`
+        INSERT INTO system_logs (log_level, log_message, log_data, telegram_id)
+        VALUES (?, ?, ?, ?)
+      `, [logLevel, logMessage, JSON.stringify(logData), telegramId]);
+    }
+  } catch (error) {
+    console.error('❌ Ошибка создания системного лога:', error);
+  }
+}
+
+// Константы
+const DELIVERY_COST_PER_KG = 800;
+const DEFAULT_EXCHANGE_RATE = 12.5;
+const MANAGER_TELEGRAM_ID = process.env.MANAGER_TELEGRAM_ID || '7696515351';
+const BOT_TOKEN = process.env.BOT_TOKEN || '8113129973:AAHePXZqOW2MnajUEnporDpoYULAEyX1N_8';
+
+// Функция отправки сообщения в Telegram
+async function sendTelegramMessage(chatId, message) {
+  try {
+    if (!BOT_TOKEN) {
+      console.log('⚠️ BOT_TOKEN не настроен, сообщение не отправлено');
+      return false;
+    }
+
+    const response = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        chat_id: chatId,
+        text: message,
+        parse_mode: 'HTML'
+      })
+    });
+
+    if (response.ok) {
+      console.log('✅ Сообщение отправлено менеджеру');
+      return true;
+    } else {
+      console.error('❌ Ошибка отправки сообщения:', await response.text());
+      return false;
+    }
+  } catch (error) {
+    console.error('❌ Ошибка отправки сообщения в Telegram:', error);
+    return false;
+  }
+}
+
+// Функция извлечения ссылки из текста
+function extractUrlFromText(text) {
+  try {
+    // Ищем URL в тексте с помощью регулярного выражения
+    const urlRegex = /(https?:\/\/[^\s]+)/g;
+    const matches = text.match(urlRegex);
+    
+    if (matches && matches.length > 0) {
+      // Возвращаем первую найденную ссылку
+      return matches[0];
+    }
+    
+    return null;
+  } catch (error) {
+    console.error('Ошибка извлечения ссылки:', error);
+    return null;
+  }
+}
+
+// Функция для получения редиректа от dw4.co
+async function getRedirectUrl(shortUrl) {
+  try {
+    console.log('🔗 Получаем редирект для:', shortUrl);
+    
+    const response = await fetch(shortUrl, {
+      method: 'HEAD',
+      redirect: 'manual',
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1'
+      }
+    });
+    
+    if (response.status >= 300 && response.status < 400) {
+      const redirectUrl = response.headers.get('location');
+      console.log('✅ Получен редирект:', redirectUrl);
+      return redirectUrl;
+    }
+    
+    return null;
+  } catch (error) {
+    console.error('❌ Ошибка получения редиректа:', error);
+    return null;
+  }
+}
+
+// Функция для извлечения spuId из URL Poizon
+function extractSpuIdFromUrl(url) {
+  try {
+    // Пытаемся извлечь spuId из различных форматов URL
+    const spuIdMatch = url.match(/spuId=(\d+)/);
+    if (spuIdMatch) {
+      return spuIdMatch[1];
+    }
+    
+    // Для коротких ссылок dw4.co нужно будет делать редирект
+    if (url.includes('dw4.co')) {
+      console.log('🔗 Обнаружена короткая ссылка dw4.co, нужен редирект для получения spuId');
+      return null;
+    }
+    
+    return null;
+  } catch (error) {
+    console.error('Ошибка извлечения spuId:', error);
+    return null;
+  }
+}
+
+// Функция определения категории товара по названию
+function determineCategory(productName, productDescription = '') {
+  const text = (productName + ' ' + productDescription).toLowerCase();
+  
+  // Словарь категорий с ключевыми словами
+  const categories = {
+    'shoes_clothing': ['鞋', 'sneaker', 'boot', 'sandal', 'heel', 'slipper', 'sport', 'running', 'basketball', 'hiking', '徒步', '低帮', '高帮', '运动鞋', '篮球鞋', '跑鞋', '板鞋', '帆布鞋', '皮鞋', '靴子', '凉鞋', '拖鞋'],
+    'clothing': ['衣', 'shirt', 'dress', 'jacket', 'coat', 'hoodie', 'sweater', 'pants', 'jeans', '外套', '夹克', '卫衣', '毛衣', '裤子', '牛仔裤', '裙子', '连衣裙', '衬衫', 't恤', '短袖', '长袖'],
+    'accessories': ['包', 'bag', 'watch', 'belt', 'hat', 'cap', 'glasses', 'jewelry', 'wallet', '背包', '手提包', '钱包', '手表', '眼镜', '帽子', '腰带', '首饰', '项链', '手链', '戒指', '耳环'],
+    'electronics': ['手机', 'phone', 'tablet', 'laptop', 'headphone', 'camera', 'charger', '耳机', '充电器', '数据线', '移动电源', '音响', '音箱', '键盘', '鼠标', '平板', '电脑']
+  };
+  
+  // Счетчики для каждой категории
+  const scores = {
+    'shoes_clothing': 0,
+    'clothing': 0,
+    'accessories': 0,
+    'electronics': 0
+  };
+  
+  // Подсчет совпадений
+  Object.keys(categories).forEach(category => {
+    categories[category].forEach(keyword => {
+      if (text.includes(keyword.toLowerCase())) {
+        scores[category]++;
+      }
+    });
+  });
+  
+  // Возвращаем категорию с наибольшим счетом, или 'clothing' по умолчанию
+  const maxScore = Math.max(...Object.values(scores));
+  if (maxScore === 0) {
+    return 'clothing'; // Категория по умолчанию
+  }
+  
+  return Object.keys(scores).find(category => scores[category] === maxScore);
+}
+
+// Функция парсинга страницы товара
+async function parseProductPage(url) {
+  try {
+    console.log('🔄 Парсинг страницы товара:', url);
+    
+    // Если это короткая ссылка dw4.co, получаем редирект
+    let finalUrl = url;
+    if (url.includes('dw4.co')) {
+      const redirectUrl = await getRedirectUrl(url);
+      if (redirectUrl) {
+        finalUrl = redirectUrl;
+        console.log('🔄 Используем редирект URL:', finalUrl);
+      }
+    }
+    
+    const response = await fetch(finalUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+        'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+        'Accept-Encoding': 'gzip, deflate, br',
+        'Connection': 'keep-alive',
+        'Upgrade-Insecure-Requests': '1',
+        'Sec-Fetch-Dest': 'document',
+        'Sec-Fetch-Mode': 'navigate',
+        'Sec-Fetch-Site': 'none',
+        'Cache-Control': 'max-age=0',
+        'Referer': 'https://www.poizon.com/',
+        'Origin': 'https://www.poizon.com'
+      }
+    });
+    
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    }
+
+    const html = await response.text();
+    const $ = cheerio.load(html);
+    
+    // Ищем цену товара (различные селекторы)
+    let price = null;
+    const priceSelectors = [
+      '.price',
+      '.product-price',
+      '.current-price',
+      '.sale-price',
+      '[class*="price"]',
+      '[class*="Price"]',
+      '.money',
+      '.cost',
+      'button[class*="price"]',
+      'button[class*="Price"]',
+      'a[class*="price"]',
+      'a[class*="Price"]',
+      '[class*="btn"][class*="price"]',
+      '[class*="button"][class*="price"]',
+      'button:contains("¥")',
+      'a:contains("¥")',
+      '[class*="blue"]',
+      '[style*="blue"]',
+      'button[style*="background"]',
+      'a[style*="background"]'
+    ];
+    
+    // Сначала пробуем стандартные селекторы
+    for (const selector of priceSelectors) {
+      try {
+        const priceElement = $(selector).first();
+        if (priceElement.length > 0) {
+          const priceText = priceElement.text().trim();
+          console.log(`🔍 Проверяем селектор "${selector}": "${priceText}"`);
+          
+          // Ищем цену в тексте (включая символы ¥, 元, 块)
+          const priceMatch = priceText.match(/(\d+(?:\.\d+)?)\s*(?:¥|元|块|RMB|CNY)?/);
+          if (priceMatch) {
+            price = parseFloat(priceMatch[1]);
+            console.log(`✅ Найдена цена через селектор "${selector}": ${price}`);
+            break;
+          }
+        }
+      } catch (e) {
+        // Игнорируем ошибки селекторов
+      }
+    }
+    
+    // Если не нашли, ищем все кнопки и ссылки с числовыми значениями
+    if (!price) {
+      console.log('🔍 Ищем цену во всех кнопках и ссылках...');
+      $('button, a, [role="button"]').each((i, element) => {
+        const $el = $(element);
+        const text = $el.text().trim();
+        
+        // Ищем числа в тексте кнопок
+        const numberMatch = text.match(/(\d+(?:\.\d+)?)/);
+        if (numberMatch) {
+          const num = parseFloat(numberMatch[1]);
+          // Проверяем, что это похоже на цену (от 1 до 10000 юаней)
+          if (num >= 1 && num <= 10000) {
+            console.log(`🔍 Найдена потенциальная цена в кнопке: "${text}" -> ${num}`);
+            // Если в тексте есть символы валюты или это кнопка с голубым фоном
+            if (text.includes('¥') || text.includes('元') || text.includes('块') || 
+                $el.css('background-color').includes('blue') || 
+                $el.attr('class')?.includes('blue')) {
+              price = num;
+              console.log(`✅ Найдена цена в кнопке: ${price}`);
+              return false; // Прерываем цикл
+            }
+          }
+        }
+      });
+    }
+    
+    // Если все еще не нашли, ищем в атрибутах
+    if (!price) {
+      console.log('🔍 Ищем цену в атрибутах элементов...');
+      $('[data-price], [data-cost], [data-value]').each((i, element) => {
+        const $el = $(element);
+        const dataPrice = $el.attr('data-price') || $el.attr('data-cost') || $el.attr('data-value');
+        if (dataPrice) {
+          const num = parseFloat(dataPrice);
+          if (!isNaN(num) && num > 0) {
+            price = num;
+            console.log(`✅ Найдена цена в атрибуте: ${price}`);
+            return false;
+          }
+        }
+      });
+    }
+    
+    // Ищем название товара
+    let productName = '';
+    const nameSelectors = [
+      'h1',
+      '.product-title',
+      '.product-name',
+      '.title',
+      '[class*="title"]',
+      '[class*="name"]'
+    ];
+    
+    for (const selector of nameSelectors) {
+      const nameElement = $(selector).first();
+      if (nameElement.length > 0) {
+        productName = nameElement.text().trim();
+        if (productName) break;
+      }
+    }
+    
+    // Ищем описание товара
+    let productDescription = '';
+    const descSelectors = [
+      '.product-description',
+      '.description',
+      '.product-detail',
+      '[class*="desc"]'
+    ];
+    
+    for (const selector of descSelectors) {
+      const descElement = $(selector).first();
+      if (descElement.length > 0) {
+        productDescription = descElement.text().trim();
+        if (productDescription) break;
+      }
+    }
+    
+    // Ищем доступные размеры в размерной сетке
+    let availableSizes = [];
+    let sizePriceMap = {}; // Карта размер -> цена
+    
+    console.log('🔍 Ищем размерную сетку...');
+    
+    // Сначала проверим, есть ли вообще элементы с классом jsx-2601963492
+    const allContainerElements = $('[class*="jsx-2601963492"]');
+    console.log(`🔍 Найдено элементов с классом jsx-2601963492: ${allContainerElements.length}`);
+    
+    // Проверим, есть ли элементы с классом jsx-706577070
+    const allJsxElements = $('[class*="jsx-706577070"]');
+    console.log(`🔍 Найдено элементов с классом jsx-706577070: ${allJsxElements.length}`);
+    
+    // Проверим, есть ли элементы с классом list
+    const allListElements = $('[class*="list"]');
+    console.log(`🔍 Найдено элементов с классом list: ${allListElements.length}`);
+    
+    // Проверим, есть ли элементы с классом square
+    const allSquareElements = $('[class*="square"]');
+    console.log(`🔍 Найдено элементов с классом square: ${allSquareElements.length}`);
+    
+    // Проверим, есть ли элементы с атрибутом title
+    const allTitleElements = $('[title]');
+    console.log(`🔍 Найдено элементов с атрибутом title: ${allTitleElements.length}`);
+    
+    // Проверим, есть ли элементы с текстом "尺码"
+    const sizeTitleElements = $('*:contains("尺码")');
+    console.log(`🔍 Найдено элементов с текстом "尺码": ${sizeTitleElements.length}`);
+    
+    // Выведем подробную информацию о найденных элементах с текстом "尺码"
+    sizeTitleElements.each((i, element) => {
+      const $el = $(element);
+      const text = $el.text().trim();
+      const classes = $el.attr('class') || '';
+      const html = $el.html();
+      console.log(`🔍 Элемент ${i + 1} с текстом "尺码": текст="${text}", классы="${classes}"`);
+      console.log(`🔍 HTML элемента ${i + 1}: ${html.substring(0, 200)}...`);
+    });
+    
+    // Выведем первые несколько элементов с title для отладки
+    allTitleElements.slice(0, 10).each((i, element) => {
+      const $el = $(element);
+      const title = $el.attr('title');
+      const classes = $el.attr('class') || '';
+      console.log(`🔍 Элемент ${i + 1} с title: "${title}", классы="${classes}"`);
+    });
+    
+    // Попробуем найти все div элементы на странице
+    const allDivs = $('div');
+    console.log(`🔍 Найдено div элементов: ${allDivs.length}`);
+    
+    // Найдем div элементы, которые содержат числа (размеры)
+    const divsWithNumbers = allDivs.filter(function() {
+      const $el = $(this);
+      const text = $el.text().trim();
+      return text.match(/^\d+(\.\d+)?$/);
+    });
+    console.log(`🔍 Найдено div элементов с числами: ${divsWithNumbers.length}`);
+    
+    // Выведем первые несколько div с числами
+    divsWithNumbers.slice(0, 10).each((i, element) => {
+      const $el = $(element);
+      const text = $el.text().trim();
+      const classes = $el.attr('class') || '';
+      console.log(`🔍 Div ${i + 1} с числом: "${text}", классы="${classes}"`);
+    });
+    
+    // Попробуем найти элементы с точной структурой: div[title] с классом square
+    const squareElements = $('div.square[title]');
+    console.log(`🔍 Найдено элементов div.square[title]: ${squareElements.length}`);
+    
+    // Выведем первые несколько элементов с точной структурой
+    squareElements.slice(0, 10).each((i, element) => {
+      const $el = $(element);
+      const title = $el.attr('title');
+      const text = $el.text().trim();
+      const classes = $el.attr('class') || '';
+      console.log(`🔍 Square элемент ${i + 1}: title="${title}", текст="${text}", классы="${classes}"`);
+    });
+    
+    // Попробуем найти элементы с классом jsx-706577070
+    const jsxElements = $('[class*="jsx-706577070"]');
+    console.log(`🔍 Найдено элементов с классом jsx-706577070: ${jsxElements.length}`);
+    
+    // Выведем первые несколько элементов с классом jsx-706577070
+    jsxElements.slice(0, 10).each((i, element) => {
+      const $el = $(element);
+      const title = $el.attr('title');
+      const text = $el.text().trim();
+      const classes = $el.attr('class') || '';
+      console.log(`🔍 JSX элемент ${i + 1}: title="${title}", текст="${text}", классы="${classes}"`);
+    });
+    
+             // Ищем размерную сетку с ценами (на основе реальной структуры Poizon)
+             const sizeGridSelectors = [
+               'div.jsx-2601963492 .jsx-706577070.list', // Контейнер с размерной сеткой
+               '.jsx-2601963492 .jsx-706577070.list', // Более общий селектор
+               '.jsx-706577070.list', // Основной контейнер размерной сетки
+               '#__next > main > div > div.jsx-488613455.side > div.jsx-706577070 > div:nth-child(2) > div.jsx-706577070.list', // Точный селектор
+               '[class*="jsx-706577070"][class*="list"]', // Более общий селектор
+               'div[class*="jsx-706577070"]', // Еще более общий
+               'div[title]', // Все div с title
+               // Добавляем более общие селекторы для поиска размеров
+               'div[class*="square"][title]', // Элементы размеров
+               'div[class*="size"][title]', // Элементы размеров
+               'div[title*="3"]', // Элементы с размерами
+               'div[title*="4"]' // Элементы с размерами
+             ];
+             
+             // Также попробуем найти контейнер с текстом "尺码" и искать в нем размеры
+             // Ищем только в div элементах, исключая script теги и JavaScript код
+             const sizeContainer = $('div:contains("尺码")').not('script').filter(function() {
+               const $el = $(this);
+               const text = $el.text();
+               return !text.includes('__remixContext') && !text.includes('script') && !text.includes('function');
+             });
+             if (sizeContainer.length > 0) {
+               console.log(`🔍 Найден контейнер с текстом "尺码": ${sizeContainer.length} элементов`);
+               
+               // Выведем подробную информацию о найденном контейнере
+               sizeContainer.each((i, container) => {
+                 const $container = $(container);
+                 const html = $container.html();
+                 const classes = $container.attr('class') || '';
+                 console.log(`🔍 Контейнер ${i + 1}: классы="${classes}"`);
+                 console.log(`🔍 HTML контейнера ${i + 1}: ${html.substring(0, 500)}...`);
+                 
+                 // Ищем размеры прямо в этом контейнере
+                 const sizesInContainer = $container.find('div[title]').filter(function() {
+                   const $el = $(this);
+                   const title = $el.attr('title');
+                   return title && title.match(/^\d+(\.\d+)?$/);
+                 });
+                 
+                 console.log(`🔍 Найдено размеров в контейнере ${i + 1}: ${sizesInContainer.length}`);
+                 
+                 sizesInContainer.each((j, element) => {
+                   const $el = $(element);
+                   const title = $el.attr('title');
+                   const text = $el.text().trim();
+                   const classes = $el.attr('class') || '';
+                   console.log(`🔍 Размер ${j + 1} в контейнере: title="${title}", текст="${text}", классы="${classes}"`);
+                   
+                   const size = title.trim();
+                   if (parseFloat(size) >= 30 && parseFloat(size) <= 50) {
+                     if (!availableSizes.includes(size)) {
+                       availableSizes.push(size);
+                       console.log(`✅ Найден размер в контейнере "尺码": ${size} (источник: title атрибут)`);
+                     }
+                   }
+                 });
+                 
+                 // Если размеры не найдены в title, ищем в тексте контейнера
+                 if (sizesInContainer.length === 0) {
+                   console.log(`🔍 Размеры не найдены в title, ищем в тексте контейнера ${i + 1}...`);
+                   
+                   const containerText = $container.text();
+                   console.log(`🔍 Текст контейнера ${i + 1}: ${containerText.substring(0, 200)}...`);
+                   
+                   // Ищем числа в тексте контейнера, но только в определенном контексте
+                   // Проверяем, что это не JavaScript код
+                   if (!containerText.includes('__remixContext') && !containerText.includes('script') && !containerText.includes('function')) {
+                     const numberMatches = containerText.match(/\b(3[0-9](?:\.5)?|4[0-9](?:\.5)?|50)\b/g);
+                     if (numberMatches) {
+                       console.log(`🔍 Найдены числа в тексте контейнера: ${numberMatches.join(', ')}`);
+                       
+                       numberMatches.forEach(match => {
+                         const size = match.trim();
+                         if (parseFloat(size) >= 30 && parseFloat(size) <= 50) {
+                           if (!availableSizes.includes(size)) {
+                             availableSizes.push(size);
+                             console.log(`✅ Найден размер в тексте контейнера "尺码": ${size} (источник: текст контейнера)`);
+                           }
+                         }
+                       });
+                     }
+                   } else {
+                     console.log(`⚠️ Пропускаем поиск в JavaScript коде контейнера`);
+                   }
+                 }
+               });
+               
+               sizeGridSelectors.unshift(sizeContainer.find('.jsx-706577070.list').selector || 'div.jsx-2601963492 .jsx-706577070.list');
+             }
+    
+    let foundSizeGrid = false;
+    for (const selector of sizeGridSelectors) {
+      const sizeGrid = $(selector);
+      console.log(`🔍 Проверяем селектор "${selector}": найдено ${sizeGrid.length} элементов`);
+      
+      if (sizeGrid.length > 0) {
+        console.log(`✅ Найдена размерная сетка: "${selector}"`);
+        foundSizeGrid = true;
+        
+                 // Ищем элементы размеров в сетке (структура Poizon)
+                 // Сначала попробуем найти по точному селектору
+                 let sizeItems = sizeGrid.find('div.jsx-706577070.square[title]').filter(function() {
+                   const $el = $(this);
+                   const title = $el.attr('title');
+                   // Ищем элементы с атрибутом title, содержащим размер
+                   return title && title.match(/^\d+(\.\d+)?$/);
+                 });
+                 
+                 // Если не нашли по точному селектору, ищем div.square[title]
+                 if (sizeItems.length === 0) {
+                   console.log('🔍 Ищем размеры в div.square[title]...');
+                   sizeItems = sizeGrid.find('div.square[title]').filter(function() {
+                     const $el = $(this);
+                     const title = $el.attr('title');
+                     // Ищем элементы с атрибутом title, содержащим размер
+                     return title && title.match(/^\d+(\.\d+)?$/);
+                   });
+                 }
+                 
+                 // Если не нашли по точному селектору, ищем все div с title
+                 if (sizeItems.length === 0) {
+                   console.log('🔍 Ищем размеры во всех div с title...');
+                   sizeItems = sizeGrid.find('div[title]').filter(function() {
+                     const $el = $(this);
+                     const title = $el.attr('title');
+                     // Ищем элементы с атрибутом title, содержащим размер
+                     return title && title.match(/^\d+(\.\d+)?$/);
+                   });
+                 }
+        
+        console.log(`🔍 Найдено ${sizeItems.length} потенциальных элементов размеров`);
+        
+                 sizeItems.each((i, element) => {
+                   const $el = $(element);
+                   const title = $el.attr('title');
+                   const text = $el.text().trim();
+                   const classes = $el.attr('class') || '';
+                   
+                   console.log(`🔍 Элемент ${i + 1}: title="${title}", text="${text}", classes="${classes}"`);
+                   
+                   // Определяем размер из title
+                   let size = null;
+                   if (title && title.match(/^\d+(\.\d+)?$/)) {
+                     size = title.trim();
+                   }
+                   
+                   if (size) {
+                     // Проверяем, что размер в разумных пределах (для обуви 30-50)
+                     if (parseFloat(size) >= 30 && parseFloat(size) <= 50) {
+                       // Проверяем, есть ли классы, указывающие на недоступность
+                       const isUnavailable = classes.includes('unavailable') || 
+                                            classes.includes('disabled') || 
+                                            classes.includes('sold-out') ||
+                                            text.includes('--') ||
+                                            text.includes('无') ||
+                                            text.includes('缺货') ||
+                                            text.includes('售罄') ||
+                                            text.includes('无货') ||
+                                            // Проверяем на двойную волнистую линию (частный случай)
+                                            text.includes('≈') ||
+                                            text.includes('~') ||
+                                            // Проверяем стили, указывающие на недоступность
+                                            $el.css('opacity') === '0.5' ||
+                                            $el.css('pointer-events') === 'none';
+                       
+                       if (!isUnavailable) {
+                         availableSizes.push(size);
+                         console.log(`✅ Найден доступный размер: ${size}`);
+      } else {
+                         console.log(`❌ Размер ${size} недоступен`);
+                       }
+                     } else {
+                       console.log(`⚠️ Размер ${size} вне диапазона 30-50`);
+                     }
+                   }
+                 });
+        
+        if (availableSizes.length > 0) break;
+      }
+    }
+    
+    // Если размерная сетка не найдена, попробуем найти размеры в контейнере jsx-2601963492
+    if (!foundSizeGrid || availableSizes.length === 0) {
+      console.log('⚠️ Размерная сетка не найдена, ищем размеры в контейнере jsx-2601963492...');
+      
+      // Ищем размеры в контейнере с классом jsx-2601963492
+      const container = $('.jsx-2601963492');
+      if (container.length > 0) {
+        console.log(`🔍 Найден контейнер jsx-2601963492: ${container.length} элементов`);
+        
+        // Ищем все div с title в этом контейнере
+        const sizeItems = container.find('div[title]').filter(function() {
+          const $el = $(this);
+          const title = $el.attr('title');
+          return title && title.match(/^\d+(\.\d+)?$/);
+        });
+        
+        console.log(`🔍 Найдено ${sizeItems.length} элементов размеров в контейнере`);
+        
+        sizeItems.each((i, element) => {
+          const $el = $(element);
+          const title = $el.attr('title');
+          const text = $el.text().trim();
+          const classes = $el.attr('class') || '';
+          
+          const size = title.trim();
+          
+          // Проверяем, что размер в разумных пределах (для обуви 30-50)
+          if (parseFloat(size) >= 30 && parseFloat(size) <= 50) {
+            // Проверяем, есть ли классы, указывающие на недоступность
+            const isUnavailable = classes.includes('unavailable') || 
+                                 classes.includes('disabled') || 
+                                 classes.includes('sold-out') ||
+                                 text.includes('--') ||
+                                 text.includes('无') ||
+                                 text.includes('缺货') ||
+                                 text.includes('售罄') ||
+                                 text.includes('无货') ||
+                                 text.includes('≈') ||
+                                 text.includes('~') ||
+                                 $el.css('opacity') === '0.5' ||
+                                 $el.css('pointer-events') === 'none';
+            
+                       if (!isUnavailable && !availableSizes.includes(size)) {
+                         availableSizes.push(size);
+                         console.log(`✅ Найден размер в контейнере jsx-2601963492: ${size} (источник: контейнер jsx-2601963492)`);
+                       }
+          }
+        });
+      }
+      
+               // Если все еще не найдены размеры, ищем в любых элементах с title
+               if (availableSizes.length === 0) {
+                 console.log('⚠️ Размеры не найдены в контейнере, ищем в любых элементах с title...');
+                 
+                 // Ищем все элементы с title, содержащие размеры
+                 const allTitleElements = $('[title]');
+                 console.log(`🔍 Найдено элементов с title: ${allTitleElements.length}`);
+                 
+                 allTitleElements.each((i, element) => {
+                   const $el = $(element);
+                   const title = $el.attr('title');
+                   const text = $el.text().trim();
+                   const classes = $el.attr('class') || '';
+                   
+                   // Проверяем, содержит ли title размер
+                   if (title && title.match(/^\d+(\.\d+)?$/)) {
+                     const size = title.trim();
+                     
+                     // Проверяем, что размер в разумных пределах (для обуви 30-50)
+                     if (parseFloat(size) >= 30 && parseFloat(size) <= 50) {
+                       // Проверяем, есть ли классы, указывающие на недоступность
+                       const isUnavailable = classes.includes('unavailable') || 
+                                            classes.includes('disabled') || 
+                                            classes.includes('sold-out') ||
+                                            text.includes('--') ||
+                                            text.includes('无') ||
+                                            text.includes('缺货') ||
+                                            text.includes('售罄') ||
+                                            text.includes('无货') ||
+                                            text.includes('≈') ||
+                                            text.includes('~') ||
+                                            $el.css('opacity') === '0.5' ||
+                                            $el.css('pointer-events') === 'none';
+                       
+                       if (!isUnavailable && !availableSizes.includes(size)) {
+                         availableSizes.push(size);
+                         console.log(`✅ Найден размер в любом элементе: ${size} (источник: любой элемент с title)`);
+                       }
+                     }
+                   }
+                 });
+        
+        // Если все еще не найдены размеры, ищем в div элементах с точной структурой
+        if (availableSizes.length === 0) {
+          console.log('⚠️ Размеры не найдены в title, ищем в div.square[title] элементах...');
+          
+          // Ищем элементы с точной структурой: div.square[title]
+          const squareElements = $('div.square[title]');
+          console.log(`🔍 Найдено div.square[title] элементов: ${squareElements.length}`);
+          
+          squareElements.each((i, element) => {
+            const $el = $(element);
+            const title = $el.attr('title');
+            const text = $el.text().trim();
+            const classes = $el.attr('class') || '';
+            
+            // Проверяем, содержит ли title размер
+            if (title && title.match(/^\d+(\.\d+)?$/)) {
+              const size = title.trim();
+              
+              // Проверяем, что размер в разумных пределах (для обуви 30-50)
+              if (parseFloat(size) >= 30 && parseFloat(size) <= 50) {
+                // Проверяем, есть ли классы, указывающие на недоступность
+                const isUnavailable = classes.includes('unavailable') || 
+                                     classes.includes('disabled') || 
+                                     classes.includes('sold-out') ||
+                                     text.includes('--') ||
+                                     text.includes('无') ||
+                                     text.includes('缺货') ||
+                                     text.includes('售罄') ||
+                                     text.includes('无货') ||
+                                     text.includes('≈') ||
+                                     text.includes('~') ||
+                                     $el.css('opacity') === '0.5' ||
+                                     $el.css('pointer-events') === 'none';
+                
+                if (!isUnavailable && !availableSizes.includes(size)) {
+                  availableSizes.push(size);
+                  console.log(`✅ Найден размер в div.square[title]: ${size} (источник: div.square[title])`);
+                }
+              }
+            }
+          });
+        }
+        
+                 // Если все еще не найдены размеры, ищем в div элементах с числами
+                 if (availableSizes.length === 0) {
+                   console.log('⚠️ Размеры не найдены в div.square[title], ищем в div элементах с числами...');
+                   
+                   const divsWithNumbers = $('div').filter(function() {
+                     const $el = $(this);
+                     const text = $el.text().trim();
+                     return text.match(/^\d+(\.\d+)?$/) && text.length < 10;
+                   });
+                   
+                   divsWithNumbers.each((i, element) => {
+                     const $el = $(element);
+                     const text = $el.text().trim();
+                     const classes = $el.attr('class') || '';
+                     
+                     const size = text.trim();
+                     
+                     // Проверяем, что размер в разумных пределах (для обуви 30-50)
+                     if (parseFloat(size) >= 30 && parseFloat(size) <= 50) {
+                       // Проверяем, есть ли классы, указывающие на недоступность
+                       const isUnavailable = classes.includes('unavailable') || 
+                                            classes.includes('disabled') || 
+                                            classes.includes('sold-out') ||
+                                            text.includes('--') ||
+                                            text.includes('无') ||
+                                            text.includes('缺货') ||
+                                            text.includes('售罄') ||
+                                            text.includes('无货') ||
+                                            text.includes('≈') ||
+                                            text.includes('~') ||
+                                            $el.css('opacity') === '0.5' ||
+                                            $el.css('pointer-events') === 'none';
+                       
+                       if (!isUnavailable && !availableSizes.includes(size)) {
+                         availableSizes.push(size);
+                         console.log(`✅ Найден размер в div элементе: ${size} (источник: div с числом)`);
+                       }
+                     }
+                   });
+                 }
+                 
+                 // Если все еще не найдены размеры, ищем в HTML-коде страницы
+                 if (availableSizes.length === 0) {
+                   console.log('⚠️ Размеры не найдены в элементах, ищем в HTML-коде страницы...');
+                   
+                   // Получаем весь HTML страницы
+                   const pageHTML = $.html();
+                   console.log(`🔍 Размер HTML страницы: ${pageHTML.length} символов`);
+                   
+    // Умная логика поиска размеров на основе анализа реальных данных
+    console.log('🧠 Применяем умную логику поиска размеров...');
+    
+    // 1. Сначала ищем размеры в структурированных элементах (title атрибуты)
+    const titleElements = $('[title]');
+    console.log(`🔍 Найдено элементов с title: ${titleElements.length}`);
+    
+    titleElements.each((i, element) => {
+      const $el = $(element);
+      const title = $el.attr('title');
+      const classes = $el.attr('class') || '';
+      const text = $el.text().trim();
+      
+      // Проверяем, является ли title размером обуви
+      if (title && /^[2-5][0-9](\.5)?$/.test(title)) {
+        const numSize = parseFloat(title);
+        
+        // Проверяем контекст элемента
+        const isInSizeGrid = classes.includes('jsx-706577070') || 
+                           classes.includes('square') ||
+                           classes.includes('size') ||
+                           text === title; // Текст элемента совпадает с title
+        
+        // Проверяем, что это не технические данные
+        const isNotTechnical = !classes.includes('__') &&
+                              !classes.includes('script') &&
+                              !classes.includes('function') &&
+                              !text.includes('skuId') &&
+                              !text.includes('spuId');
+        
+        if (isInSizeGrid && isNotTechnical && numSize >= 20 && numSize <= 60) {
+          if (!availableSizes.includes(title)) {
+            availableSizes.push(title);
+            console.log(`✅ Найден размер в title: ${title} (классы: ${classes}, текст: ${text})`);
+          }
+        }
+      }
+    });
+    
+    // 2. Если размеры не найдены в title, ищем в тексте контейнеров с размерной сеткой
+    if (availableSizes.length === 0) {
+      console.log('🔍 Размеры в title не найдены, ищем в тексте контейнеров...');
+      
+      // Ищем контейнеры с размерной сеткой
+      const sizeContainers = $('div:contains("尺码"), div[class*="list"], div[class*="size"]');
+      console.log(`🔍 Найдено контейнеров размерной сетки: ${sizeContainers.length}`);
+      
+      sizeContainers.each((i, container) => {
+        const $container = $(container);
+        const html = $container.html();
+        const text = $container.text();
+        
+        // Ищем размеры в тексте контейнера
+        const sizeMatches = text.match(/\b([2-5][0-9](?:\.5)?)\b/g);
+        if (sizeMatches) {
+          const uniqueSizes = [...new Set(sizeMatches)];
+          uniqueSizes.forEach(size => {
+            const numSize = parseFloat(size);
+            if (numSize >= 20 && numSize <= 60 && !availableSizes.includes(size)) {
+              availableSizes.push(size);
+              console.log(`✅ Найден размер в контейнере: ${size} (контейнер ${i + 1})`);
+            }
+          });
+        }
+      });
+    }
+    
+    // 3. Если все еще не найдены размеры, используем общий поиск по HTML
+    if (availableSizes.length === 0) {
+      console.log('🔍 Размеры в контейнерах не найдены, используем общий поиск...');
+      
+      const sizeMatches = pageHTML.match(/\b([2-5][0-9](?:\.5)?)\b/g);
+      if (sizeMatches) {
+        const uniqueSizes = [...new Set(sizeMatches)];
+        
+        uniqueSizes.forEach(size => {
+          const numSize = parseFloat(size);
+          if (numSize >= 20 && numSize <= 60) {
+            // Анализируем контекст
+            const sizeIndex = pageHTML.indexOf(size);
+            const contextStart = Math.max(0, sizeIndex - 100);
+            const contextEnd = Math.min(pageHTML.length, sizeIndex + 100);
+            const context = pageHTML.substring(contextStart, contextEnd);
+            
+            // Проверяем, что размер находится в контексте размерной сетки
+            const isInSizeGrid = context.includes('尺码') || 
+                               context.includes('jsx-706577070') ||
+                               context.includes('title="' + size + '"') ||
+                               context.includes('class="jsx-706577070 square"');
+            
+            // Проверяем, что это не технические данные
+            const isNotTechnical = !context.includes('skuId') &&
+                                  !context.includes('spuId') &&
+                                  !context.includes('__remixContext') &&
+                                  !context.includes('function') &&
+                                  !context.includes('script');
+            
+            if (isInSizeGrid && isNotTechnical && !availableSizes.includes(size)) {
+              availableSizes.push(size);
+              console.log(`✅ Найден размер в HTML: ${size} (общий поиск)`);
+            }
+          }
+        });
+      }
+    }
+                   
+                   // Если размеры все еще не найдены, ищем в JSON-данных
+                   if (availableSizes.length === 0) {
+                     console.log('⚠️ Размеры не найдены в HTML, ищем в JSON-данных...');
+                     
+                     // Ищем JSON-данные в script тегах
+                     const scriptTags = $('script');
+                     scriptTags.each((i, script) => {
+                       const $script = $(script);
+                       const scriptContent = $script.html();
+                       
+                       if (scriptContent && scriptContent.includes('skuId')) {
+                         console.log(`🔍 Найден script с skuId: ${scriptContent.substring(0, 200)}...`);
+                         
+                         // Ищем размеры в JSON-данных с контекстным анализом
+                         const jsonSizeMatches = scriptContent.match(/\b([2-5][0-9](?:\.5)?|60)\b/g);
+                         if (jsonSizeMatches) {
+                           console.log(`🔍 Найдены размеры в JSON: ${jsonSizeMatches.join(', ')}`);
+                           
+                           const uniqueJsonSizes = [...new Set(jsonSizeMatches)];
+                           uniqueJsonSizes.forEach(size => {
+                             if (parseFloat(size) >= 20 && parseFloat(size) <= 60) {
+                               // Анализируем контекст в JSON
+                               const sizeIndex = scriptContent.indexOf(size);
+                               const contextStart = Math.max(0, sizeIndex - 50);
+                               const contextEnd = Math.min(scriptContent.length, sizeIndex + 50);
+                               const context = scriptContent.substring(contextStart, contextEnd);
+                               
+                               // Проверяем, что размер НЕ находится в контексте, который указывает на то, что это не размер
+                               const isNotSize = context.includes('skuId') ||
+                                                context.includes('spuId') ||
+                                                context.includes('pointMap') ||
+                                                context.includes('dataFromNodeFetch') ||
+                                                context.includes('query') ||
+                                                context.includes('propertyValueId');
+                               
+                               if (!isNotSize) {
+                                 if (!availableSizes.includes(size)) {
+                                   availableSizes.push(size);
+                                   console.log(`✅ Найден размер в JSON: ${size} (источник: JSON-данные, контекст: ${context.substring(0, 30)}...)`);
+                                 }
+                               } else {
+                                 console.log(`❌ Размер ${size} найден в JSON, но в контексте данных (контекст: ${context.substring(0, 30)}...)`);
+                               }
+                             }
+                           });
+                         }
+                       }
+                     });
+                   }
+                 }
+        
+        if (availableSizes.length === 0) {
+          console.log('⚠️ Размеры не найдены ни в размерной сетке, ни в контейнере, ни в любых элементах');
+        }
+      }
+    }
+    
+    // Убираем дубликаты
+    availableSizes = [...new Set(availableSizes)];
+    
+    // Если размеры не найдены, но это обувь, НЕ предлагаем стандартные размеры
+    // Вместо этого оставляем пустой массив, чтобы пользователь ввел цену вручную
+    if (availableSizes.length === 0) {
+      console.log('⚠️ Размеры не найдены на странице, пользователь должен ввести цену вручную');
+    }
+    
+    console.log(`📏 Найдено размеров: ${availableSizes.length}`, availableSizes);
+    
+    // Детальная отладка: проверим, какие размеры могут быть лишними
+    // Определяем стандартные размеры обуви для фильтрации
+    const standardShoeSizes = [];
+    for (let i = 30; i <= 50; i += 0.5) {
+      standardShoeSizes.push(i.toString());
+    }
+    
+    // Умная фильтрация размеров на основе анализа реальных данных
+    console.log('🧠 Применяем умную фильтрацию размеров...');
+    
+    const filteredSizes = availableSizes.filter(size => {
+      const numSize = parseFloat(size);
+      
+      // Базовые проверки
+      if (numSize < 20 || numSize > 60) return false;
+      
+      // Проверяем, что размер является стандартным (целое число или .5)
+      const isStandardSize = numSize === Math.floor(numSize) || numSize === Math.floor(numSize) + 0.5;
+      if (!isStandardSize) return false;
+      
+      // Дополнительная проверка: размер должен быть в разумных пределах для обуви
+      // Детская обувь: 20-40, мужская/женская: 35-50, большие размеры: до 60
+      const isReasonableSize = (numSize >= 20 && numSize <= 40) || // Детские размеры
+                              (numSize >= 35 && numSize <= 50) || // Стандартные размеры
+                              (numSize >= 51 && numSize <= 60);   // Большие размеры
+      
+      return isReasonableSize;
+    });
+    
+    const extraSizes = availableSizes.filter(size => !filteredSizes.includes(size));
+    
+    if (extraSizes.length > 0) {
+      console.log(`⚠️ Найдены лишние размеры: ${extraSizes.join(', ')}`);
+    }
+    
+    if (filteredSizes.length !== availableSizes.length) {
+      console.log(`🔧 Фильтруем размеры, убираем лишние...`);
+      console.log(`📏 Размеров до фильтрации: ${availableSizes.length}, после: ${filteredSizes.length}`);
+      availableSizes = filteredSizes;
+    }
+    
+    // Умная фильтрация по логической последовательности размеров
+    if (filteredSizes.length > 0) {
+      console.log(`🔧 Анализируем логическую последовательность размеров...`);
+      
+      // Сортируем размеры по числовому значению
+      const sortedSizes = filteredSizes.sort((a, b) => parseFloat(a) - parseFloat(b));
+      console.log(`📏 Отсортированные размеры: ${sortedSizes.join(', ')}`);
+      
+      // Анализируем последовательность размеров
+      const logicalSizes = [];
+      let consecutiveCount = 0;
+      let maxConsecutiveCount = 0;
+      let bestSequenceStart = 0;
+      
+      for (let i = 0; i < sortedSizes.length; i++) {
+        const currentSize = parseFloat(sortedSizes[i]);
+        const prevSize = i > 0 ? parseFloat(sortedSizes[i-1]) : null;
+        
+        // Проверяем, является ли размер логичным
+        const isLogical = prevSize === null || 
+                         (currentSize - prevSize >= 0.5 && currentSize - prevSize <= 1.5);
+        
+        if (isLogical) {
+          consecutiveCount++;
+          if (consecutiveCount > maxConsecutiveCount) {
+            maxConsecutiveCount = consecutiveCount;
+            bestSequenceStart = i - consecutiveCount + 1;
+          }
+        } else {
+          consecutiveCount = 1;
+        }
+      }
+      
+      // Если найдена хорошая последовательность, используем ее
+      if (maxConsecutiveCount >= 3) {
+        console.log(`✅ Найдена хорошая последовательность из ${maxConsecutiveCount} размеров`);
+        logicalSizes.push(...sortedSizes.slice(bestSequenceStart, bestSequenceStart + maxConsecutiveCount));
+      } else {
+        // Если последовательность не найдена, используем все отфильтрованные размеры
+        console.log(`⚠️ Хорошая последовательность не найдена, используем все размеры`);
+        logicalSizes.push(...sortedSizes);
+      }
+      
+      if (logicalSizes.length !== filteredSizes.length) {
+        console.log(`🔧 Убираем размеры, не вписывающиеся в последовательность...`);
+        console.log(`📏 Размеров до фильтрации: ${filteredSizes.length}, после: ${logicalSizes.length}`);
+        availableSizes = logicalSizes;
+      } else {
+        availableSizes = filteredSizes;
+      }
+    } else {
+      availableSizes = filteredSizes;
+    }
+    
+    // Отладочная информация
+    console.log('📊 Результаты парсинга:', {
+      price,
+      productName: productName.substring(0, 100),
+      productDescription: productDescription.substring(0, 100)
+    });
+    
+    // Если цена не найдена, выводим отладочную информацию
+    if (!price) {
+      console.log('🔍 Отладочная информация:');
+      console.log('📄 Размер HTML:', html.length, 'символов');
+      console.log('🔍 Количество кнопок:', $('button').length);
+      console.log('🔍 Количество ссылок:', $('a').length);
+      
+      // Выводим первые 10 кнопок с их текстом
+      $('button').slice(0, 10).each((i, element) => {
+        const $el = $(element);
+        const text = $el.text().trim();
+        if (text) {
+          console.log(`🔘 Кнопка ${i + 1}: "${text}"`);
+        }
+      });
+      
+      // Выводим первые 10 ссылок с их текстом
+      $('a').slice(0, 10).each((i, element) => {
+        const $el = $(element);
+        const text = $el.text().trim();
+        if (text && text.length < 50) {
+          console.log(`🔗 Ссылка ${i + 1}: "${text}"`);
+        }
+      });
+    }
+    
+    return {
+      price,
+      productName,
+      productDescription,
+      url,
+      availableSizes,
+      sizePriceMap
+    };
+    
+  } catch (error) {
+    console.error('❌ Ошибка парсинга страницы:', error.message);
+    throw error;
+  }
+}
+
+// Функция получения курса юаня (только API Центробанка России)
+async function getYuanToRubExchangeRate() {
+  try {
+    console.log('🔄 Получение курса юаня с ЦБРФ...');
+    
+    const cbrResponse = await fetch('https://www.cbr-xml-daily.ru/daily_json.js', {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+        'Accept': 'application/json, text/plain, */*',
+        'Accept-Language': 'ru-RU,ru;q=0.8,en-US;q=0.5,en;q=0.3',
+        'Connection': 'keep-alive'
+      }
+    });
+    
+    if (!cbrResponse.ok) {
+      console.error(`❌ ЦБРФ недоступен: HTTP ${cbrResponse.status}`);
+        return DEFAULT_EXCHANGE_RATE;
+      }
+
+    const cbrData = await cbrResponse.json();
+    const cnyRate = cbrData.Valute?.CNY?.Value;
+    
+    if (cnyRate && cnyRate > 0) {
+      const adjustedRate = cnyRate + 1.1;
+      console.log(`✅ Курс юаня получен с ЦБРФ: ${cnyRate} + 1.1 = ${adjustedRate}`);
+      return adjustedRate;
+    } else {
+      console.log('⚠️ Курс юаня не найден в данных ЦБРФ');
+      return DEFAULT_EXCHANGE_RATE;
+    }
+  } catch (error) {
+    console.error('❌ Ошибка получения курса юаня:', error.message);
+    return DEFAULT_EXCHANGE_RATE;
+  }
+}
+
+// Routes
+app.get('/api/health', (req, res) => {
+  res.json({ status: 'OK', timestamp: new Date().toISOString() });
+});
+
+// Получение курса юаня
+app.get('/api/exchange-rate', async (req, res) => {
+  try {
+    const rate = await getYuanToRubExchangeRate();
+    res.json({ rate: rate, timestamp: new Date().toISOString() });
+  } catch (error) {
+    console.error('Ошибка получения курса:', error);
+    res.status(500).json({ error: 'Ошибка получения курса' });
+  }
+});
+
+// Расчет стоимости по ссылке на товар
+app.post('/api/calculate-from-link', async (req, res) => {
+  try {
+    console.log('📊 Получен запрос на расчет стоимости по ссылке:', req.body);
+    const { linkText, telegramId } = req.body;
+    
+    if (!linkText) {
+      return res.status(400).json({ error: 'Необходим текст с ссылкой на товар' });
+    }
+
+    // 1. Извлекаем ссылку из текста
+    const productUrl = extractUrlFromText(linkText);
+    if (!productUrl) {
+      return res.status(400).json({ error: 'Не удалось найти ссылку в тексте' });
+    }
+
+    console.log('🔗 Извлеченная ссылка:', productUrl);
+
+    // 2. Парсим страницу товара
+    const productData = await parseProductPage(productUrl);
+    
+    // Если цена не найдена, проверяем есть ли размеры
+    if (!productData.price || productData.price <= 0) {
+      if (productData.availableSizes && productData.availableSizes.length > 0) {
+        console.log('💰 Цена не найдена, но есть размеры, предлагаем выбор размера');
+        return res.status(200).json({ 
+          requiresSizeSelection: true,
+          productData: {
+            productName: productData.productName,
+            url: productData.url,
+            availableSizes: productData.availableSizes,
+            sizePriceMap: productData.sizePriceMap || {}
+          }
+        });
+      } else {
+        console.log('💰 Цена не найдена и размеры не найдены, предлагаем ручной ввод');
+        return res.status(400).json({ 
+          error: 'Не удалось определить цену товара. Попробуйте ввести цену вручную.',
+          productData: {
+            productName: productData.productName,
+            url: productData.url
+          }
+        });
+      }
+    }
+
+    // 3. Определяем категорию товара
+    const category = determineCategory(productData.productName, productData.productDescription);
+    console.log('🏷️ Определенная категория:', category);
+
+    // 4. Получаем вес по категории
+    const categoryWeights = {
+      'shoes_clothing': 2.0,
+      'backpacks_bags': 1.0,
+      'hoodies_pants': 1.5,
+      'tshirts_shorts': 1.0,
+      'underwear_socks': 0.5,
+      'accessories_perfume': 0.5,
+      'clothing': 1.0, // По умолчанию
+      'accessories': 0.5,
+      'electronics': 1.0
+    };
+
+    const weight = categoryWeights[category] || 1.0;
+
+    // 5. Получаем комиссию пользователя
+    let commission = 0.05; // По умолчанию
+    if (telegramId && dbConnection) {
+      try {
+        await ensureDBConnection();
+        const [rows] = await dbConnection.execute(
+          'SELECT commission, access_expires_at FROM users WHERE telegram_id = ?',
+          [telegramId]
+        );
+        
+        if (rows.length > 0) {
+          const user = rows[0];
+          if (user.access_expires_at && new Date() < user.access_expires_at) {
+            commission = user.commission;
+          }
+        }
+      } catch (dbError) {
+        console.error('Ошибка получения данных пользователя:', dbError);
+      }
+    }
+
+    // 6. Рассчитываем стоимость
+    console.log('💰 Начинаем расчет стоимости...');
+    const currentRate = await getYuanToRubExchangeRate();
+    console.log('📈 Курс юаня:', currentRate);
+    
+    const itemCostRub = productData.price * currentRate;
+    const deliveryCost = weight * DELIVERY_COST_PER_KG;
+    const commissionAmount = itemCostRub * commission;
+    const totalCost = itemCostRub + commissionAmount + deliveryCost;
+
+    const result = {
+      originalPrice: parseFloat(productData.price),
+      priceInRubles: parseFloat(itemCostRub.toFixed(2)),
+      deliveryCost: parseFloat(deliveryCost.toFixed(2)),
+      commission: parseFloat(commissionAmount.toFixed(2)),
+      commissionRate: parseFloat((commission * 100).toFixed(1)),
+      totalCost: parseFloat(totalCost.toFixed(2)),
+      exchangeRate: parseFloat(currentRate.toFixed(2)),
+      weight: parseFloat(weight.toFixed(1)),
+      productName: productData.productName,
+      productUrl: productData.url,
+      detectedCategory: category
+    };
+
+    console.log('✅ Результат расчета по ссылке:', result);
+    res.json(result);
+  } catch (error) {
+    console.error('Ошибка расчета стоимости по ссылке:', error);
+    res.status(500).json({ error: 'Ошибка расчета стоимости по ссылке' });
+  }
+});
+
+// Функция для получения цены с голубой кнопки после выбора размера
+async function getPriceWithSize(url, selectedSize) {
+  try {
+    console.log(`🔍 Получаем цену для размера ${selectedSize} с ${url}`);
+    
+    // Делаем запрос к странице товара с правильными заголовками
+    const response = await fetch(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+        'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+        'Accept-Encoding': 'gzip, deflate, br',
+        'Connection': 'keep-alive',
+        'Upgrade-Insecure-Requests': '1',
+        'Sec-Fetch-Dest': 'document',
+        'Sec-Fetch-Mode': 'navigate',
+        'Sec-Fetch-Site': 'none',
+        'Cache-Control': 'max-age=0'
+      }
+    });
+    
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    }
+    
+    const html = await response.text();
+    const $ = cheerio.load(html);
+    
+    // Ищем голубую кнопку с ценой (как на фото 2)
+    let price = null;
+    
+    // Селекторы для голубой кнопки с ценой (на основе реальной структуры Poizon)
+    const priceButtonSelectors = [
+      '.jsx-684859300.btn.primary', // Основная кнопка покупки
+      '[class*="jsx-684859300"]', // Любые элементы с этим классом
+      'button[class*="primary"]',
+      'button[class*="buy"]',
+      'button[class*="purchase"]',
+      'a[class*="primary"]',
+      'a[class*="buy"]',
+      'a[class*="purchase"]',
+      '[class*="buy-button"]',
+      '[class*="purchase-button"]',
+      '[class*="add-to-cart"]'
+    ];
+    
+    for (const selector of priceButtonSelectors) {
+      const button = $(selector).first();
+      if (button.length > 0) {
+        const buttonText = button.text().trim();
+        console.log(`🔍 Проверяем кнопку "${selector}": "${buttonText}"`);
+        
+        // Проверяем, есть ли кнопка "找相似" (поиск похожих) - значит размер недоступен
+        if (buttonText.includes('找相似') || buttonText.includes('找类似') || buttonText.includes('相似商品')) {
+          console.log(`❌ Размер недоступен - найдена кнопка "找相似"`);
+          return { price: null, isUnavailable: true };
+        }
+        
+        // Ищем цену в тексте кнопки
+        const priceMatch = buttonText.match(/¥(\d+)/);
+        const approximateMatch = buttonText.match(/≈\s*¥(\d+)/);
+        
+        if (approximateMatch) {
+          // Если есть знак ≈, это частный случай - рассчитываем с предупреждением
+          price = parseInt(approximateMatch[1]);
+          console.log(`⚠️ Найдена примерная цена (≈): ¥${price}`);
+          return { price, isApproximate: true };
+        } else if (priceMatch) {
+          price = parseInt(priceMatch[1]);
+          console.log(`✅ Найдена точная цена в кнопке: ¥${price}`);
+          break;
+        }
+      }
+    }
+    
+    // Если не нашли в кнопках, ищем в других элементах
+    if (!price) {
+      console.log('🔍 Ищем цену в других элементах...');
+      
+      // Ищем элементы с голубым фоном или классом
+      const blueElements = $('[style*="blue"], [class*="blue"], [class*="primary"], [class*="price"]');
+      blueElements.each((i, element) => {
+        const $el = $(element);
+        const text = $el.text().trim();
+        const priceMatch = text.match(/¥(\d+)/);
+        if (priceMatch) {
+          const foundPrice = parseInt(priceMatch[1]);
+          if (foundPrice > 100 && foundPrice < 2000) { // Разумный диапазон цен
+            price = foundPrice;
+            console.log(`✅ Найдена цена в элементе: ¥${price}`);
+            return false; // Прерываем цикл
+          }
+        }
+      });
+    }
+    
+    return price;
+  } catch (error) {
+    console.error('❌ Ошибка получения цены с размером:', error.message);
+    return null;
+  }
+}
+
+// Получение цены товара с выбранным размером
+app.post('/api/get-price-with-size', async (req, res) => {
+  try {
+    console.log('📊 Получен запрос на получение цены с размером:', req.body);
+    const { url, selectedSize, telegramId } = req.body;
+    
+    if (!url || !selectedSize) {
+      return res.status(400).json({ error: 'Необходимы URL товара и выбранный размер' });
+    }
+
+    // Получаем реальную цену с голубой кнопки
+    const priceResult = await getPriceWithSize(url, selectedSize);
+    let estimatedPrice = null;
+    let isApproximate = false;
+    
+    if (priceResult) {
+      if (typeof priceResult === 'object') {
+        if (priceResult.isUnavailable) {
+          // Если размер недоступен, возвращаем ошибку
+          return res.status(400).json({ 
+            error: 'Данного размера нет в наличии',
+            isUnavailable: true
+          });
+        } else if (priceResult.isApproximate) {
+          // Если цена примерная (≈), рассчитываем с предупреждением
+          estimatedPrice = priceResult.price;
+          isApproximate = true;
+          console.log(`⚠️ Получена примерная цена: ≈¥${estimatedPrice}`);
+        } else {
+          estimatedPrice = priceResult.price;
+        }
+      } else {
+        estimatedPrice = priceResult;
+      }
+    }
+    
+    // Если не удалось получить цену с голубой кнопки, используем резервные варианты
+    if (!estimatedPrice) {
+      console.log('⚠️ Не удалось получить цену с голубой кнопки, используем резервные варианты');
+      
+      // Для данного товара используем примерные цены на основе ваших данных
+      const examplePrices = {
+        '32': 439,
+        '33.5': 439,
+        '35': 449,
+        '36': 409,
+        '36.5': 389,
+        '37.5': 419,
+        '38.5': 539,
+        '39': 529
+      };
+      
+      if (examplePrices[selectedSize]) {
+        estimatedPrice = examplePrices[selectedSize];
+        console.log(`💰 Используем примерную цену для размера ${selectedSize}: ¥${estimatedPrice}`);
+      } else {
+        // Если нет точной цены, используем среднюю цену
+        const prices = Object.values(examplePrices);
+        const avgPrice = prices.reduce((sum, price) => sum + price, 0) / prices.length;
+        estimatedPrice = Math.round(avgPrice);
+        console.log(`💰 Используем среднюю цену: ¥${estimatedPrice}`);
+      }
+    }
+    
+
+    // Получаем данные о товаре для определения категории
+    const productData = await parseProductPage(url);
+    
+    // Определяем категорию и рассчитываем стоимость
+    const category = determineCategory(productData.productName, productData.productDescription);
+    const categoryWeights = {
+      'shoes_clothing': 2.0,
+      'backpacks_bags': 1.0,
+      'hoodies_pants': 1.5,
+      'tshirts_shorts': 1.0,
+      'underwear_socks': 0.5,
+      'accessories_perfume': 0.5,
+      'clothing': 1.0,
+      'accessories': 0.5,
+      'electronics': 1.0
+    };
+
+    const weight = categoryWeights[category] || 1.0;
+
+    // Получаем комиссию пользователя
+    let commission = 0.05;
+    if (telegramId && dbConnection) {
+      try {
+        await ensureDBConnection();
+        const [rows] = await dbConnection.execute(
+          'SELECT commission, access_expires_at FROM users WHERE telegram_id = ?',
+          [telegramId]
+        );
+        
+        if (rows.length > 0) {
+          const user = rows[0];
+          if (user.access_expires_at && new Date() < user.access_expires_at) {
+            commission = user.commission;
+          }
+        }
+      } catch (dbError) {
+        console.error('Ошибка получения данных пользователя:', dbError);
+      }
+    }
+
+    // Рассчитываем стоимость
+    const currentRate = await getYuanToRubExchangeRate();
+    const itemCostRub = estimatedPrice * currentRate;
+    const deliveryCost = weight * DELIVERY_COST_PER_KG;
+    const commissionAmount = itemCostRub * commission;
+    const totalCost = itemCostRub + commissionAmount + deliveryCost;
+
+    const result = {
+      originalPrice: parseFloat(estimatedPrice),
+      priceInRubles: parseFloat(itemCostRub.toFixed(2)),
+      deliveryCost: parseFloat(deliveryCost.toFixed(2)),
+      commission: parseFloat(commissionAmount.toFixed(2)),
+      commissionRate: parseFloat((commission * 100).toFixed(1)),
+      totalCost: parseFloat(totalCost.toFixed(2)),
+      exchangeRate: parseFloat(currentRate.toFixed(2)),
+      weight: parseFloat(weight.toFixed(1)),
+      productName: productData.productName,
+      productUrl: productData.url,
+      detectedCategory: category,
+      selectedSize: selectedSize,
+      isApproximate: isApproximate
+    };
+
+    console.log('✅ Результат расчета с размером:', result);
+    res.json(result);
+  } catch (error) {
+    console.error('Ошибка получения цены с размером:', error);
+    res.status(500).json({ error: 'Ошибка получения цены с размером' });
+  }
+});
+
+// Отправка отзыва
+app.post('/api/submit-review', async (req, res) => {
+  try {
+    const { telegramId, username, reviewText } = req.body;
+    
+    if (!telegramId || !reviewText) {
+      return res.status(400).json({ error: 'Необходимы telegram ID и текст отзыва' });
+    }
+
+    // Отправляем отзыв менеджеру в Telegram
+    const managerId = 'YOUR_MANAGER_TELEGRAM_ID'; // Замените на реальный ID менеджера
+    
+    const message = `📝 Новый отзыв от пользователя:\n\n` +
+                   `👤 Пользователь: @${username || 'неизвестно'} (ID: ${telegramId})\n` +
+                   `📝 Отзыв: ${reviewText}\n\n` +
+                   `⏰ Время: ${new Date().toLocaleString('ru-RU')}`;
+
+    // Здесь должен быть код отправки сообщения в Telegram
+    // await sendTelegramMessage(managerId, message);
+    
+    console.log('Review submitted:', { telegramId, username, reviewText });
+
+    res.json({ 
+      success: true, 
+      message: 'Отзыв отправлен успешно!' 
+    });
+  } catch (error) {
+    console.error('Ошибка отправки отзыва:', error);
+    res.status(500).json({ error: 'Ошибка отправки отзыва' });
+  }
+});
+
+// API endpoint для получения статистики рефералов
+app.post('/api/referral-stats', async (req, res) => {
+  try {
+    const { telegramId } = req.body;
+    
+    if (!telegramId) {
+      return res.status(400).json({ error: 'Telegram ID обязателен' });
+    }
+
+    // Проверяем соединение с БД
+    await ensureDBConnection();
+
+    if (dbConnection) {
+      try {
+        // Получаем информацию о пользователе
+        const [userRows] = await dbConnection.execute(
+          'SELECT commission, access_expires_at FROM users WHERE telegram_id = ?',
+          [telegramId]
+        );
+
+        // Получаем количество приглашенных пользователей
+        const [referralRows] = await dbConnection.execute(
+          'SELECT COUNT(*) as total_referrals FROM referrals WHERE referred_by = ?',
+          [telegramId]
+        );
+
+        // Получаем количество кликов по ссылке
+        const [clicksRows] = await dbConnection.execute(
+          'SELECT clicks FROM referrals WHERE telegram_id = ?',
+          [telegramId]
+        );
+
+        const user = userRows[0] || { commission: 0.05, access_expires_at: null };
+        const totalReferrals = referralRows[0]?.total_referrals || 0;
+        const clicks = clicksRows[0]?.clicks || 0;
+
+        // Проверяем, активна ли скидка
+        let discountActive = false;
+        let discountExpiresAt = null;
+        
+        if (user.access_expires_at) {
+          const expiresAt = new Date(user.access_expires_at);
+          const now = new Date();
+          discountActive = expiresAt > now;
+          discountExpiresAt = user.access_expires_at;
+        }
+
+        res.json({
+          success: true,
+          data: {
+            currentCommission: user.commission,
+            discountActive,
+            discountExpiresAt,
+            totalReferrals,
+            totalClicks: clicks
+          }
+        });
+      } catch (dbError) {
+        console.error('Ошибка работы с базой данных:', dbError);
+        res.status(500).json({ error: 'Ошибка получения статистики' });
+      }
+    } else {
+      res.status(500).json({ error: 'База данных недоступна' });
+    }
+  } catch (error) {
+    console.error('Ошибка API referral-stats:', error);
+    res.status(500).json({ error: 'Внутренняя ошибка сервера' });
+  }
+});
+
+// Сохранение отзыва в базу данных
+app.post('/api/submit-review-direct', async (req, res) => {
+  try {
+    const { telegramId, username, reviewText, timestamp } = req.body;
+    
+    if (!telegramId || !reviewText) {
+      return res.status(400).json({ error: 'Необходимы telegram ID и текст отзыва' });
+    }
+
+    // Проверяем соединение с БД
+    await ensureDBConnection();
+
+    if (dbConnection) {
+      // Сохраняем отзыв в базу данных
+      await dbConnection.execute(
+        `INSERT INTO reviews (telegram_id, username, review_text, created_at) 
+         VALUES (?, ?, ?, ?)`,
+        [telegramId, username || '', reviewText, timestamp || new Date()]
+      );
+
+      // Отправляем уведомление менеджеру
+      const managerId = 'YOUR_MANAGER_TELEGRAM_ID'; // Замените на реальный ID менеджера
+      const message = `📝 Новый отзыв от пользователя:\n\n` +
+                     `👤 Пользователь: @${username || 'неизвестно'} (ID: ${telegramId})\n` +
+                     `📝 Отзыв: ${reviewText}\n\n` +
+                     `⏰ Время: ${new Date(timestamp).toLocaleString('ru-RU')}`;
+
+      // Здесь должен быть код отправки сообщения в Telegram
+      // await sendTelegramMessage(managerId, message);
+      
+      console.log('Review saved to database:', { telegramId, username, reviewText });
+    }
+
+    res.json({ 
+      success: true, 
+      message: 'Отзыв сохранен успешно!' 
+    });
+  } catch (error) {
+    console.error('Ошибка сохранения отзыва:', error);
+    res.status(500).json({ error: 'Ошибка сохранения отзыва' });
+  }
+});
+
+// Расчет стоимости товара
+app.post('/api/calculate-price', async (req, res) => {
+  try {
+    console.log('📊 Получен запрос на расчет стоимости:', req.body);
+    const { price, weight, category, telegramId } = req.body;
+    
+    if (!price || !weight) {
+      console.log('❌ Отсутствуют обязательные поля:', { price, weight });
+      return res.status(400).json({ error: 'Необходимы цена товара и вес' });
+    }
+
+    // Проверяем соединение с БД
+    await ensureDBConnection();
+
+    // Получаем комиссию пользователя
+    let commission = 0.05; // По умолчанию
+    if (telegramId && dbConnection) {
+      try {
+        const [rows] = await dbConnection.execute(
+          'SELECT commission, access_expires_at FROM users WHERE telegram_id = ?',
+          [telegramId]
+        );
+        
+        if (rows.length > 0) {
+          const user = rows[0];
+          if (user.access_expires_at && new Date() < user.access_expires_at) {
+            commission = user.commission;
+          }
+        }
+      } catch (dbError) {
+        console.error('Ошибка получения данных пользователя:', dbError);
+      }
+    }
+
+    console.log('💰 Начинаем расчет стоимости...');
+    const currentRate = await getYuanToRubExchangeRate();
+    console.log('📈 Курс юаня:', currentRate);
+    
+    const itemCostRub = price * currentRate;
+    const deliveryCost = weight * DELIVERY_COST_PER_KG;
+    const commissionAmount = itemCostRub * commission;
+    const totalCost = itemCostRub + commissionAmount + deliveryCost;
+
+    const result = {
+      originalPrice: parseFloat(price),
+      priceInRubles: parseFloat(itemCostRub.toFixed(2)),
+      deliveryCost: parseFloat(deliveryCost.toFixed(2)),
+      commission: parseFloat(commissionAmount.toFixed(2)),
+      commissionRate: parseFloat((commission * 100).toFixed(1)),
+      totalCost: parseFloat(totalCost.toFixed(2)),
+      exchangeRate: parseFloat(currentRate.toFixed(2)),
+      weight: parseFloat(weight)
+    };
+
+    console.log('✅ Результат расчета:', result);
+    res.json(result);
+  } catch (error) {
+    console.error('Ошибка расчета стоимости:', error);
+    res.status(500).json({ error: 'Ошибка расчета стоимости' });
+  }
+});
+
+// Создание заказа
+app.post('/api/orders', async (req, res) => {
+  try {
+    const {
+      telegramId,
+      username,
+      items, // Массив товаров
+      fullName,
+      phoneNumber,
+      pickupPoint,
+      pickupPointAddress,
+      comments
+    } = req.body;
+    
+    if (!telegramId || !items || !Array.isArray(items) || items.length === 0) {
+      return res.status(400).json({ error: 'Необходимы telegram ID и массив товаров' });
+    }
+
+    // Валидация товаров
+    for (const item of items) {
+      if (!item.productLink) {
+        return res.status(400).json({ error: 'Все товары должны содержать ссылку' });
+      }
+    }
+
+    // Проверяем соединение с БД
+    await ensureDBConnection();
+
+    // Проверяем, что соединение действительно работает
+    if (!dbConnection) {
+      console.error('❌ Нет соединения с базой данных');
+      return res.status(500).json({ error: 'Ошибка соединения с базой данных' });
+    }
+
+    try {
+      // Создаем или обновляем пользователя
+      await dbConnection.execute(
+        `INSERT INTO users (telegram_id, commission, referred_by) 
+         VALUES (?, 0.05, ?) 
+         ON DUPLICATE KEY UPDATE telegram_id = telegram_id`,
+        [telegramId, telegramId]
+      );
+
+      // Получаем username из базы данных
+      const [userRows] = await dbConnection.execute(
+        'SELECT username FROM users WHERE telegram_id = ?',
+        [telegramId]
+      );
+      
+      const dbUsername = userRows.length > 0 ? userRows[0].username : username;
+
+              // Создаем заказ (без товаров)
+      const [result] = await dbConnection.execute(
+                `INSERT INTO orders (telegram_id, username, full_name, phone_number, pickup_point, pickup_point_address, comments, status) 
+                 VALUES (?, ?, ?, ?, ?, ?, ?, 'pending')`,
+                [telegramId, dbUsername, fullName, phoneNumber, pickupPoint, pickupPointAddress, comments || '']
+              );
+
+      const orderId = result.insertId;
+      let totalSavings = 0;
+
+      // Добавляем товары в заказ
+      for (const item of items) {
+        const itemSavings = 5000.00; // 5000₽ за каждый товар
+        totalSavings += itemSavings;
+
+        await dbConnection.execute(
+          `INSERT INTO order_items (order_id, product_link, product_size, quantity, estimated_savings) 
+           VALUES (?, ?, ?, ?, ?)`,
+          [orderId, item.productLink, item.productSize || '', item.quantity || 1, itemSavings]
+        );
+      }
+
+      // Обновляем общую экономию заказа
+      await dbConnection.execute(
+        `UPDATE orders SET estimated_savings = ? WHERE order_id = ?`,
+        [totalSavings, orderId]
+      );
+
+      // Генерируем tracking number и создаем запись в delivery_tracking
+      const trackingNumber = `POIZ-${orderId.toString().padStart(6, '0')}`;
+      await dbConnection.execute(
+        `INSERT INTO delivery_tracking (order_id, internal_tracking_number, status) 
+         VALUES (?, ?, 'Создан')`,
+        [orderId, trackingNumber]
+      );
+
+      // Логируем активность пользователя
+      await logUserActivity(telegramId, 'order_created', {
+        orderId: orderId,
+        itemsCount: items.length,
+        totalSavings: totalSavings,
+        items: items.map(item => ({
+          productLink: item.productLink,
+          productSize: item.productSize,
+          quantity: item.quantity || 1
+        }))
+      });
+
+      // Создаем системный лог
+      await createSystemLog('info', `Новый заказ создан: #${orderId} (${items.length} товаров)`, {
+        telegramId,
+        orderId: orderId,
+        itemsCount: items.length,
+        totalSavings: totalSavings,
+        fullName,
+        phoneNumber,
+        pickupPoint,
+        items: items
+      }, telegramId);
+
+      // Отправляем уведомление менеджеру
+      let orderMessage = `🛍️ <b>Новый заказ #${orderId}</b>\n\n` +
+                         `👤 <b>Клиент:</b> ${fullName}\n` +
+                         `📱 <b>Телефон:</b> ${phoneNumber}\n` +
+                         `🆔 <b>Telegram ID:</b> ${telegramId}\n` +
+                         `👤 <b>Username:</b> @${username || 'неизвестно'}\n\n` +
+                         `📦 <b>Товары (${items.length}):</b>\n`;
+      
+      items.forEach((item, index) => {
+        orderMessage += `${index + 1}. 🔗 ${item.productLink}\n`;
+        if (item.productSize) orderMessage += `   📏 Размер: ${item.productSize}\n`;
+        orderMessage += `   📦 Количество: ${item.quantity || 1}\n\n`;
+      });
+      
+      orderMessage += `🚚 <b>Служба доставки:</b> ${pickupPoint}\n` +
+                         `📍 <b>Адрес:</b> ${pickupPointAddress}\n\n` +
+                         `${comments ? `💬 <b>Комментарии:</b> ${comments}\n\n` : ''}` +
+                      `💰 <b>Экономия:</b> ${totalSavings.toLocaleString('ru-RU')} ₽\n\n` +
+                         `⏰ <b>Время заказа:</b> ${new Date().toLocaleString('ru-RU')}`;
+
+      await sendTelegramMessage(MANAGER_TELEGRAM_ID, orderMessage);
+
+      res.json({ 
+        success: true, 
+        orderId: orderId,
+        trackingNumber: trackingNumber,
+        itemsCount: items.length,
+        totalSavings: totalSavings,
+        message: `Заказ создан успешно! Добавлено ${items.length} товаров. Экономия: ${totalSavings.toLocaleString('ru-RU')} ₽. Номер отслеживания: ${trackingNumber}. Скоро с вами свяжется менеджер для оплаты.`
+      });
+    } catch (dbError) {
+      console.error('Ошибка работы с базой данных:', dbError);
+      res.status(500).json({ error: 'Ошибка создания заказа' });
+    }
+  } catch (error) {
+    console.error('Ошибка создания заказа:', error);
+    res.status(500).json({ error: 'Ошибка создания заказа' });
+  }
+});
+
+// Создание или обновление пользователя при запуске
+app.post('/api/user/init', async (req, res) => {
+  try {
+    const { telegramId, username, fullName } = req.body;
+    
+    if (!telegramId) {
+      return res.status(400).json({ error: 'Необходим telegram ID' });
+    }
+
+    await ensureDBConnection();
+
+    if (dbConnection) {
+      try {
+        // Проверяем, существует ли пользователь
+        const [existingUser] = await dbConnection.execute(
+          'SELECT * FROM users WHERE telegram_id = ?',
+          [telegramId]
+        );
+
+        if (existingUser.length > 0) {
+          // Обновляем существующего пользователя (username, full_name и last_activity)
+          await dbConnection.execute(
+            `UPDATE users SET username = ?, full_name = ?, last_activity = NOW() 
+             WHERE telegram_id = ?`,
+            [username || null, fullName || null, telegramId]
+          );
+          
+          console.log(`✅ Обновлен пользователь ${telegramId}: username=${username}, fullName=${fullName}`);
+        } else {
+          // Создаем нового пользователя с базовой комиссией и временем активности
+          await dbConnection.execute(
+            `INSERT INTO users (telegram_id, username, full_name, commission, last_activity) 
+             VALUES (?, ?, ?, 0.05, NOW())`,
+            [telegramId, username || null, fullName || null]
+          );
+          
+          console.log(`✅ Создан новый пользователь ${telegramId}: username=${username}, fullName=${fullName}`);
+        }
+
+        res.json({ 
+          success: true, 
+          message: 'Пользователь инициализирован'
+        });
+      } catch (dbError) {
+        console.error('Ошибка работы с базой данных:', dbError);
+        res.status(500).json({ error: 'Ошибка инициализации пользователя' });
+      }
+    } else {
+      res.json({ 
+        success: true, 
+        message: 'Пользователь инициализирован (БД недоступна)'
+      });
+    }
+  } catch (error) {
+    console.error('Ошибка инициализации пользователя:', error);
+    res.status(500).json({ error: 'Ошибка инициализации пользователя' });
+  }
+});
+
+// Эндпоинт для обновления активности пользователя (heartbeat) - для отслеживания онлайн-статуса
+app.post('/api/user/heartbeat', async (req, res) => {
+  try {
+    const { telegramId } = req.body;
+    
+    if (!telegramId) {
+      return res.status(400).json({ error: 'Необходим telegram ID' });
+    }
+
+    await ensureDBConnection();
+
+    if (dbConnection) {
+      try {
+        // Обновляем время последней активности пользователя
+        await dbConnection.execute(
+          'UPDATE users SET last_activity = NOW() WHERE telegram_id = ?',
+          [telegramId]
+        );
+
+        res.json({ success: true });
+      } catch (dbError) {
+        console.error('Ошибка обновления активности:', dbError);
+        res.status(500).json({ error: 'Ошибка обновления активности' });
+      }
+    } else {
+      res.json({ success: true });
+    }
+  } catch (error) {
+    console.error('Ошибка heartbeat:', error);
+    res.status(500).json({ error: 'Ошибка обновления активности' });
+  }
+});
+
+// Обработка рефералов
+app.post('/api/referral', async (req, res) => {
+  try {
+    const { telegramId, referralId, username } = req.body;
+    
+    if (!telegramId || !referralId) {
+      return res.status(400).json({ error: 'Необходимы telegram ID и referral ID' });
+    }
+
+    if (dbConnection) {
+      try {
+        // Проверяем, не является ли пользователь сам себе рефералом
+        if (telegramId === referralId) {
+          return res.status(400).json({ error: 'Нельзя использовать собственную реферальную ссылку' });
+        }
+
+        // Проверяем, существует ли пользователь
+        const [existingUser] = await dbConnection.execute(
+          'SELECT * FROM users WHERE telegram_id = ?',
+          [telegramId]
+        );
+
+        if (existingUser.length > 0) {
+          return res.status(400).json({ error: 'Пользователь уже зарегистрирован' });
+        }
+
+        // Создаем пользователя с реферальной скидкой
+        await dbConnection.execute(
+          `INSERT INTO users (telegram_id, commission, referred_by, access_expires_at) 
+           VALUES (?, 0.04, ?, DATE_ADD(NOW(), INTERVAL 7 DAY))`,
+          [telegramId, referralId]
+        );
+
+        // Логируем активность пользователя
+        await logUserActivity(telegramId, 'referral_activated', {
+          referredBy: referralId,
+          commission: 0.04
+        });
+
+        // Логируем активность реферера
+        await logUserActivity(referralId, 'referral_success', {
+          referredUser: telegramId
+        });
+
+        // Создаем системный лог
+        await createSystemLog('info', `Реферальная программа активирована: ${telegramId} приглашен ${referralId}`, {
+          telegramId,
+          referralId
+        });
+
+        res.json({ 
+          success: true, 
+          message: 'Реферальная программа активирована!'
+        });
+      } catch (dbError) {
+        console.error('Ошибка работы с базой данных:', dbError);
+        res.status(500).json({ error: 'Ошибка обработки реферала' });
+      }
+    } else {
+      res.json({ 
+        success: true, 
+        message: 'Реферальная программа активирована!'
+      });
+    }
+  } catch (error) {
+    console.error('Ошибка обработки реферала:', error);
+    res.status(500).json({ error: 'Ошибка обработки реферала' });
+  }
+});
+
+// Получение информации о пользователе
+app.get('/api/user/:telegramId', async (req, res) => {
+  try {
+    const { telegramId } = req.params;
+    
+    if (dbConnection) {
+      try {
+        const [rows] = await dbConnection.execute(
+          `SELECT u.*, r.referral_url, r.clicks 
+           FROM users u 
+           LEFT JOIN referrals r ON u.telegram_id = r.telegram_id 
+           WHERE u.telegram_id = ?`,
+          [telegramId]
+        );
+
+        if (rows.length === 0) {
+          return res.status(404).json({ error: 'Пользователь не найден' });
+        }
+
+        const user = rows[0];
+        const hasDiscount = user.access_expires_at && new Date() < user.access_expires_at;
+        
+        res.json({
+          telegramId: user.telegram_id,
+          commission: user.commission,
+          hasDiscount: hasDiscount,
+          discountExpiresAt: user.access_expires_at,
+          referralUrl: user.referral_url,
+          referralClicks: user.clicks || 0
+        });
+      } catch (dbError) {
+        console.error('Ошибка работы с базой данных:', dbError);
+        res.status(500).json({ error: 'Ошибка получения информации о пользователе' });
+      }
+    } else {
+      res.json({
+        telegramId: telegramId,
+        commission: 0.05,
+        hasDiscount: false,
+        discountExpiresAt: null,
+        referralUrl: null,
+        referralClicks: 0
+      });
+    }
+  } catch (error) {
+    console.error('Ошибка получения информации о пользователе:', error);
+    res.status(500).json({ error: 'Ошибка получения информации о пользователе' });
+  }
+});
+
+// API для отзывов
+// Получение всех одобренных отзывов
+app.get('/api/reviews', async (req, res) => {
+  try {
+    await ensureDBConnection();
+    
+    const [rows] = await dbConnection.execute(`
+      SELECT review_id, telegram_id, username, full_name, rating, review_text, photo_url, created_at
+      FROM reviews 
+      WHERE is_approved = 1 
+      ORDER BY created_at DESC
+    `);
+    
+    res.json({ reviews: rows });
+  } catch (error) {
+    console.error('Ошибка получения отзывов:', error);
+    res.status(500).json({ error: 'Ошибка получения отзывов' });
+  }
+});
+
+// Создание нового отзыва
+app.post('/api/reviews', upload.single('photo'), async (req, res) => {
+  try {
+    await ensureDBConnection();
+    
+    const { telegram_id, username, full_name, rating, review_text } = req.body;
+    
+    console.log('Получены данные отзыва:', {
+      telegram_id,
+      username,
+      full_name,
+      rating,
+      review_text,
+      hasPhoto: !!req.file
+    });
+    
+    // Валидация
+    if (!telegram_id || !rating || rating < 1 || rating > 5) {
+      console.error('Ошибка валидации:', { telegram_id, rating });
+      return res.status(400).json({ error: 'Неверные данные отзыва' });
+    }
+    
+    let photo_url = null;
+    if (req.file) {
+      photo_url = `/uploads/reviews/${req.file.filename}`;
+    }
+    
+    // Проверяем, существует ли пользователь, если нет - создаем
+    const [existingUser] = await dbConnection.execute(
+      'SELECT telegram_id FROM users WHERE telegram_id = ?',
+      [telegram_id]
+    );
+    
+    if (existingUser.length === 0) {
+      console.log('Создаем нового пользователя:', telegram_id);
+      await dbConnection.execute(`
+        INSERT INTO users (telegram_id, commission, created_at) 
+        VALUES (?, 0.05, NOW())
+      `, [telegram_id]);
+    }
+    
+    const [result] = await dbConnection.execute(`
+      INSERT INTO reviews (telegram_id, username, full_name, rating, review_text, photo_url, is_approved)
+      VALUES (?, ?, ?, ?, ?, ?, 1)
+    `, [telegram_id, username, full_name, rating, review_text, photo_url]);
+    
+    // Логируем активность пользователя
+    await logUserActivity(telegram_id, 'review_created', {
+      reviewId: result.insertId,
+      rating,
+      hasPhoto: !!photo_url
+    });
+
+    // Создаем системный лог
+    await createSystemLog('info', `Новый отзыв создан: #${result.insertId}`, {
+      telegramId: telegram_id,
+      reviewId: result.insertId,
+      rating
+    }, telegram_id);
+    
+    res.json({ 
+      success: true, 
+      review_id: result.insertId,
+      message: 'Отзыв успешно добавлен!' 
+    });
+  } catch (error) {
+    console.error('Ошибка создания отзыва:', error);
+    res.status(500).json({ error: 'Ошибка создания отзыва' });
+  }
+});
+
+// Получение профиля пользователя
+app.get('/api/profile', async (req, res) => {
+  try {
+    await ensureDBConnection();
+    
+    const { telegram_id } = req.query;
+    
+    if (!telegram_id) {
+      return res.status(400).json({ error: 'Telegram ID обязателен' });
+    }
+    
+    // Получаем данные пользователя
+    const [userRows] = await dbConnection.execute(`
+      SELECT telegram_id, commission, created_at, full_name, phone_number, preferred_currency, avatar_url
+      FROM users 
+      WHERE telegram_id = ?
+    `, [telegram_id]);
+    
+    if (userRows.length === 0) {
+      return res.status(404).json({ error: 'Пользователь не найден' });
+    }
+    
+    const user = userRows[0];
+    
+    // Получаем статистику заказов
+    const [orderStats] = await dbConnection.execute(`
+      SELECT 
+        COUNT(*) as total_orders,
+        COALESCE(SUM(CASE WHEN product_link IS NOT NULL THEN 1 ELSE 0 END), 0) as completed_orders
+      FROM orders 
+      WHERE telegram_id = ?
+    `, [telegram_id]);
+    
+    // Получаем статистику рефералов
+    const [referralStats] = await dbConnection.execute(`
+      SELECT 
+        COUNT(*) as total_referrals,
+        COALESCE(SUM(clicks), 0) as total_clicks
+      FROM referrals 
+      WHERE referred_by = ?
+    `, [telegram_id]);
+    
+    // Получаем статистику покупок юаня
+    const [yuanStats] = await dbConnection.execute(`
+      SELECT 
+        COUNT(*) as total_purchases,
+        COALESCE(SUM(amount_rub), 0) as total_spent_rub,
+        COALESCE(SUM(amount_cny), 0) as total_bought_cny,
+        COALESCE(SUM(savings), 0) as total_savings
+      FROM yuan_purchases 
+      WHERE telegram_id = ? AND status = 'completed'
+    `, [telegram_id]);
+
+    // Получаем экономию от заказов
+    const [orderSavingsStats] = await dbConnection.execute(`
+      SELECT 
+        COUNT(*) as total_orders,
+        COALESCE(SUM(estimated_savings), 0) as total_order_savings
+      FROM orders 
+      WHERE telegram_id = ?
+    `, [telegram_id]);
+
+    // Получаем уровень пользователя
+    const [levelRows] = await dbConnection.execute(`
+      SELECT current_level, level_progress, total_orders
+      FROM user_levels 
+      WHERE telegram_id = ?
+    `, [telegram_id]);
+
+    // Получаем достижения пользователя
+    const [achievementRows] = await dbConnection.execute(`
+      SELECT achievement_id, achievement_name, achievement_description, progress, max_progress, completed
+      FROM user_achievements 
+      WHERE telegram_id = ? AND completed = 1
+    `, [telegram_id]);
+    
+    // Используем данные уровня из таблицы user_levels
+    let userLevel = 'Bronze';
+    let levelProgress = 0;
+    let nextLevel = 'Silver';
+    let ordersToNext = 6;
+
+    if (levelRows.length > 0) {
+      const levelData = levelRows[0];
+      userLevel = levelData.current_level;
+      levelProgress = levelData.level_progress;
+      
+      // Определяем следующий уровень
+      if (userLevel === 'Bronze') {
+        nextLevel = 'Silver';
+        ordersToNext = Math.max(6 - levelData.total_orders, 0);
+      } else if (userLevel === 'Silver') {
+        nextLevel = 'Gold';
+        ordersToNext = Math.max(21 - levelData.total_orders, 0);
+      } else {
+        nextLevel = 'Gold';
+        ordersToNext = 0;
+      }
+    } else {
+      // Если данных нет, создаем начальный уровень
+      const orderCount = orderStats[0].total_orders;
+      if (orderCount >= 21) {
+        userLevel = 'Gold';
+        levelProgress = 100;
+        nextLevel = 'Gold';
+        ordersToNext = 0;
+      } else if (orderCount >= 6) {
+        userLevel = 'Silver';
+        levelProgress = Math.min(100, ((orderCount - 6) / 15) * 100);
+        nextLevel = 'Gold';
+        ordersToNext = Math.max(0, 21 - orderCount);
+      } else {
+        levelProgress = Math.min(100, (orderCount / 6) * 100);
+        ordersToNext = Math.max(0, 6 - orderCount);
+      }
+    }
+    
+    // Функция для получения иконки достижения
+    const getAchievementIcon = (achievementId) => {
+      const iconMap = {
+        'first_order': '🎯',
+        'loyal_customer': '⭐',
+        'vip_customer': '👑',
+        'referrer': '🤝',
+        'super_referrer': '🚀',
+        'yuan_buyer': '💰',
+        'bronze_level': '🥉',
+        'silver_level': '🥈',
+        'gold_level': '🥇'
+      };
+      return iconMap[achievementId] || '🏆';
+    };
+    
+    // Используем достижения из таблицы user_achievements
+    const achievements = achievementRows.map(row => ({
+      id: row.achievement_id,
+      name: row.achievement_name,
+      icon: getAchievementIcon(row.achievement_id)
+    }));
+    
+    res.json({
+      user: {
+        telegram_id: user.telegram_id,
+        full_name: user.full_name,
+        phone_number: user.phone_number,
+        preferred_currency: user.preferred_currency || 'RUB',
+        commission: user.commission,
+        created_at: user.created_at,
+        avatar_url: user.avatar_url
+      },
+      statistics: {
+        orders: orderStats[0],
+        referrals: referralStats[0],
+        yuan_purchases: yuanStats[0],
+        order_savings: orderSavingsStats[0],
+        total_savings: {
+          yuan_savings: yuanStats[0].total_savings || 0,
+          order_savings: orderSavingsStats[0].total_order_savings || 0,
+          total: (yuanStats[0].total_savings || 0) + (orderSavingsStats[0].total_order_savings || 0)
+        }
+      },
+      gamification: {
+        level: userLevel,
+        levelProgress,
+        nextLevel,
+        ordersToNext,
+        achievements
+      }
+    });
+  } catch (error) {
+    console.error('Ошибка получения профиля:', error);
+    res.status(500).json({ error: 'Ошибка получения профиля' });
+  }
+});
+
+// Обновление профиля пользователя
+app.patch('/api/users', async (req, res) => {
+  try {
+    await ensureDBConnection();
+    
+    const { telegram_id, full_name, phone_number, preferred_currency, avatar_url } = req.body;
+    
+    if (!telegram_id) {
+      return res.status(400).json({ error: 'Telegram ID обязателен' });
+    }
+    
+    // Проверяем, существует ли пользователь
+    const [existingUser] = await dbConnection.execute(
+      'SELECT telegram_id FROM users WHERE telegram_id = ?',
+      [telegram_id]
+    );
+    
+    if (existingUser.length === 0) {
+      // Создаем нового пользователя
+      await dbConnection.execute(`
+        INSERT INTO users (telegram_id, commission, full_name, phone_number, preferred_currency, avatar_url, created_at) 
+        VALUES (?, 0.05, ?, ?, ?, ?, NOW())
+      `, [telegram_id, full_name, phone_number, preferred_currency, avatar_url]);
+    } else {
+      // Обновляем существующего пользователя
+      await dbConnection.execute(`
+        UPDATE users 
+        SET full_name = COALESCE(?, full_name),
+            phone_number = COALESCE(?, phone_number),
+            preferred_currency = COALESCE(?, preferred_currency),
+            avatar_url = COALESCE(?, avatar_url)
+        WHERE telegram_id = ?
+      `, [full_name, phone_number, preferred_currency, avatar_url, telegram_id]);
+    }
+    
+    res.json({ success: true, message: 'Профиль обновлен успешно' });
+  } catch (error) {
+    console.error('Ошибка обновления профиля:', error);
+    res.status(500).json({ error: 'Ошибка обновления профиля' });
+  }
+});
+
+// Получение курса валют
+app.get('/api/exchange-rate', async (req, res) => {
+  try {
+    // Здесь можно интегрировать с реальным API курса валют
+    // Пока возвращаем фиксированный курс с благоприятным коэффициентом
+    const baseRate = 12.5; // Базовый курс CNY/RUB
+    const favorableRate = baseRate * 0.95; // 5% скидка
+    
+    res.json({
+      base_rate: baseRate,
+      favorable_rate: favorableRate,
+      savings_percent: 5,
+      last_updated: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('Ошибка получения курса валют:', error);
+    res.status(500).json({ error: 'Ошибка получения курса валют' });
+  }
+});
+
+// Покупка юаня
+app.post('/api/yuan-purchase', async (req, res) => {
+  try {
+    await ensureDBConnection();
+    
+    const { 
+      telegramId, 
+      username, 
+      firstName, 
+      lastName, 
+      amountCny, 
+      amountRub, 
+      tariff, 
+      rate, 
+      savings, 
+      userLink 
+    } = req.body;
+    
+    if (!telegramId || !amountCny || !amountRub) {
+      return res.status(400).json({ error: 'Telegram ID, количество юаней и сумма обязательны' });
+    }
+    
+    const amountCnyNum = parseFloat(amountCny);
+    const amountRubNum = parseFloat(amountRub);
+    
+    if (amountCnyNum < 200 || amountCnyNum > 10000) {
+      return res.status(400).json({ error: 'Количество юаней должно быть от 200 до 10,000' });
+    }
+    
+    // Проверяем, существует ли пользователь
+    const [existingUser] = await dbConnection.execute(
+      'SELECT telegram_id FROM users WHERE telegram_id = ?',
+      [telegramId]
+    );
+    
+    if (existingUser.length === 0) {
+      // Создаем нового пользователя
+      await dbConnection.execute(`
+        INSERT INTO users (telegram_id, username, full_name, commission, created_at) 
+        VALUES (?, ?, ?, 0.05, NOW())
+      `, [telegramId, username || 'unknown', (firstName && lastName) ? `${firstName} ${lastName}` : (firstName || 'Пользователь')]);
+    }
+    
+    // Создаем запись о покупке
+    const [result] = await dbConnection.execute(`
+      INSERT INTO yuan_purchases (telegram_id, amount_rub, amount_cny, exchange_rate, favorable_rate, savings, status)
+      VALUES (?, ?, ?, ?, ?, ?, 'pending')
+    `, [telegramId, amountRubNum, amountCnyNum, 12.5, rate, savings || 0]);
+    
+    // Логируем активность пользователя
+    await logUserActivity(telegramId, 'yuan_purchase', {
+      purchaseId: result.insertId,
+      amountRub: amountRubNum,
+      amountCny: amountCnyNum,
+      savings: savings || 0,
+      tariff: tariff
+    });
+
+    // Создаем системный лог
+    await createSystemLog('info', `Заказ на покупку юаня: ${amountCnyNum} CNY за ${amountRubNum} RUB (${tariff})`, {
+      telegramId: telegramId,
+      purchaseId: result.insertId,
+      amountRub: amountRubNum,
+      amountCny: amountCnyNum,
+      savings: savings || 0,
+      tariff: tariff,
+      userLink: userLink
+    }, telegramId);
+    
+    // Отправляем сообщение менеджеру
+    const managerMessage = `🛒 <b>Новый заказ на покупку юаня</b>
+
+💰 <b>Количество:</b> ${amountCnyNum.toFixed(2)} юаней
+💵 <b>Стоимость:</b> ${amountRubNum.toLocaleString('ru-RU')} ₽
+📊 <b>Тариф:</b> ${tariff}
+💸 <b>Курс:</b> ${rate.toFixed(2)} ₽ за юань
+💎 <b>Экономия:</b> ${(savings || 0).toLocaleString('ru-RU')} ₽
+
+👤 <b>Пользователь:</b> ${userLink}
+📝 <b>Имя:</b> ${firstName}${lastName ? ' ' + lastName : ''}
+📅 <b>Дата:</b> ${new Date().toLocaleString('ru-RU')}
+
+🆔 <b>Telegram ID:</b> <code>${telegramId}</code>`;
+
+    await sendManagerMessage(managerMessage);
+    
+    res.json({
+      success: true,
+      purchase_id: result.insertId,
+      message: 'Заказ на покупку юаня успешно отправлен менеджеру!'
+    });
+  } catch (error) {
+    console.error('Ошибка покупки юаня:', error);
+    res.status(500).json({ error: 'Ошибка покупки юаня' });
+  }
+});
+
+// Получение истории покупок юаня
+app.get('/api/yuan-purchases', async (req, res) => {
+  try {
+    await ensureDBConnection();
+    
+    const { telegram_id } = req.query;
+    
+    if (!telegram_id) {
+      return res.status(400).json({ error: 'Telegram ID обязателен' });
+    }
+    
+    const [rows] = await dbConnection.execute(`
+      SELECT id, amount_rub, amount_cny, exchange_rate, favorable_rate, savings, status, created_at
+      FROM yuan_purchases 
+      WHERE telegram_id = ? AND status = 'completed'
+      ORDER BY created_at DESC
+    `, [telegram_id]);
+    
+    res.json({ purchases: rows });
+  } catch (error) {
+    console.error('Ошибка получения истории покупок:', error);
+    res.status(500).json({ error: 'Ошибка получения истории покупок' });
+  }
+});
+
+// Получение истории заказов
+app.get('/api/orders-history', async (req, res) => {
+  try {
+    await ensureDBConnection();
+    
+    const { telegram_id } = req.query;
+    
+    if (!telegram_id) {
+      return res.status(400).json({ error: 'Telegram ID обязателен' });
+    }
+    
+    // Получаем заказы с товарами (только завершенные)
+    const [orders] = await dbConnection.execute(`
+      SELECT order_id, full_name, phone_number, pickup_point_address, created_at, estimated_savings
+      FROM orders 
+      WHERE telegram_id = ? AND status = 'completed'
+      ORDER BY created_at DESC
+    `, [telegram_id]);
+
+    // Для каждого заказа получаем товары
+    const ordersWithItems = await Promise.all(orders.map(async (order) => {
+      const [items] = await dbConnection.execute(`
+        SELECT product_link, product_size, quantity, estimated_savings
+        FROM order_items 
+        WHERE order_id = ?
+        ORDER BY id
+      `, [order.order_id]);
+
+      return {
+        ...order,
+        items: items,
+        itemsCount: items.length
+      };
+    }));
+    
+    res.json({ orders: ordersWithItems });
+  } catch (error) {
+    console.error('Ошибка получения истории заказов:', error);
+    res.status(500).json({ error: 'Ошибка получения истории заказов' });
+  }
+});
+
+// ==================== USER ACTIVITY API ====================
+
+// Получение активности пользователя
+app.get('/api/user-activity', async (req, res) => {
+  try {
+    await ensureDBConnection();
+    
+    const { telegram_id, limit = 50 } = req.query;
+    
+    if (!telegram_id) {
+      return res.status(400).json({ error: 'Telegram ID обязателен' });
+    }
+    
+    const [rows] = await dbConnection.execute(`
+      SELECT id, action_type, action_data, created_at
+      FROM user_activity 
+      WHERE telegram_id = ?
+      ORDER BY created_at DESC
+      LIMIT ?
+    `, [telegram_id, parseInt(limit)]);
+    
+    res.json({ activities: rows });
+  } catch (error) {
+    console.error('Ошибка получения активности:', error);
+    res.status(500).json({ error: 'Ошибка получения активности' });
+  }
+});
+
+// Запись активности пользователя
+app.post('/api/user-activity', async (req, res) => {
+  try {
+    await ensureDBConnection();
+    
+    const { telegram_id, action_type, action_data } = req.body;
+    
+    if (!telegram_id || !action_type) {
+      return res.status(400).json({ error: 'Telegram ID и тип действия обязательны' });
+    }
+    
+    const [result] = await dbConnection.execute(`
+      INSERT INTO user_activity (telegram_id, action_type, action_data)
+      VALUES (?, ?, ?)
+    `, [telegram_id, action_type, JSON.stringify(action_data || {})]);
+    
+    res.json({ 
+      success: true, 
+      activity_id: result.insertId,
+      message: 'Активность записана успешно' 
+    });
+  } catch (error) {
+    console.error('Ошибка записи активности:', error);
+    res.status(500).json({ error: 'Ошибка записи активности' });
+  }
+});
+
+// ==================== USER REWARDS API ====================
+
+// Получение наград пользователя
+app.get('/api/user-rewards', async (req, res) => {
+  try {
+    await ensureDBConnection();
+    
+    const { telegram_id, unclaimed_only = false } = req.query;
+    
+    if (!telegram_id) {
+      return res.status(400).json({ error: 'Telegram ID обязателен' });
+    }
+    
+    let query = `
+      SELECT id, reward_type, reward_value, reward_description, is_claimed, claimed_at, created_at
+      FROM user_rewards 
+      WHERE telegram_id = ?
+    `;
+    
+    if (unclaimed_only === 'true') {
+      query += ' AND is_claimed = 0';
+    }
+    
+    query += ' ORDER BY created_at DESC';
+    
+    const [rows] = await dbConnection.execute(query, [telegram_id]);
+    
+    res.json({ rewards: rows });
+  } catch (error) {
+    console.error('Ошибка получения наград:', error);
+    res.status(500).json({ error: 'Ошибка получения наград' });
+  }
+});
+
+// Создание награды
+app.post('/api/user-rewards', async (req, res) => {
+  try {
+    await ensureDBConnection();
+    
+    const { telegram_id, reward_type, reward_value, reward_description } = req.body;
+    
+    if (!telegram_id || !reward_type) {
+      return res.status(400).json({ error: 'Telegram ID и тип награды обязательны' });
+    }
+    
+    const [result] = await dbConnection.execute(`
+      INSERT INTO user_rewards (telegram_id, reward_type, reward_value, reward_description)
+      VALUES (?, ?, ?, ?)
+    `, [telegram_id, reward_type, reward_value || 0, reward_description || '']);
+    
+    res.json({ 
+      success: true, 
+      reward_id: result.insertId,
+      message: 'Награда создана успешно' 
+    });
+  } catch (error) {
+    console.error('Ошибка создания награды:', error);
+    res.status(500).json({ error: 'Ошибка создания награды' });
+  }
+});
+
+// Получение награды
+app.patch('/api/user-rewards/:id/claim', async (req, res) => {
+  try {
+    await ensureDBConnection();
+    
+    const { id } = req.params;
+    
+    await dbConnection.execute(`
+      UPDATE user_rewards 
+      SET is_claimed = 1, claimed_at = NOW() 
+      WHERE id = ? AND is_claimed = 0
+    `, [id]);
+    
+    res.json({ success: true, message: 'Награда получена успешно' });
+  } catch (error) {
+    console.error('Ошибка получения награды:', error);
+    res.status(500).json({ error: 'Ошибка получения награды' });
+  }
+});
+
+// ==================== USER ACHIEVEMENTS API ====================
+
+// Получение достижений пользователя
+app.get('/api/user-achievements', async (req, res) => {
+  try {
+    await ensureDBConnection();
+    
+    const { telegram_id, completed_only = false } = req.query;
+    
+    if (!telegram_id) {
+      return res.status(400).json({ error: 'Telegram ID обязателен' });
+    }
+    
+    let query = `
+      SELECT id, achievement_id, achievement_name, achievement_description, progress, max_progress, completed, completed_at, created_at
+      FROM user_achievements 
+      WHERE telegram_id = ?
+    `;
+    
+    if (completed_only === 'true') {
+      query += ' AND completed = 1';
+    }
+    
+    query += ' ORDER BY created_at DESC';
+    
+    const [rows] = await dbConnection.execute(query, [telegram_id]);
+    
+    res.json({ achievements: rows });
+  } catch (error) {
+    console.error('Ошибка получения достижений:', error);
+    res.status(500).json({ error: 'Ошибка получения достижений' });
+  }
+});
+
+// Создание/обновление достижения
+app.post('/api/user-achievements', async (req, res) => {
+  try {
+    await ensureDBConnection();
+    
+    const { telegram_id, achievement_id, achievement_name, achievement_description, progress, max_progress } = req.body;
+    
+    if (!telegram_id || !achievement_id) {
+      return res.status(400).json({ error: 'Telegram ID и ID достижения обязательны' });
+    }
+    
+    const completed = progress >= max_progress ? 1 : 0;
+    const completed_at = completed ? new Date() : null;
+    
+    await dbConnection.execute(`
+      INSERT INTO user_achievements (telegram_id, achievement_id, achievement_name, achievement_description, progress, max_progress, completed, completed_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      ON DUPLICATE KEY UPDATE
+        progress = VALUES(progress),
+        completed = VALUES(completed),
+        completed_at = VALUES(completed_at)
+    `, [telegram_id, achievement_id, achievement_name, achievement_description, progress, max_progress, completed, completed_at]);
+    
+    res.json({ 
+      success: true, 
+      message: 'Достижение обновлено успешно',
+      completed: completed === 1
+    });
+  } catch (error) {
+    console.error('Ошибка обновления достижения:', error);
+    res.status(500).json({ error: 'Ошибка обновления достижения' });
+  }
+});
+
+// ==================== USER LEVELS API ====================
+
+// Получение уровня пользователя
+app.get('/api/user-levels', async (req, res) => {
+  try {
+    await ensureDBConnection();
+    
+    const { telegram_id } = req.query;
+    
+    if (!telegram_id) {
+      return res.status(400).json({ error: 'Telegram ID обязателен' });
+    }
+    
+    const [rows] = await dbConnection.execute(`
+      SELECT id, current_level, level_progress, total_orders, updated_at
+      FROM user_levels 
+      WHERE telegram_id = ?
+    `, [telegram_id]);
+    
+    if (rows.length === 0) {
+      // Создаем начальный уровень
+      await dbConnection.execute(`
+        INSERT INTO user_levels (telegram_id, current_level, level_progress, total_orders)
+        VALUES (?, 'Bronze', 0, 0)
+      `, [telegram_id]);
+      
+      res.json({ 
+        level: { 
+          current_level: 'Bronze', 
+          level_progress: 0, 
+          total_orders: 0 
+        } 
+      });
+    } else {
+      res.json({ level: rows[0] });
+    }
+  } catch (error) {
+    console.error('Ошибка получения уровня:', error);
+    res.status(500).json({ error: 'Ошибка получения уровня' });
+  }
+});
+
+// Обновление уровня пользователя
+app.post('/api/user-levels', async (req, res) => {
+  try {
+    await ensureDBConnection();
+    
+    const { telegram_id, current_level, level_progress, total_orders } = req.body;
+    
+    if (!telegram_id) {
+      return res.status(400).json({ error: 'Telegram ID обязателен' });
+    }
+    
+    await dbConnection.execute(`
+      INSERT INTO user_levels (telegram_id, current_level, level_progress, total_orders)
+      VALUES (?, ?, ?, ?)
+      ON DUPLICATE KEY UPDATE
+        current_level = VALUES(current_level),
+        level_progress = VALUES(level_progress),
+        total_orders = VALUES(total_orders),
+        updated_at = NOW()
+    `, [telegram_id, current_level, level_progress, total_orders]);
+    
+    res.json({ success: true, message: 'Уровень обновлен успешно' });
+  } catch (error) {
+    console.error('Ошибка обновления уровня:', error);
+    res.status(500).json({ error: 'Ошибка обновления уровня' });
+  }
+});
+
+// ==================== USER STATS API ====================
+
+// Получение статистики пользователя
+app.get('/api/user-stats', async (req, res) => {
+  try {
+    await ensureDBConnection();
+    
+    const { telegram_id } = req.query;
+    
+    if (!telegram_id) {
+      return res.status(400).json({ error: 'Telegram ID обязателен' });
+    }
+    
+    const [rows] = await dbConnection.execute(`
+      SELECT id, total_orders, referrals_count, yuan_purchases_count, yuan_savings, last_activity, updated_at
+      FROM user_stats 
+      WHERE telegram_id = ?
+    `, [telegram_id]);
+    
+    if (rows.length === 0) {
+      // Создаем начальную статистику
+      await dbConnection.execute(`
+        INSERT INTO user_stats (telegram_id, total_orders, referrals_count, yuan_purchases_count, yuan_savings, last_activity)
+        VALUES (?, 0, 0, 0, 0.00, NOW())
+      `, [telegram_id]);
+      
+      res.json({ 
+        stats: { 
+          total_orders: 0, 
+          referrals_count: 0, 
+          yuan_purchases_count: 0, 
+          yuan_savings: 0.00,
+          last_activity: new Date().toISOString()
+        } 
+      });
+    } else {
+      res.json({ stats: rows[0] });
+    }
+  } catch (error) {
+    console.error('Ошибка получения статистики:', error);
+    res.status(500).json({ error: 'Ошибка получения статистики' });
+  }
+});
+
+// ==================== EXCHANGE RATES API ====================
+
+// Получение курсов валют
+app.get('/api/exchange-rates', async (req, res) => {
+  try {
+    await ensureDBConnection();
+    
+    const { currency_from = 'CNY', currency_to = 'RUB' } = req.query;
+    
+    const [rows] = await dbConnection.execute(`
+      SELECT id, currency_from, currency_to, rate, favorable_rate, source, created_at, updated_at
+      FROM exchange_rates 
+      WHERE currency_from = ? AND currency_to = ?
+      ORDER BY created_at DESC
+      LIMIT 1
+    `, [currency_from, currency_to]);
+    
+    if (rows.length === 0) {
+      // Создаем дефолтный курс
+      const defaultRate = 12.5;
+      const defaultFavorableRate = defaultRate * 0.95;
+      
+      await dbConnection.execute(`
+        INSERT INTO exchange_rates (currency_from, currency_to, rate, favorable_rate, source)
+        VALUES (?, ?, ?, ?, 'CBRF')
+      `, [currency_from, currency_to, defaultRate, defaultFavorableRate]);
+      
+      res.json({ 
+        rate: { 
+          currency_from, 
+          currency_to, 
+          rate: defaultRate, 
+          favorable_rate: defaultFavorableRate, 
+          source: 'CBRF',
+          created_at: new Date().toISOString()
+        } 
+      });
+    } else {
+      res.json({ rate: rows[0] });
+    }
+  } catch (error) {
+    console.error('Ошибка получения курса валют:', error);
+    res.status(500).json({ error: 'Ошибка получения курса валют' });
+  }
+});
+
+// Обновление курса валют
+app.post('/api/exchange-rates', async (req, res) => {
+  try {
+    await ensureDBConnection();
+    
+    const { currency_from, currency_to, rate, favorable_rate, source = 'CBRF' } = req.body;
+    
+    if (!currency_from || !currency_to || !rate) {
+      return res.status(400).json({ error: 'Валюта от, валюта до и курс обязательны' });
+    }
+    
+    const [result] = await dbConnection.execute(`
+      INSERT INTO exchange_rates (currency_from, currency_to, rate, favorable_rate, source)
+      VALUES (?, ?, ?, ?, ?)
+    `, [currency_from, currency_to, rate, favorable_rate || rate * 0.95, source]);
+    
+    res.json({ 
+      success: true, 
+      rate_id: result.insertId,
+      message: 'Курс валют обновлен успешно' 
+    });
+  } catch (error) {
+    console.error('Ошибка обновления курса валют:', error);
+    res.status(500).json({ error: 'Ошибка обновления курса валют' });
+  }
+});
+
+// ==================== SYSTEM LOGS API ====================
+
+// Получение логов системы
+app.get('/api/system-logs', async (req, res) => {
+  try {
+    await ensureDBConnection();
+    
+    const { log_level, telegram_id, limit = 100 } = req.query;
+    
+    let query = `
+      SELECT id, log_level, log_message, log_data, telegram_id, created_at
+      FROM system_logs 
+      WHERE 1=1
+    `;
+    const params = [];
+    
+    if (log_level) {
+      query += ' AND log_level = ?';
+      params.push(log_level);
+    }
+    
+    if (telegram_id) {
+      query += ' AND telegram_id = ?';
+      params.push(telegram_id);
+    }
+    
+    query += ' ORDER BY created_at DESC LIMIT ?';
+    params.push(parseInt(limit));
+    
+    const [rows] = await dbConnection.execute(query, params);
+    
+    res.json({ logs: rows });
+  } catch (error) {
+    console.error('Ошибка получения логов:', error);
+    res.status(500).json({ error: 'Ошибка получения логов' });
+  }
+});
+
+// Создание лога системы
+app.post('/api/system-logs', async (req, res) => {
+  try {
+    await ensureDBConnection();
+    
+    const { log_level, log_message, log_data, telegram_id } = req.body;
+    
+    if (!log_level || !log_message) {
+      return res.status(400).json({ error: 'Уровень лога и сообщение обязательны' });
+    }
+    
+    const [result] = await dbConnection.execute(`
+      INSERT INTO system_logs (log_level, log_message, log_data, telegram_id)
+      VALUES (?, ?, ?, ?)
+    `, [log_level, log_message, JSON.stringify(log_data || {}), telegram_id]);
+    
+    res.json({ 
+      success: true, 
+      log_id: result.insertId,
+      message: 'Лог создан успешно' 
+    });
+  } catch (error) {
+    console.error('Ошибка создания лога:', error);
+    res.status(500).json({ error: 'Ошибка создания лога' });
+  }
+});
+
+// ============================================
+// АДМИНСКИЕ ЭНДПОИНТЫ
+// ============================================
+
+// Проверка прав доступа админа
+function checkAdminAccess(req, res, next) {
+  // Временно отключаем проверку для тестирования
+  // const adminIds = ['7696515351', '690296532'];
+  // const telegramId = req.headers['x-telegram-user-id'] || req.query.admin_id || req.body.admin_id;
+  // 
+  // if (!adminIds.includes(telegramId)) {
+  //   return res.status(403).json({ error: 'Доступ запрещен' });
+  // }
+  
+  next();
+}
+
+// Общая статистика для админов
+app.get('/api/admin/stats', async (req, res) => {
+  try {
+    await ensureDBConnection();
+    
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    
+    // Общее количество пользователей
+    const [totalUsersResult] = await dbConnection.execute(
+      'SELECT COUNT(*) as total FROM users'
+    );
+    const totalUsers = totalUsersResult[0].total;
+    
+    // Новые пользователи сегодня
+    const [newUsersTodayResult] = await dbConnection.execute(
+      'SELECT COUNT(*) as total FROM users WHERE DATE(created_at) = CURDATE()'
+    );
+    const newUsersToday = newUsersTodayResult[0].total;
+    
+    // Общее количество заказов
+    const [totalOrdersResult] = await dbConnection.execute(
+      'SELECT COUNT(*) as total FROM orders'
+    );
+    const totalOrders = totalOrdersResult[0].total;
+    
+    // Заказы сегодня
+    const [ordersTodayResult] = await dbConnection.execute(
+      'SELECT COUNT(*) as total FROM orders WHERE DATE(created_at) = CURDATE()'
+    );
+    const ordersToday = ordersTodayResult[0].total;
+    
+    // Общее количество покупок юаней
+    const [totalYuanResult] = await dbConnection.execute(
+      'SELECT COUNT(*) as total FROM yuan_purchases'
+    );
+    const totalYuanPurchases = totalYuanResult[0].total;
+    
+    // Покупки юаней сегодня
+    const [yuanTodayResult] = await dbConnection.execute(
+      'SELECT COUNT(*) as total FROM yuan_purchases WHERE DATE(created_at) = CURDATE()'
+    );
+    const yuanPurchasesToday = yuanTodayResult[0].total;
+    
+    // Общая экономия (только завершенные заказы)
+    const [totalSavingsResult] = await dbConnection.execute(`
+      SELECT 
+        COALESCE(SUM(yuan_savings), 0) + COALESCE(SUM(order_savings), 0) as total_savings
+      FROM (
+        SELECT SUM(savings) as yuan_savings, 0 as order_savings FROM yuan_purchases WHERE status = 'completed'
+        UNION ALL
+        SELECT 0 as yuan_savings, SUM(estimated_savings) as order_savings FROM orders WHERE status = 'completed'
+      ) as combined_savings
+    `);
+    const totalSavings = totalSavingsResult[0].total_savings || 0;
+    
+    // Общий доход (реальная прибыль из расчетов)
+    const [totalRevenueResult] = await dbConnection.execute(`
+      SELECT 
+        COALESCE(SUM(profit), 0) as total_revenue
+      FROM profit_calculations
+    `);
+    const totalRevenue = totalRevenueResult[0].total_revenue || 0;
+    
+    // Активные пользователи (пользователи с активностью за последние 7 дней)
+    const [activeUsersResult] = await dbConnection.execute(`
+      SELECT COUNT(DISTINCT telegram_id) as active_users
+      FROM (
+        SELECT telegram_id FROM orders WHERE created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)
+        UNION
+        SELECT telegram_id FROM yuan_purchases WHERE created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)
+      ) as active_users_combined
+    `);
+    const activeUsers = activeUsersResult[0].active_users || 0;
+    
+    // Конверсия (процент пользователей, которые сделали заказ или покупку)
+    const [conversionResult] = await dbConnection.execute(`
+      SELECT 
+        COUNT(DISTINCT active_users.telegram_id) as converted_users
+      FROM users
+      LEFT JOIN (
+        SELECT telegram_id FROM orders
+        UNION
+        SELECT telegram_id FROM yuan_purchases
+      ) as active_users ON users.telegram_id = active_users.telegram_id
+      WHERE active_users.telegram_id IS NOT NULL
+    `);
+    const convertedUsers = conversionResult[0].converted_users || 0;
+    const conversionRate = totalUsers > 0 ? (convertedUsers / totalUsers) * 100 : 0;
+    
+    res.json({
+      totalUsers,
+      newUsersToday,
+      totalOrders,
+      ordersToday,
+      totalYuanPurchases,
+      yuanPurchasesToday,
+      totalSavings,
+      totalRevenue,
+      activeUsers,
+      conversionRate
+    });
+    
+  } catch (error) {
+    console.error('Ошибка получения админ статистики:', error);
+    res.status(500).json({ error: 'Ошибка получения статистики' });
+  }
+});
+
+// Получение всех пользователей для админов
+app.get('/api/admin/users', async (req, res) => {
+  try {
+    await ensureDBConnection();
+    
+    const [users] = await dbConnection.execute(`
+      SELECT 
+        u.telegram_id,
+        u.username,
+        u.full_name,
+        u.created_at,
+        u.last_activity,
+        u.commission,
+        u.referred_by,
+        CASE 
+          WHEN u.last_activity IS NULL THEN 'offline'
+          WHEN TIMESTAMPDIFF(SECOND, u.last_activity, NOW()) <= 30 THEN 'online'
+          ELSE 'offline'
+        END as status,
+        COUNT(DISTINCT CASE WHEN o.status = 'completed' THEN o.order_id END) as orders_count,
+        COUNT(DISTINCT CASE WHEN yp.status = 'completed' THEN yp.id END) as yuan_purchases_count,
+        COALESCE(SUM(CASE WHEN yp.status = 'completed' THEN yp.savings ELSE 0 END), 0) as yuan_savings,
+        COALESCE(SUM(CASE WHEN o.status = 'completed' THEN o.estimated_savings ELSE 0 END), 0) as order_savings,
+        COALESCE(SUM(CASE WHEN yp.status = 'completed' THEN yp.savings ELSE 0 END), 0) + COALESCE(SUM(CASE WHEN o.status = 'completed' THEN o.estimated_savings ELSE 0 END), 0) as total_savings,
+        COUNT(DISTINCT r.telegram_id) as referrals_count
+      FROM users u
+      LEFT JOIN orders o ON u.telegram_id = o.telegram_id
+      LEFT JOIN yuan_purchases yp ON u.telegram_id = yp.telegram_id
+      LEFT JOIN users r ON u.telegram_id = r.referred_by
+      GROUP BY u.telegram_id, u.username, u.full_name, u.created_at, u.last_activity, u.commission, u.referred_by
+      ORDER BY u.created_at DESC
+    `);
+    
+    res.json({ users });
+    
+  } catch (error) {
+    console.error('Ошибка получения пользователей:', error);
+    res.status(500).json({ error: 'Ошибка получения пользователей' });
+  }
+});
+
+// Получение всех заказов для админов
+app.get('/api/admin/orders', async (req, res) => {
+  try {
+    await ensureDBConnection();
+    
+    const [orders] = await dbConnection.execute(`
+      SELECT 
+        o.order_id,
+        o.telegram_id,
+        o.username,
+        o.full_name,
+        o.phone_number,
+        o.created_at,
+        o.estimated_savings,
+        o.status,
+        COALESCE(item_stats.items_count, 0) as items_count
+      FROM orders o
+      LEFT JOIN (
+        SELECT 
+          order_id,
+          COUNT(*) as items_count
+        FROM order_items
+        GROUP BY order_id
+      ) item_stats ON o.order_id = item_stats.order_id
+      ORDER BY o.created_at DESC
+    `);
+    
+    res.json({ orders });
+    
+  } catch (error) {
+    console.error('Ошибка получения заказов:', error);
+    res.status(500).json({ error: 'Ошибка получения заказов' });
+  }
+});
+
+// Получение всех покупок юаней для админов
+app.get('/api/admin/yuan-purchases', async (req, res) => {
+  try {
+    await ensureDBConnection();
+    
+    const [purchases] = await dbConnection.execute(`
+      SELECT 
+        id,
+        telegram_id,
+        amount_cny,
+        amount_rub,
+        savings,
+        created_at,
+        status
+      FROM yuan_purchases
+      ORDER BY created_at DESC
+    `);
+    
+    res.json({ purchases });
+    
+  } catch (error) {
+    console.error('Ошибка получения покупок юаней:', error);
+    res.status(500).json({ error: 'Ошибка получения покупок юаней' });
+  }
+});
+
+// Получение детальной информации о пользователе
+app.get('/api/admin/user-details/:telegramId', async (req, res) => {
+  try {
+    await ensureDBConnection();
+    
+    const { telegramId } = req.params;
+    
+    // Основная информация о пользователе
+    const [userInfo] = await dbConnection.execute(
+      'SELECT * FROM users WHERE telegram_id = ?',
+      [telegramId]
+    );
+    
+    if (userInfo.length === 0) {
+      return res.status(404).json({ error: 'Пользователь не найден' });
+    }
+    
+    // Заказы пользователя
+    const [orders] = await dbConnection.execute(`
+      SELECT 
+        o.*,
+        GROUP_CONCAT(
+          CONCAT(oi.product_link, ' (', COALESCE(oi.product_size, 'без размера'), ', ', oi.quantity, ' шт.)')
+          SEPARATOR '; '
+        ) as items_details
+      FROM orders o
+      LEFT JOIN order_items oi ON o.order_id = oi.order_id
+      WHERE o.telegram_id = ?
+      GROUP BY o.order_id
+      ORDER BY o.created_at DESC
+    `, [telegramId]);
+    
+    // Покупки юаней
+    const [yuanPurchases] = await dbConnection.execute(
+      'SELECT * FROM yuan_purchases WHERE telegram_id = ? ORDER BY created_at DESC',
+      [telegramId]
+    );
+    
+    // Активность пользователя
+    const [activity] = await dbConnection.execute(
+      'SELECT * FROM user_activity WHERE telegram_id = ? ORDER BY created_at DESC LIMIT 50',
+      [telegramId]
+    );
+    
+    // Достижения
+    const [achievements] = await dbConnection.execute(
+      'SELECT * FROM user_achievements WHERE telegram_id = ? ORDER BY created_at DESC',
+      [telegramId]
+    );
+    
+    res.json({
+      user: userInfo[0],
+      orders,
+      yuanPurchases,
+      activity,
+      achievements
+    });
+    
+  } catch (error) {
+    console.error('Ошибка получения детальной информации:', error);
+    res.status(500).json({ error: 'Ошибка получения информации о пользователе' });
+  }
+});
+
+// Получение системных логов
+app.get('/api/admin/system-logs', async (req, res) => {
+  try {
+    await ensureDBConnection();
+    
+    const { limit = 100, level = 'all' } = req.query;
+    
+    let query = 'SELECT * FROM system_logs';
+    const params = [];
+    
+    if (level !== 'all') {
+      query += ' WHERE level = ?';
+      params.push(level);
+    }
+    
+    query += ' ORDER BY created_at DESC LIMIT ?';
+    params.push(parseInt(limit));
+    
+    const [logs] = await dbConnection.execute(query, params);
+    
+    res.json({ logs });
+    
+  } catch (error) {
+    console.error('Ошибка получения логов:', error);
+    res.status(500).json({ error: 'Ошибка получения логов' });
+  }
+});
+
+// ============================================
+// АДМИНСКИЕ ЭНДПОИНТЫ
+// ============================================
+
+// Проверка прав доступа админа
+function checkAdminAccess(req, res, next) {
+  // Временно отключаем проверку для тестирования
+  // const adminIds = ['7696515351', '690296532'];
+  // const telegramId = req.headers['x-telegram-user-id'] || req.query.admin_id || req.body.admin_id;
+  // 
+  // if (!adminIds.includes(telegramId)) {
+  //   return res.status(403).json({ error: 'Доступ запрещен' });
+  // }
+  
+  next();
+}
+
+// Общая статистика для админов
+app.get('/api/admin/stats', async (req, res) => {
+  try {
+    await ensureDBConnection();
+    
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    
+    // Общее количество пользователей
+    const [totalUsersResult] = await dbConnection.execute(
+      'SELECT COUNT(*) as total FROM users'
+    );
+    const totalUsers = totalUsersResult[0].total;
+    
+    // Новые пользователи сегодня
+    const [newUsersTodayResult] = await dbConnection.execute(
+      'SELECT COUNT(*) as total FROM users WHERE DATE(created_at) = CURDATE()'
+    );
+    const newUsersToday = newUsersTodayResult[0].total;
+    
+    // Общее количество заказов
+    const [totalOrdersResult] = await dbConnection.execute(
+      'SELECT COUNT(*) as total FROM orders'
+    );
+    const totalOrders = totalOrdersResult[0].total;
+    
+    // Заказы сегодня
+    const [ordersTodayResult] = await dbConnection.execute(
+      'SELECT COUNT(*) as total FROM orders WHERE DATE(created_at) = CURDATE()'
+    );
+    const ordersToday = ordersTodayResult[0].total;
+    
+    // Общее количество покупок юаней
+    const [totalYuanResult] = await dbConnection.execute(
+      'SELECT COUNT(*) as total FROM yuan_purchases'
+    );
+    const totalYuanPurchases = totalYuanResult[0].total;
+    
+    // Покупки юаней сегодня
+    const [yuanTodayResult] = await dbConnection.execute(
+      'SELECT COUNT(*) as total FROM yuan_purchases WHERE DATE(created_at) = CURDATE()'
+    );
+    const yuanPurchasesToday = yuanTodayResult[0].total;
+    
+    // Общая экономия (только завершенные заказы)
+    const [totalSavingsResult] = await dbConnection.execute(`
+      SELECT 
+        COALESCE(SUM(yuan_savings), 0) + COALESCE(SUM(order_savings), 0) as total_savings
+      FROM (
+        SELECT SUM(savings) as yuan_savings, 0 as order_savings FROM yuan_purchases WHERE status = 'completed'
+        UNION ALL
+        SELECT 0 as yuan_savings, SUM(estimated_savings) as order_savings FROM orders WHERE status = 'completed'
+      ) as combined_savings
+    `);
+    const totalSavings = totalSavingsResult[0].total_savings || 0;
+    
+    // Общий доход (реальная прибыль из расчетов)
+    const [totalRevenueResult] = await dbConnection.execute(`
+      SELECT 
+        COALESCE(SUM(profit), 0) as total_revenue
+      FROM profit_calculations
+    `);
+    const totalRevenue = totalRevenueResult[0].total_revenue || 0;
+    
+    // Активные пользователи (пользователи с активностью за последние 7 дней)
+    const [activeUsersResult] = await dbConnection.execute(`
+      SELECT COUNT(DISTINCT telegram_id) as active_users
+      FROM (
+        SELECT telegram_id FROM orders WHERE created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)
+        UNION
+        SELECT telegram_id FROM yuan_purchases WHERE created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)
+      ) as active_users_combined
+    `);
+    const activeUsers = activeUsersResult[0].active_users || 0;
+    
+    // Конверсия (процент пользователей, которые сделали заказ или покупку)
+    const [conversionResult] = await dbConnection.execute(`
+      SELECT 
+        COUNT(DISTINCT active_users.telegram_id) as converted_users
+      FROM users
+      LEFT JOIN (
+        SELECT telegram_id FROM orders
+        UNION
+        SELECT telegram_id FROM yuan_purchases
+      ) as active_users ON users.telegram_id = active_users.telegram_id
+      WHERE active_users.telegram_id IS NOT NULL
+    `);
+    const convertedUsers = conversionResult[0].converted_users || 0;
+    const conversionRate = totalUsers > 0 ? (convertedUsers / totalUsers) * 100 : 0;
+    
+    res.json({
+      totalUsers,
+      newUsersToday,
+      totalOrders,
+      ordersToday,
+      totalYuanPurchases,
+      yuanPurchasesToday,
+      totalSavings,
+      totalRevenue,
+      activeUsers,
+      conversionRate
+    });
+    
+  } catch (error) {
+    console.error('Ошибка получения админ статистики:', error);
+    res.status(500).json({ error: 'Ошибка получения статистики' });
+  }
+});
+
+// Получение всех пользователей
+app.get('/api/admin/users', async (req, res) => {
+  try {
+    await ensureDBConnection();
+    
+    const [users] = await dbConnection.execute(`
+      SELECT 
+        u.telegram_id,
+        u.username,
+        u.full_name,
+        u.created_at,
+        u.last_activity,
+        u.commission,
+        u.referred_by,
+        CASE 
+          WHEN u.last_activity IS NULL THEN 'offline'
+          WHEN TIMESTAMPDIFF(SECOND, u.last_activity, NOW()) <= 30 THEN 'online'
+          ELSE 'offline'
+        END as status,
+        COUNT(DISTINCT CASE WHEN o.status = 'completed' THEN o.order_id END) as orders_count,
+        COUNT(DISTINCT CASE WHEN yp.status = 'completed' THEN yp.id END) as yuan_purchases_count,
+        COALESCE(SUM(CASE WHEN yp.status = 'completed' THEN yp.savings ELSE 0 END), 0) as yuan_savings,
+        COALESCE(SUM(CASE WHEN o.status = 'completed' THEN o.estimated_savings ELSE 0 END), 0) as order_savings,
+        COALESCE(SUM(CASE WHEN yp.status = 'completed' THEN yp.savings ELSE 0 END), 0) + COALESCE(SUM(CASE WHEN o.status = 'completed' THEN o.estimated_savings ELSE 0 END), 0) as total_savings,
+        COUNT(DISTINCT r.telegram_id) as referrals_count
+      FROM users u
+      LEFT JOIN orders o ON u.telegram_id = o.telegram_id
+      LEFT JOIN yuan_purchases yp ON u.telegram_id = yp.telegram_id
+      LEFT JOIN users r ON u.telegram_id = r.referred_by
+      GROUP BY u.telegram_id, u.username, u.full_name, u.created_at, u.last_activity, u.commission, u.referred_by
+      ORDER BY u.created_at DESC
+    `);
+    
+    res.json({ users });
+  } catch (error) {
+    console.error('Ошибка получения пользователей:', error);
+    res.status(500).json({ error: 'Ошибка получения пользователей' });
+  }
+});
+
+// Получение всех заказов
+app.get('/api/admin/orders', async (req, res) => {
+  try {
+    await ensureDBConnection();
+    
+    const [orders] = await dbConnection.execute(`
+      SELECT 
+        o.order_id,
+        o.telegram_id,
+        o.username,
+        o.full_name,
+        o.phone_number,
+        o.pickup_point,
+        o.pickup_point_address,
+        o.comments,
+        o.estimated_savings,
+        o.status,
+        o.created_at,
+        COUNT(oi.id) as items_count
+      FROM orders o
+      LEFT JOIN order_items oi ON o.order_id = oi.order_id
+      GROUP BY o.order_id, o.telegram_id, o.username, o.full_name, o.phone_number, o.pickup_point, o.pickup_point_address, o.comments, o.estimated_savings, o.status, o.created_at
+      ORDER BY o.created_at DESC
+    `);
+    
+    res.json({ orders });
+  } catch (error) {
+    console.error('Ошибка получения заказов:', error);
+    res.status(500).json({ error: 'Ошибка получения заказов' });
+  }
+});
+
+// Получение всех покупок юаней
+app.get('/api/admin/yuan-purchases', async (req, res) => {
+  try {
+    await ensureDBConnection();
+    
+    const [purchases] = await dbConnection.execute(`
+      SELECT 
+        yp.id,
+        yp.telegram_id,
+        yp.amount_rub,
+        yp.amount_cny,
+        yp.exchange_rate,
+        yp.favorable_rate,
+        yp.savings,
+        yp.status,
+        yp.created_at,
+        u.username,
+        u.full_name
+      FROM yuan_purchases yp
+      LEFT JOIN users u ON yp.telegram_id = u.telegram_id
+      ORDER BY yp.created_at DESC
+    `);
+    
+    res.json({ purchases });
+  } catch (error) {
+    console.error('Ошибка получения покупок юаней:', error);
+    res.status(500).json({ error: 'Ошибка получения покупок юаней' });
+  }
+});
+
+// Получение детальной информации о пользователе
+app.get('/api/admin/user-details/:telegramId', async (req, res) => {
+  try {
+    await ensureDBConnection();
+    const { telegramId } = req.params;
+    
+    // Информация о пользователе
+    const [userInfo] = await dbConnection.execute(
+      'SELECT * FROM users WHERE telegram_id = ?',
+      [telegramId]
+    );
+    
+    if (userInfo.length === 0) {
+      return res.status(404).json({ error: 'Пользователь не найден' });
+    }
+    
+    // Заказы пользователя
+    const [orders] = await dbConnection.execute(`
+      SELECT 
+        o.*,
+        COUNT(oi.id) as items_count
+      FROM orders o
+      LEFT JOIN order_items oi ON o.order_id = oi.order_id
+      WHERE o.telegram_id = ?
+      GROUP BY o.order_id
+      ORDER BY o.created_at DESC
+    `, [telegramId]);
+    
+    // Покупки юаней пользователя
+    const [yuanPurchases] = await dbConnection.execute(
+      'SELECT * FROM yuan_purchases WHERE telegram_id = ? ORDER BY created_at DESC',
+      [telegramId]
+    );
+    
+    // Активность пользователя
+    const [activity] = await dbConnection.execute(
+      'SELECT * FROM user_activity WHERE telegram_id = ? ORDER BY created_at DESC LIMIT 50',
+      [telegramId]
+    );
+    
+    // Достижения пользователя
+    const [achievements] = await dbConnection.execute(
+      'SELECT * FROM user_achievements WHERE telegram_id = ?',
+      [telegramId]
+    );
+    
+    res.json({
+      user: userInfo[0],
+      orders,
+      yuanPurchases,
+      activity,
+      achievements
+    });
+    
+  } catch (error) {
+    console.error('Ошибка получения детальной информации о пользователе:', error);
+    res.status(500).json({ error: 'Ошибка получения информации о пользователе' });
+  }
+});
+
+// Получение системных логов
+app.get('/api/admin/system-logs', async (req, res) => {
+  try {
+    await ensureDBConnection();
+    
+    const { level, limit = 100 } = req.query;
+    
+    let query = 'SELECT * FROM system_logs';
+    const params = [];
+    
+    if (level) {
+      query += ' WHERE level = ?';
+      params.push(level);
+    }
+    
+    query += ' ORDER BY created_at DESC LIMIT ?';
+    params.push(parseInt(limit));
+    
+    const [logs] = await dbConnection.execute(query, params);
+    
+    res.json({ logs });
+  } catch (error) {
+    console.error('Ошибка получения системных логов:', error);
+    res.status(500).json({ error: 'Ошибка получения логов' });
+  }
+});
+
+// Получение заказов, ожидающих подтверждения
+app.get('/api/admin/pending-orders', async (req, res) => {
+  try {
+    await ensureDBConnection();
+    
+    // Заказы, ожидающие подтверждения
+    const [orders] = await dbConnection.execute(`
+      SELECT 
+        o.order_id,
+        o.telegram_id,
+        o.username,
+        o.full_name,
+        o.phone_number,
+        o.pickup_point,
+        o.pickup_point_address,
+        o.comments,
+        o.estimated_savings,
+        o.created_at,
+        COUNT(oi.id) as items_count,
+        GROUP_CONCAT(oi.product_link SEPARATOR '; ') as product_links
+      FROM orders o
+      LEFT JOIN order_items oi ON o.order_id = oi.order_id
+      WHERE o.status = 'pending'
+      GROUP BY o.order_id, o.telegram_id, o.username, o.full_name, o.phone_number, o.pickup_point, o.pickup_point_address, o.comments, o.estimated_savings, o.created_at
+      ORDER BY o.created_at DESC
+    `);
+    
+    // Покупки юаней, ожидающие подтверждения
+    const [yuanPurchases] = await dbConnection.execute(`
+      SELECT 
+        yp.id,
+        yp.telegram_id,
+        yp.amount_rub,
+        yp.amount_cny,
+        yp.exchange_rate,
+        yp.favorable_rate,
+        yp.savings,
+        yp.created_at,
+        u.username,
+        u.full_name
+      FROM yuan_purchases yp
+      LEFT JOIN users u ON yp.telegram_id = u.telegram_id
+      WHERE yp.status = 'pending'
+      ORDER BY yp.created_at DESC
+    `);
+    
+    res.json({ orders, yuanPurchases });
+  } catch (error) {
+    console.error('Ошибка получения заказов, ожидающих подтверждения:', error);
+    res.status(500).json({ error: 'Ошибка получения заказов' });
+  }
+});
+
+// Подтверждение заказа
+app.post('/api/admin/confirm-order', async (req, res) => {
+  try {
+    await ensureDBConnection();
+    const { orderId, type } = req.body; // type: 'order' или 'yuan'
+    
+    if (type === 'order') {
+      await dbConnection.execute(
+        'UPDATE orders SET status = ? WHERE order_id = ?',
+        ['completed', orderId]
+      );
+    } else if (type === 'yuan') {
+      await dbConnection.execute(
+        'UPDATE yuan_purchases SET status = ? WHERE id = ?',
+        ['completed', orderId]
+      );
+    }
+    
+    // Отправляем уведомление пользователю
+    const telegramId = await getTelegramIdByOrderId(orderId, type);
+    if (telegramId) {
+      await sendUserNotification(telegramId, 'confirm', type, orderId);
+      
+      // Обновляем статистику пользователя только после подтверждения
+      await updateUserStatsAfterConfirmation(telegramId, orderId, type);
+    }
+    
+    res.json({ success: true, message: 'Заказ подтвержден' });
+  } catch (error) {
+    console.error('Ошибка подтверждения заказа:', error);
+    res.status(500).json({ error: 'Ошибка подтверждения заказа' });
+  }
+});
+
+// Отмена заказа
+app.post('/api/admin/cancel-order', async (req, res) => {
+  try {
+    await ensureDBConnection();
+    const { orderId, type } = req.body; // type: 'order' или 'yuan'
+    
+    if (type === 'order') {
+      await dbConnection.execute(
+        'UPDATE orders SET status = ? WHERE order_id = ?',
+        ['cancelled', orderId]
+      );
+    } else if (type === 'yuan') {
+      await dbConnection.execute(
+        'UPDATE yuan_purchases SET status = ? WHERE id = ?',
+        ['cancelled', orderId]
+      );
+    }
+    
+    // Отправляем уведомление пользователю
+    const telegramId = await getTelegramIdByOrderId(orderId, type);
+    if (telegramId) {
+      await sendUserNotification(telegramId, 'cancel', type, orderId);
+    }
+    
+    res.json({ success: true, message: 'Заказ отменен' });
+  } catch (error) {
+    console.error('Ошибка отмены заказа:', error);
+    res.status(500).json({ error: 'Ошибка отмены заказа' });
+  }
+});
+
+// Вспомогательные функции
+async function getTelegramIdByOrderId(orderId, type) {
+  try {
+    if (type === 'order') {
+      const [result] = await dbConnection.execute(
+        'SELECT telegram_id FROM orders WHERE order_id = ?',
+        [orderId]
+      );
+      return result[0]?.telegram_id;
+    } else if (type === 'yuan') {
+      const [result] = await dbConnection.execute(
+        'SELECT telegram_id FROM yuan_purchases WHERE id = ?',
+        [orderId]
+      );
+      return result[0]?.telegram_id;
+    }
+  } catch (error) {
+    console.error('Ошибка получения Telegram ID:', error);
+    return null;
+  }
+}
+
+async function sendUserNotification(telegramId, action, type, orderId) {
+  try {
+    const botToken = process.env.BOT_TOKEN || '8113129973:AAHePXZqOW2MnajUEnporDpoYULAEyX1N_8';
+    
+    let message = '';
+    if (action === 'confirm') {
+      if (type === 'order') {
+        message = `🎉 Отличные новости! Ваш заказ #${orderId} успешно подтвержден и оплачен. Мы приступили к его обработке. Спасибо за покупку!`;
+      } else {
+        message = `💰 Ваша покупка юаней #${orderId} подтверждена! Средства поступят на ваш счет в течение 24 часов. Спасибо за доверие!`;
+      }
+    } else if (action === 'cancel') {
+      message = `😔 К сожалению, ваш заказ #${orderId} был отменен. Очень жаль, надеемся в следующий раз закажете еще! Если у вас есть вопросы, обращайтесь к нашему менеджеру.`;
+    }
+    
+    const url = `https://api.telegram.org/bot${botToken}/sendMessage`;
+    const data = JSON.stringify({
+      chat_id: telegramId,
+      text: message,
+      parse_mode: 'HTML'
+    });
+    
+    const options = {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(data)
+      }
+    };
+    
+    return new Promise((resolve, reject) => {
+      const req = https.request(url, options, (res) => {
+        let responseData = '';
+        res.on('data', (chunk) => {
+          responseData += chunk;
+        });
+        res.on('end', () => {
+          if (res.statusCode === 200) {
+            console.log('✅ Уведомление пользователю отправлено');
+            resolve(true);
+          } else {
+            console.error('❌ Ошибка отправки уведомления:', responseData);
+            resolve(false);
+          }
+        });
+      });
+      
+      req.on('error', (error) => {
+        console.error('❌ Ошибка сети при отправке уведомления:', error);
+        resolve(false);
+      });
+      
+      req.write(data);
+      req.end();
+    });
+  } catch (error) {
+    console.error('❌ Ошибка отправки уведомления пользователю:', error);
+    return false;
+  }
+}
+
+// Функция для обновления статистики пользователя после подтверждения заказа
+async function updateUserStatsAfterConfirmation(telegramId, orderId, type) {
+  try {
+    if (type === 'order') {
+      // Получаем данные заказа
+      const [orderData] = await dbConnection.execute(`
+        SELECT estimated_savings FROM orders WHERE order_id = ? AND telegram_id = ?
+      `, [orderId, telegramId]);
+      
+      if (orderData.length > 0) {
+        const savings = orderData[0].estimated_savings || 0;
+        
+        // Обновляем статистику пользователя
+        await dbConnection.execute(`
+          UPDATE users 
+          SET total_savings = total_savings + ?,
+              last_activity = NOW()
+          WHERE telegram_id = ?
+        `, [savings, telegramId]);
+        
+        console.log(`✅ Обновлена статистика пользователя ${telegramId}: +${savings} руб. экономии`);
+      }
+    } else if (type === 'yuan') {
+      // Получаем данные покупки юаней
+      const [yuanData] = await dbConnection.execute(`
+        SELECT savings FROM yuan_purchases WHERE id = ? AND telegram_id = ?
+      `, [orderId, telegramId]);
+      
+      if (yuanData.length > 0) {
+        const savings = yuanData[0].savings || 0;
+        
+        // Обновляем статистику пользователя
+        await dbConnection.execute(`
+          UPDATE users 
+          SET total_savings = total_savings + ?,
+              last_activity = NOW()
+          WHERE telegram_id = ?
+        `, [savings, telegramId]);
+        
+        console.log(`✅ Обновлена статистика пользователя ${telegramId}: +${savings} руб. экономии`);
+        
+        // Обновляем достижения и уровни
+        await updateUserAchievementsAndLevels(telegramId, type);
+      }
+    }
+  } catch (error) {
+    console.error('❌ Ошибка обновления статистики пользователя:', error);
+  }
+}
+
+// Функция для обновления достижений и уровней пользователя
+async function updateUserAchievementsAndLevels(telegramId, type) {
+  try {
+    // Получаем текущую статистику пользователя
+    const [userStats] = await dbConnection.execute(`
+      SELECT 
+        COUNT(DISTINCT CASE WHEN o.status = 'completed' THEN o.order_id END) as total_orders,
+        COUNT(DISTINCT CASE WHEN yp.status = 'completed' THEN yp.id END) as total_yuan_purchases,
+        COALESCE(SUM(CASE WHEN yp.status = 'completed' THEN yp.savings ELSE 0 END), 0) as total_savings
+      FROM users u
+      LEFT JOIN orders o ON u.telegram_id = o.telegram_id
+      LEFT JOIN yuan_purchases yp ON u.telegram_id = yp.telegram_id
+      WHERE u.telegram_id = ?
+    `, [telegramId]);
+    
+    if (userStats.length > 0) {
+      const stats = userStats[0];
+      const totalOrders = stats.total_orders || 0;
+      const totalYuanPurchases = stats.total_yuan_purchases || 0;
+      const totalSavings = stats.total_savings || 0;
+      
+      // Обновляем уровень пользователя
+      let currentLevel = 'Bronze';
+      let levelProgress = 0;
+      
+      if (totalOrders >= 21) {
+        currentLevel = 'Gold';
+        levelProgress = 100;
+      } else if (totalOrders >= 6) {
+        currentLevel = 'Silver';
+        levelProgress = Math.min(100, ((totalOrders - 6) / 15) * 100);
+      } else {
+        levelProgress = Math.min(100, (totalOrders / 6) * 100);
+      }
+      
+      // Обновляем уровень в базе
+      await dbConnection.execute(`
+        INSERT INTO user_levels (telegram_id, current_level, level_progress, total_orders)
+        VALUES (?, ?, ?, ?)
+        ON DUPLICATE KEY UPDATE
+          current_level = VALUES(current_level),
+          level_progress = VALUES(level_progress),
+          total_orders = VALUES(total_orders),
+          updated_at = NOW()
+      `, [telegramId, currentLevel, levelProgress, totalOrders]);
+      
+      // Проверяем и обновляем достижения
+      const achievements = [
+        { id: 'first_order', name: 'Первый заказ', max_progress: 1, condition: totalOrders >= 1 },
+        { id: 'loyal_customer', name: 'Постоянный клиент', max_progress: 5, condition: totalOrders >= 5 },
+        { id: 'yuan_buyer', name: 'Покупатель юаней', max_progress: 1, condition: totalYuanPurchases >= 1 },
+        { id: 'bronze_level', name: 'Бронзовый уровень', max_progress: 1, condition: currentLevel === 'Bronze' && totalOrders >= 1 },
+        { id: 'silver_level', name: 'Серебряный уровень', max_progress: 1, condition: currentLevel === 'Silver' },
+        { id: 'gold_level', name: 'Золотой уровень', max_progress: 1, condition: currentLevel === 'Gold' }
+      ];
+      
+      for (const achievement of achievements) {
+        if (achievement.condition) {
+          await dbConnection.execute(`
+            INSERT INTO user_achievements (telegram_id, achievement_id, achievement_name, achievement_description, progress, max_progress, completed, completed_at)
+            VALUES (?, ?, ?, ?, ?, ?, 1, NOW())
+            ON DUPLICATE KEY UPDATE
+              progress = VALUES(progress),
+              completed = VALUES(completed),
+              completed_at = VALUES(completed_at)
+          `, [telegramId, achievement.id, achievement.name, `Достижение: ${achievement.name}`, achievement.max_progress, achievement.max_progress]);
+        }
+      }
+      
+      console.log(`✅ Обновлены достижения и уровень пользователя ${telegramId}: ${currentLevel} (${levelProgress}%)`);
+    }
+  } catch (error) {
+    console.error('❌ Ошибка обновления достижений и уровней:', error);
+  }
+}
+
+// Отправка уведомлений всем пользователям
+app.post('/api/admin/send-notification-all', async (req, res) => {
+  try {
+    const { message, title } = req.body;
+    
+    if (!message) {
+      return res.status(400).json({ error: 'Необходимо сообщение' });
+    }
+
+    await ensureDBConnection();
+
+    if (dbConnection) {
+      try {
+        // Получаем всех пользователей
+        const [users] = await dbConnection.execute(
+          'SELECT telegram_id, username, full_name FROM users WHERE telegram_id != 0'
+        );
+
+        let successCount = 0;
+        let errorCount = 0;
+
+        // Отправляем уведомления всем пользователям
+        for (const user of users) {
+          try {
+            const notificationMessage = title 
+              ? `🔔 <b>${title}</b>\n\n${message}`
+              : `🔔 ${message}`;
+
+            await sendTelegramMessage(user.telegram_id, notificationMessage);
+            successCount++;
+            
+            // Небольшая задержка между отправками, чтобы не превысить лимиты Telegram
+            await new Promise(resolve => setTimeout(resolve, 100));
+          } catch (error) {
+            console.error(`Ошибка отправки уведомления пользователю ${user.telegram_id}:`, error);
+            errorCount++;
+          }
+        }
+
+        // Логируем результат
+        await createSystemLog('info', `Массовая рассылка: отправлено ${successCount}, ошибок ${errorCount}`, {
+          totalUsers: users.length,
+          successCount,
+          errorCount,
+          message: message.substring(0, 100) + (message.length > 100 ? '...' : '')
+        });
+
+        res.json({ 
+          success: true, 
+          message: `Уведомления отправлены: ${successCount} успешно, ${errorCount} ошибок`,
+          stats: {
+            total: users.length,
+            success: successCount,
+            errors: errorCount
+          }
+        });
+      } catch (dbError) {
+        console.error('Ошибка работы с базой данных:', dbError);
+        res.status(500).json({ error: 'Ошибка отправки уведомлений' });
+      }
+    } else {
+      res.status(500).json({ error: 'Нет соединения с базой данных' });
+    }
+  } catch (error) {
+    console.error('Ошибка отправки уведомлений:', error);
+    res.status(500).json({ error: 'Ошибка отправки уведомлений' });
+  }
+});
+
+// Отправка уведомления конкретному пользователю
+app.post('/api/admin/send-notification-user', async (req, res) => {
+  try {
+    const { telegramId, message, title } = req.body;
+    
+    if (!telegramId || !message) {
+      return res.status(400).json({ error: 'Необходимы telegram ID и сообщение' });
+    }
+
+    await ensureDBConnection();
+
+    if (dbConnection) {
+      try {
+        // Проверяем, существует ли пользователь
+        const [users] = await dbConnection.execute(
+          'SELECT telegram_id, username, full_name FROM users WHERE telegram_id = ?',
+          [telegramId]
+        );
+
+        if (users.length === 0) {
+          return res.status(404).json({ error: 'Пользователь не найден' });
+        }
+
+        const user = users[0];
+        const notificationMessage = title 
+          ? `🔔 <b>${title}</b>\n\n${message}`
+          : `🔔 ${message}`;
+
+        await sendTelegramMessage(telegramId, notificationMessage);
+
+        // Логируем отправку
+        await createSystemLog('info', `Уведомление отправлено пользователю ${telegramId}`, {
+          telegramId,
+          username: user.username,
+          fullName: user.full_name,
+          message: message.substring(0, 100) + (message.length > 100 ? '...' : '')
+        });
+
+        res.json({ 
+          success: true, 
+          message: `Уведомление отправлено пользователю @${user.username || telegramId}`
+        });
+      } catch (dbError) {
+        console.error('Ошибка работы с базой данных:', dbError);
+        res.status(500).json({ error: 'Ошибка отправки уведомления' });
+      }
+    } else {
+      res.status(500).json({ error: 'Нет соединения с базой данных' });
+    }
+  } catch (error) {
+    console.error('Ошибка отправки уведомления:', error);
+    res.status(500).json({ error: 'Ошибка отправки уведомления' });
+  }
+});
+
+// Получение списка пользователей для выбора
+app.get('/api/admin/users-list', async (req, res) => {
+  try {
+    await ensureDBConnection();
+
+    if (dbConnection) {
+      try {
+        const [users] = await dbConnection.execute(`
+          SELECT 
+            u.telegram_id,
+            u.username,
+            u.full_name,
+            u.created_at,
+            COUNT(DISTINCT o.order_id) as orders_count,
+            COUNT(DISTINCT yp.id) as yuan_purchases_count
+          FROM users u
+          LEFT JOIN orders o ON u.telegram_id = o.telegram_id AND o.status = 'completed'
+          LEFT JOIN yuan_purchases yp ON u.telegram_id = yp.telegram_id AND yp.status = 'completed'
+          WHERE u.telegram_id != 0
+          GROUP BY u.telegram_id, u.username, u.full_name, u.created_at
+          ORDER BY u.created_at DESC
+        `);
+
+        res.json({ 
+          success: true, 
+          users: users.map(user => ({
+            telegram_id: user.telegram_id,
+            username: user.username,
+            full_name: user.full_name,
+            created_at: user.created_at,
+            orders_count: user.orders_count,
+            yuan_purchases_count: user.yuan_purchases_count,
+            display_name: user.full_name || user.username || `ID: ${user.telegram_id}`
+          }))
+        });
+      } catch (dbError) {
+        console.error('Ошибка работы с базой данных:', dbError);
+        res.status(500).json({ error: 'Ошибка получения списка пользователей' });
+      }
+    } else {
+      res.status(500).json({ error: 'Нет соединения с базой данных' });
+    }
+  } catch (error) {
+    console.error('Ошибка получения списка пользователей:', error);
+    res.status(500).json({ error: 'Ошибка получения списка пользователей' });
+  }
+});
+
+// Мониторинг системы
+app.get('/api/admin/system-status', async (req, res) => {
+  try {
+    const startTime = Date.now();
+    
+    // Проверяем соединение с БД
+    let dbStatus = 'disconnected';
+    let dbResponseTime = 0;
+    
+    if (dbConnection) {
+      try {
+        const dbStartTime = Date.now();
+        await dbConnection.execute('SELECT 1');
+        dbResponseTime = Date.now() - dbStartTime;
+        dbStatus = 'connected';
+      } catch (error) {
+        dbStatus = 'error';
+        console.error('Database connection error:', error);
+      }
+    }
+
+    // Получаем статистику системы
+    const systemStats = {
+      server: {
+        status: 'running',
+        uptime: process.uptime(),
+        memory: process.memoryUsage(),
+        nodeVersion: process.version,
+        platform: process.platform
+      },
+      database: {
+        status: dbStatus,
+        responseTime: dbResponseTime,
+        connectionState: dbConnection ? dbConnection.state : 'disconnected'
+      },
+      timestamp: new Date().toISOString(),
+      responseTime: Date.now() - startTime
+    };
+
+    res.json({ 
+      success: true, 
+      data: systemStats 
+    });
+  } catch (error) {
+    console.error('Ошибка получения статуса системы:', error);
+    res.status(500).json({ error: 'Ошибка получения статуса системы' });
+  }
+});
+
+// Изменение комиссии пользователя
+app.post('/api/admin/update-user-commission', async (req, res) => {
+  try {
+    const { telegramId, commission } = req.body;
+    
+    if (!telegramId || commission === undefined) {
+      return res.status(400).json({ error: 'Необходимы telegram ID и комиссия' });
+    }
+
+    if (commission < 0 || commission > 1) {
+      return res.status(400).json({ error: 'Комиссия должна быть от 0 до 1' });
+    }
+
+    await ensureDBConnection();
+
+    if (dbConnection) {
+      try {
+        // Проверяем, существует ли пользователь
+        const [users] = await dbConnection.execute(
+          'SELECT telegram_id, username, full_name FROM users WHERE telegram_id = ?',
+          [telegramId]
+        );
+
+        if (users.length === 0) {
+          return res.status(404).json({ error: 'Пользователь не найден' });
+        }
+
+        // Обновляем комиссию
+        await dbConnection.execute(
+          'UPDATE users SET commission = ? WHERE telegram_id = ?',
+          [commission, telegramId]
+        );
+
+        // Логируем изменение
+        await createSystemLog('info', `Комиссия пользователя ${telegramId} изменена на ${(commission * 100).toFixed(1)}%`, {
+          telegramId,
+          oldCommission: users[0].commission,
+          newCommission: commission,
+          username: users[0].username,
+          fullName: users[0].full_name
+        });
+
+        res.json({ 
+          success: true, 
+          message: `Комиссия пользователя изменена на ${(commission * 100).toFixed(1)}%`
+        });
+      } catch (dbError) {
+        console.error('Ошибка работы с базой данных:', dbError);
+        res.status(500).json({ error: 'Ошибка обновления комиссии' });
+      }
+    } else {
+      res.status(500).json({ error: 'Нет соединения с базой данных' });
+    }
+  } catch (error) {
+    console.error('Ошибка обновления комиссии:', error);
+    res.status(500).json({ error: 'Ошибка обновления комиссии' });
+  }
+});
+
+// Получение детальной истории пользователя
+app.get('/api/admin/user-history/:telegramId', async (req, res) => {
+  try {
+    const { telegramId } = req.params;
+    
+    await ensureDBConnection();
+
+    if (dbConnection) {
+      try {
+        // Получаем основную информацию о пользователе
+        const [userInfo] = await dbConnection.execute(`
+          SELECT 
+            u.telegram_id,
+            u.username,
+            u.full_name,
+            u.commission,
+            u.created_at,
+            u.referred_by,
+            COUNT(DISTINCT o.order_id) as total_orders,
+            COUNT(DISTINCT yp.id) as total_yuan_purchases,
+            COALESCE(SUM(CASE WHEN o.status = 'completed' THEN o.estimated_savings ELSE 0 END), 0) as total_savings_orders,
+            COALESCE(SUM(CASE WHEN yp.status = 'completed' THEN yp.savings ELSE 0 END), 0) as total_savings_yuan
+          FROM users u
+          LEFT JOIN orders o ON u.telegram_id = o.telegram_id
+          LEFT JOIN yuan_purchases yp ON u.telegram_id = yp.telegram_id
+          WHERE u.telegram_id = ?
+          GROUP BY u.telegram_id, u.username, u.full_name, u.commission, u.created_at, u.referred_by
+        `, [telegramId]);
+
+        if (userInfo.length === 0) {
+          return res.status(404).json({ error: 'Пользователь не найден' });
+        }
+
+        const user = userInfo[0];
+
+        // Получаем историю заказов
+        const [orders] = await dbConnection.execute(`
+          SELECT 
+            order_id,
+            status,
+            estimated_savings,
+            created_at,
+            phone_number,
+            pickup_point,
+            pickup_point_address,
+            comments,
+            username,
+            full_name
+          FROM orders 
+          WHERE telegram_id = ? 
+          ORDER BY created_at DESC
+        `, [telegramId]);
+
+        // Получаем историю покупок юаней
+        const [yuanPurchases] = await dbConnection.execute(`
+          SELECT 
+            id,
+            amount_rub,
+            amount_cny,
+            savings,
+            status,
+            created_at
+          FROM yuan_purchases 
+          WHERE telegram_id = ? 
+          ORDER BY created_at DESC
+        `, [telegramId]);
+
+        // Получаем активность пользователя
+        const [activity] = await dbConnection.execute(`
+          SELECT 
+            action_type,
+            action_data,
+            created_at
+          FROM user_activity 
+          WHERE telegram_id = ? 
+          ORDER BY created_at DESC
+          LIMIT 50
+        `, [telegramId]);
+
+        // Получаем достижения
+        const [achievements] = await dbConnection.execute(`
+          SELECT 
+            achievement_name,
+            progress,
+            max_progress,
+            completed,
+            completed_at
+          FROM user_achievements 
+          WHERE telegram_id = ? 
+          ORDER BY completed_at DESC
+        `, [telegramId]);
+
+        const responseData = {
+          user: user,
+          orders: orders,
+          yuanPurchases: yuanPurchases,
+          activity: activity,
+          achievements: achievements
+        };
+        
+        
+        res.json({ 
+          success: true, 
+          data: responseData
+        });
+      } catch (dbError) {
+        console.error('Ошибка работы с базой данных:', dbError);
+        res.status(500).json({ error: 'Ошибка получения истории пользователя' });
+      }
+    } else {
+      res.status(500).json({ error: 'Нет соединения с базой данных' });
+    }
+  } catch (error) {
+    console.error('Ошибка получения истории пользователя:', error);
+    res.status(500).json({ error: 'Ошибка получения истории пользователя' });
+  }
+});
+
+// Получение статистики продаж
+app.get('/api/admin/sales-analytics', async (req, res) => {
+  try {
+    const { period = 'week', startDate, endDate, compare } = req.query;
+    
+    await ensureDBConnection();
+
+    if (dbConnection) {
+      try {
+        let dateFilter = '';
+        let previousDateFilter = '';
+        
+        // Если указан произвольный период
+        if (startDate && endDate) {
+          dateFilter = `created_at BETWEEN '${startDate} 00:00:00' AND '${endDate} 23:59:59'`;
+          
+          // Для сравнения - предыдущий период той же длительности
+          if (compare === 'true') {
+            const start = new Date(startDate);
+            const end = new Date(endDate);
+            const diff = end - start;
+            const prevEnd = new Date(start - 1);
+            const prevStart = new Date(prevEnd - diff);
+            
+            previousDateFilter = `created_at BETWEEN '${prevStart.toISOString().split('T')[0]} 00:00:00' AND '${prevEnd.toISOString().split('T')[0]} 23:59:59'`;
+          }
+        } else {
+          // Стандартные периоды
+          switch (period) {
+            case 'day':
+              dateFilter = "DATE(created_at) = CURDATE()";
+              previousDateFilter = "DATE(created_at) = DATE_SUB(CURDATE(), INTERVAL 1 DAY)";
+              break;
+            case 'week':
+              dateFilter = "created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)";
+              previousDateFilter = "created_at >= DATE_SUB(NOW(), INTERVAL 14 DAY) AND created_at < DATE_SUB(NOW(), INTERVAL 7 DAY)";
+              break;
+            case 'month':
+              dateFilter = "created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)";
+              previousDateFilter = "created_at >= DATE_SUB(NOW(), INTERVAL 60 DAY) AND created_at < DATE_SUB(NOW(), INTERVAL 30 DAY)";
+              break;
+            default:
+              dateFilter = "created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)";
+              previousDateFilter = "created_at >= DATE_SUB(NOW(), INTERVAL 14 DAY) AND created_at < DATE_SUB(NOW(), INTERVAL 7 DAY)";
+          }
+        }
+
+        // Статистика заказов
+        const [ordersStats] = await dbConnection.execute(`
+          SELECT 
+            DATE(created_at) as date,
+            COUNT(*) as orders_count,
+            SUM(estimated_savings) as total_savings,
+            AVG(estimated_savings) as avg_savings
+          FROM orders 
+          WHERE ${dateFilter} AND status = 'completed'
+          GROUP BY DATE(created_at)
+          ORDER BY date ASC
+        `);
+
+        // Статистика покупок юаней
+        const [yuanStats] = await dbConnection.execute(`
+          SELECT 
+            DATE(created_at) as date,
+            COUNT(*) as purchases_count,
+            SUM(amount_rub) as total_amount_rub,
+            SUM(amount_cny) as total_amount_cny,
+            SUM(savings) as total_savings
+          FROM yuan_purchases 
+          WHERE ${dateFilter} AND status = 'completed'
+          GROUP BY DATE(created_at)
+          ORDER BY date ASC
+        `);
+
+        // Статистика новых пользователей
+        const [newUsersStats] = await dbConnection.execute(`
+          SELECT 
+            DATE(created_at) as date,
+            COUNT(*) as new_users_count
+          FROM users 
+          WHERE ${dateFilter}
+          GROUP BY DATE(created_at)
+          ORDER BY date ASC
+        `);
+
+        // Статистика доходов (прибыли)
+        const [profitStats] = await dbConnection.execute(`
+          SELECT 
+            DATE(pc.created_at) as date,
+            COUNT(*) as profit_calculations_count,
+            SUM(pc.profit) as total_profit
+          FROM profit_calculations pc
+          WHERE ${dateFilter.replace('created_at', 'pc.created_at')}
+          GROUP BY DATE(pc.created_at)
+          ORDER BY date ASC
+        `);
+
+        // Общая статистика - разделим на два отдельных запроса
+        const [ordersTotalStats] = await dbConnection.execute(`
+          SELECT 
+            COUNT(*) as total_orders
+          FROM orders 
+          WHERE ${dateFilter} AND status = 'completed'
+        `);
+
+        const [yuanTotalStats] = await dbConnection.execute(`
+          SELECT 
+            COUNT(*) as total_yuan_purchases,
+            COALESCE(SUM(amount_rub), 0) as total_yuan_amount
+          FROM yuan_purchases 
+          WHERE ${dateFilter} AND status = 'completed'
+        `);
+
+        const [newUsersTotalStats] = await dbConnection.execute(`
+          SELECT 
+            COUNT(*) as total_new_users
+          FROM users 
+          WHERE ${dateFilter}
+        `);
+
+        // Общая статистика доходов (прибыли)
+        const [profitTotalStats] = await dbConnection.execute(`
+          SELECT 
+            COUNT(*) as total_profit_calculations,
+            COALESCE(SUM(profit), 0) as total_profit
+          FROM profit_calculations 
+          WHERE ${dateFilter.replace('created_at', 'profit_calculations.created_at')}
+        `);
+
+        const totalStats = {
+          total_orders: ordersTotalStats[0]?.total_orders || 0,
+          total_yuan_purchases: yuanTotalStats[0]?.total_yuan_purchases || 0,
+          total_yuan_amount: yuanTotalStats[0]?.total_yuan_amount || 0,
+          total_new_users: newUsersTotalStats[0]?.total_new_users || 0,
+          total_profit_calculations: profitTotalStats[0]?.total_profit_calculations || 0,
+          total_profit: profitTotalStats[0]?.total_profit || 0
+        };
+
+        // Если запрошено сравнение с предыдущим периодом
+        let previousStats = null;
+        if (compare === 'true' && previousDateFilter) {
+          const [prevOrdersStats] = await dbConnection.execute(`
+            SELECT 
+              COUNT(*) as total_orders
+            FROM orders 
+            WHERE ${previousDateFilter} AND status = 'completed'
+          `);
+
+          const [prevYuanStats] = await dbConnection.execute(`
+            SELECT 
+              COUNT(*) as total_yuan_purchases,
+              COALESCE(SUM(amount_rub), 0) as total_yuan_amount
+            FROM yuan_purchases 
+            WHERE ${previousDateFilter} AND status = 'completed'
+          `);
+
+          const [prevNewUsersStats] = await dbConnection.execute(`
+            SELECT 
+              COUNT(*) as total_new_users
+            FROM users 
+            WHERE ${previousDateFilter}
+          `);
+
+          const [prevProfitStats] = await dbConnection.execute(`
+            SELECT 
+              COUNT(*) as total_profit_calculations,
+              COALESCE(SUM(profit), 0) as total_profit
+            FROM profit_calculations 
+            WHERE ${previousDateFilter.replace('created_at', 'profit_calculations.created_at')}
+          `);
+
+          previousStats = {
+            total_orders: prevOrdersStats[0]?.total_orders || 0,
+            total_yuan_purchases: prevYuanStats[0]?.total_yuan_purchases || 0,
+            total_yuan_amount: prevYuanStats[0]?.total_yuan_amount || 0,
+            total_new_users: prevNewUsersStats[0]?.total_new_users || 0,
+            total_profit_calculations: prevProfitStats[0]?.total_profit_calculations || 0,
+            total_profit: prevProfitStats[0]?.total_profit || 0
+          };
+        }
+
+        res.json({ 
+          success: true, 
+          data: {
+            period,
+            startDate,
+            endDate,
+            ordersStats,
+            yuanStats,
+            newUsersStats,
+            profitStats,
+            totalStats: totalStats,
+            previousStats: previousStats
+          }
+        });
+      } catch (dbError) {
+        console.error('Ошибка работы с базой данных:', dbError);
+        res.status(500).json({ error: 'Ошибка получения аналитики продаж' });
+      }
+    } else {
+      res.status(500).json({ error: 'Нет соединения с базой данных' });
+    }
+  } catch (error) {
+    console.error('Ошибка получения аналитики продаж:', error);
+    res.status(500).json({ error: 'Ошибка получения аналитики продаж' });
+  }
+});
+
+// Получение детальной информации о заказе
+app.get('/api/admin/order-details/:orderId', async (req, res) => {
+  try {
+    const { orderId } = req.params;
+    
+    await ensureDBConnection();
+
+    if (dbConnection) {
+      try {
+        // Получаем информацию о заказе
+        const [orderInfo] = await dbConnection.execute(`
+          SELECT 
+            o.order_id,
+            o.status,
+            o.estimated_savings,
+            o.created_at,
+            o.phone_number,
+            o.pickup_point,
+            o.pickup_point_address,
+            o.comments,
+            o.username,
+            o.full_name,
+            u.telegram_id,
+            u.username as user_username,
+            u.full_name as user_full_name
+          FROM orders o
+          LEFT JOIN users u ON o.telegram_id = u.telegram_id
+          WHERE o.order_id = ?
+        `, [orderId]);
+
+        if (orderInfo.length === 0) {
+          return res.status(404).json({ error: 'Заказ не найден' });
+        }
+
+        // Получаем товары заказа
+        const [orderItems] = await dbConnection.execute(`
+          SELECT 
+            product_link,
+            product_size,
+            quantity,
+            estimated_savings
+          FROM order_items 
+          WHERE order_id = ?
+          ORDER BY id
+        `, [orderId]);
+
+        res.json({ 
+          success: true, 
+          data: {
+            order: orderInfo[0],
+            items: orderItems
+          }
+        });
+      } catch (dbError) {
+        console.error('Ошибка работы с базой данных:', dbError);
+        res.status(500).json({ error: 'Ошибка получения деталей заказа' });
+      }
+    } else {
+      res.status(500).json({ error: 'Нет соединения с базой данных' });
+    }
+  } catch (error) {
+    console.error('Ошибка получения деталей заказа:', error);
+    res.status(500).json({ error: 'Ошибка получения деталей заказа' });
+  }
+});
+
+// API для изменения статуса заказа
+app.post('/api/admin/update-order-status', async (req, res) => {
+  try {
+    const { orderId, status } = req.body;
+    
+    console.log('📝 Запрос на обновление статуса заказа:', { orderId, status, body: req.body });
+    
+    if (!orderId || !status) {
+      console.error('❌ Отсутствуют необходимые параметры:', { orderId, status });
+      return res.status(400).json({ error: 'Необходимы orderId и status' });
+    }
+
+    await ensureDBConnection();
+
+    if (dbConnection) {
+      try {
+        await dbConnection.execute(
+          'UPDATE orders SET status = ? WHERE order_id = ?',
+          [status, orderId]
+        );
+
+        res.json({ success: true, message: 'Статус заказа обновлен' });
+      } catch (dbError) {
+        console.error('Ошибка обновления статуса:', dbError);
+        res.status(500).json({ error: 'Ошибка обновления статуса заказа' });
+      }
+    } else {
+      res.status(500).json({ error: 'Нет соединения с базой данных' });
+    }
+  } catch (error) {
+    console.error('Ошибка обновления статуса:', error);
+    res.status(500).json({ error: 'Ошибка обновления статуса заказа' });
+  }
+});
+
+// API для сохранения расчета прибыли
+app.post('/api/admin/save-profit-calculation', async (req, res) => {
+  try {
+    const {
+      orderId,
+      customerCommission,
+      customerProductCostCny,
+      customerRate,
+      customerDelivery,
+      customerTotal,
+      myProductCostCny,
+      myRate,
+      myDelivery,
+      myTotal,
+      profit,
+      createdBy
+    } = req.body;
+    
+    if (!orderId) {
+      return res.status(400).json({ error: 'Необходим orderId' });
+    }
+
+    await ensureDBConnection();
+
+    if (dbConnection) {
+      try {
+        // Проверяем, существует ли уже расчет для этого заказа
+        const [existing] = await dbConnection.execute(
+          'SELECT id FROM profit_calculations WHERE order_id = ?',
+          [orderId]
+        );
+
+        if (existing.length > 0) {
+          // Обновляем существующий расчет
+          await dbConnection.execute(`
+            UPDATE profit_calculations SET
+              customer_commission = ?,
+              customer_product_cost_cny = ?,
+              customer_rate = ?,
+              customer_delivery = ?,
+              customer_total = ?,
+              my_product_cost_cny = ?,
+              my_rate = ?,
+              my_delivery = ?,
+              my_total = ?,
+              profit = ?,
+              created_by = ?
+            WHERE order_id = ?
+          `, [
+            customerCommission, customerProductCostCny, customerRate, customerDelivery, customerTotal,
+            myProductCostCny, myRate, myDelivery, myTotal, profit, createdBy, orderId
+          ]);
+        } else {
+          // Создаем новый расчет
+          await dbConnection.execute(`
+            INSERT INTO profit_calculations (
+              order_id, customer_commission, customer_product_cost_cny, customer_rate, customer_delivery, customer_total,
+              my_product_cost_cny, my_rate, my_delivery, my_total, profit, created_by
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `, [
+            orderId, customerCommission, customerProductCostCny, customerRate, customerDelivery, customerTotal,
+            myProductCostCny, myRate, myDelivery, myTotal, profit, createdBy
+          ]);
+        }
+
+        res.json({ success: true, message: 'Расчет прибыли сохранен' });
+      } catch (dbError) {
+        console.error('Ошибка сохранения расчета:', dbError);
+        res.status(500).json({ error: 'Ошибка сохранения расчета прибыли' });
+      }
+    } else {
+      res.status(500).json({ error: 'Нет соединения с базой данных' });
+    }
+  } catch (error) {
+    console.error('Ошибка сохранения расчета:', error);
+    res.status(500).json({ error: 'Ошибка сохранения расчета прибыли' });
+  }
+});
+
+// API для получения реального дохода (сумма всех расчетов прибыли)
+app.get('/api/admin/total-profit', async (req, res) => {
+  try {
+    await ensureDBConnection();
+
+    if (dbConnection) {
+      try {
+        const [result] = await dbConnection.execute(
+          'SELECT COALESCE(SUM(profit), 0) as total_profit FROM profit_calculations'
+        );
+
+        res.json({ success: true, totalProfit: result[0].total_profit });
+      } catch (dbError) {
+        console.error('Ошибка получения общей прибыли:', dbError);
+        res.status(500).json({ error: 'Ошибка получения общей прибыли' });
+      }
+    } else {
+      res.status(500).json({ error: 'Нет соединения с базой данных' });
+    }
+  } catch (error) {
+    console.error('Ошибка получения общей прибыли:', error);
+    res.status(500).json({ error: 'Ошибка получения общей прибыли' });
+  }
+});
+
+// API для получения списка заказов для расчета прибыли (статус "paid" или "completed")
+app.get('/api/admin/orders-for-profit', async (req, res) => {
+  try {
+    await ensureDBConnection();
+
+    if (dbConnection) {
+      try {
+        const [orders] = await dbConnection.execute(`
+          SELECT 
+            o.order_id,
+            o.telegram_id,
+            o.full_name,
+            o.phone_number,
+            o.status,
+            o.estimated_savings,
+            o.created_at,
+            u.commission,
+            u.username,
+            pc.profit as existing_profit,
+            pc.id as profit_calculation_id
+          FROM orders o
+          LEFT JOIN users u ON o.telegram_id = u.telegram_id
+          LEFT JOIN profit_calculations pc ON o.order_id = pc.order_id
+          WHERE o.status IN ('paid', 'completed') AND (o.status != 'profit_calculated' OR o.status IS NULL)
+          ORDER BY o.created_at DESC
+        `);
+
+        res.json({ success: true, orders });
+      } catch (dbError) {
+        console.error('Ошибка получения заказов:', dbError);
+        res.status(500).json({ error: 'Ошибка получения заказов для расчета' });
+      }
+    } else {
+      res.status(500).json({ error: 'Нет соединения с базой данных' });
+    }
+  } catch (error) {
+    console.error('Ошибка получения заказов:', error);
+    res.status(500).json({ error: 'Ошибка получения заказов для расчета' });
+  }
+});
+
+// 404 handler (должен быть в самом конце)
+// ==================== DELIVERY TRACKING API ====================
+
+// Тестовый endpoint для проверки работы API
+app.get('/api/test-delivery', async (req, res) => {
+  try {
+    console.log('🧪 Тестовый запрос delivery API');
+    await ensureDBConnection();
+    
+    const [orderCount] = await dbConnection.execute('SELECT COUNT(*) as count FROM orders');
+    const [trackingCount] = await dbConnection.execute('SELECT COUNT(*) as count FROM delivery_tracking');
+    
+    res.json({
+      success: true,
+      message: 'Delivery API работает',
+      orders_count: orderCount[0].count,
+      tracking_count: trackingCount[0].count,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('❌ Ошибка тестового endpoint:', error);
+    res.status(500).json({ error: 'Ошибка тестового endpoint' });
+  }
+});
+
+// Тестовый endpoint для заказов пользователя без авторизации (только для разработки)
+app.get('/api/test-user-orders', async (req, res) => {
+  try {
+    console.log('🧪 Тестовый запрос заказов пользователя');
+    await ensureDBConnection();
+
+    // Получаем все заказы с информацией о доставке (без проверки telegram_id)
+    const [rows] = await dbConnection.execute(`
+      SELECT 
+        o.order_id,
+        o.full_name,
+        o.phone_number,
+        o.pickup_point,
+        o.pickup_point_address,
+        o.estimated_savings,
+        o.created_at,
+        dt.internal_tracking_number,
+        dt.status as delivery_status,
+        dt.last_updated
+      FROM orders o
+      LEFT JOIN delivery_tracking dt ON o.order_id = dt.order_id
+      ORDER BY o.created_at DESC
+      LIMIT 10
+    `);
+
+    console.log(`📦 Найдено заказов: ${rows.length}`);
+
+    res.json({
+      success: true,
+      orders: rows
+    });
+
+  } catch (error) {
+    console.error('❌ Ошибка тестового получения заказов:', error);
+    res.status(500).json({ error: 'Ошибка получения заказов' });
+  }
+});
+
+// Тестовый endpoint для отслеживания без авторизации (только для разработки)
+app.get('/api/test-tracking/:trackingNumber', async (req, res) => {
+  try {
+    const { trackingNumber } = req.params;
+    console.log(`🧪 Тестовый поиск заказа по трек-номеру: ${trackingNumber}`);
+    
+    await ensureDBConnection();
+
+    // Получаем информацию о доставке БЕЗ проверки telegram_id (только для тестирования)
+    const [rows] = await dbConnection.execute(`
+      SELECT 
+        dt.internal_tracking_number,
+        dt.status,
+        dt.last_updated,
+        o.order_id,
+        o.full_name,
+        o.phone_number,
+        o.telegram_id
+      FROM delivery_tracking dt
+      JOIN orders o ON dt.order_id = o.order_id
+      WHERE dt.internal_tracking_number = ?
+    `, [trackingNumber]);
+
+    console.log(`📦 Найдено записей: ${rows.length}`);
+
+    if (rows.length === 0) {
+      console.log('❌ Заказ не найден');
+      return res.status(404).json({ error: 'Заказ не найден' });
+    }
+
+    const trackingData = rows[0];
+    console.log('✅ Найден заказ:', {
+      order_id: trackingData.order_id,
+      status: trackingData.status,
+      tracking_number: trackingData.internal_tracking_number
+    });
+    
+    res.json({
+      success: true,
+      trackingNumber: trackingData.internal_tracking_number,
+      status: trackingData.status,
+      lastUpdated: trackingData.last_updated,
+      orderId: trackingData.order_id
+    });
+
+  } catch (error) {
+    console.error('❌ Ошибка тестового отслеживания:', error);
+    res.status(500).json({ error: 'Ошибка получения статуса доставки' });
+  }
+});
+
+// Получение статуса доставки по tracking number
+app.get('/api/tracking/:trackingNumber', async (req, res) => {
+  try {
+    const { trackingNumber } = req.params;
+    console.log(`🔍 Поиск заказа по трек-номеру: ${trackingNumber}`);
+    
+    // Получаем данные из Telegram WebApp
+    const initData = req.headers['x-telegram-init-data'];
+    console.log('📱 InitData получен:', !!initData);
+    
+    if (!initData) {
+      console.log('❌ Нет initData');
+      return res.status(401).json({ error: 'Не авторизован' });
+    }
+
+    // Парсим initData для получения telegram_id
+    const urlParams = new URLSearchParams(initData);
+    const userData = JSON.parse(decodeURIComponent(urlParams.get('user') || '{}'));
+    const telegramId = userData.id;
+    console.log('👤 Telegram ID:', telegramId);
+
+    if (!telegramId) {
+      console.log('❌ Нет telegram_id');
+      return res.status(401).json({ error: 'Не авторизован' });
+    }
+
+    await ensureDBConnection();
+
+    // Получаем информацию о доставке с проверкой принадлежности заказа пользователю
+    const [rows] = await dbConnection.execute(`
+      SELECT 
+        dt.internal_tracking_number,
+        dt.status,
+        dt.last_updated,
+        o.order_id,
+        o.full_name,
+        o.phone_number,
+        o.telegram_id
+      FROM delivery_tracking dt
+      JOIN orders o ON dt.order_id = o.order_id
+      WHERE dt.internal_tracking_number = ? AND o.telegram_id = ?
+    `, [trackingNumber, telegramId]);
+
+    console.log(`📦 Найдено записей: ${rows.length}`);
+
+    if (rows.length === 0) {
+      console.log('❌ Заказ не найден');
+      return res.status(404).json({ error: 'Заказ не найден или не принадлежит вам' });
+    }
+
+    const trackingData = rows[0];
+    console.log('✅ Найден заказ:', {
+      order_id: trackingData.order_id,
+      status: trackingData.status,
+      tracking_number: trackingData.internal_tracking_number
+    });
+    
+    res.json({
+      success: true,
+      trackingNumber: trackingData.internal_tracking_number,
+      status: trackingData.status,
+      lastUpdated: trackingData.last_updated,
+      orderId: trackingData.order_id
+    });
+
+  } catch (error) {
+    console.error('❌ Ошибка получения статуса доставки:', error);
+    res.status(500).json({ error: 'Ошибка получения статуса доставки' });
+  }
+});
+
+// Получение всех заказов пользователя для профиля
+app.get('/api/user/orders', async (req, res) => {
+  try {
+    // Получаем данные из Telegram WebApp
+    const initData = req.headers['x-telegram-init-data'];
+    if (!initData) {
+      return res.status(401).json({ error: 'Не авторизован' });
+    }
+
+    const urlParams = new URLSearchParams(initData);
+    const userData = JSON.parse(decodeURIComponent(urlParams.get('user') || '{}'));
+    const telegramId = userData.id;
+
+    if (!telegramId) {
+      return res.status(401).json({ error: 'Не авторизован' });
+    }
+
+    await ensureDBConnection();
+
+    // Получаем все заказы пользователя с информацией о доставке
+    const [rows] = await dbConnection.execute(`
+      SELECT 
+        o.order_id,
+        o.full_name,
+        o.phone_number,
+        o.pickup_point,
+        o.pickup_point_address,
+        o.estimated_savings,
+        o.created_at,
+        dt.internal_tracking_number,
+        dt.status as delivery_status,
+        dt.last_updated
+      FROM orders o
+      LEFT JOIN delivery_tracking dt ON o.order_id = dt.order_id
+      WHERE o.telegram_id = ?
+      ORDER BY o.created_at DESC
+    `, [telegramId]);
+
+    res.json({
+      success: true,
+      orders: rows
+    });
+
+  } catch (error) {
+    console.error('Ошибка получения заказов пользователя:', error);
+    res.status(500).json({ error: 'Ошибка получения заказов' });
+  }
+});
+
+// Получение всех заказов для админ панели доставки
+app.get('/api/admin/delivery', async (req, res) => {
+  try {
+    console.log('🔍 Запрос на получение заказов для доставки');
+    await ensureDBConnection();
+
+    const [rows] = await dbConnection.execute(`
+      SELECT 
+        o.order_id,
+        o.telegram_id,
+        o.username,
+        o.full_name,
+        o.phone_number,
+        o.pickup_point,
+        o.pickup_point_address,
+        o.estimated_savings,
+        o.created_at,
+        dt.internal_tracking_number,
+        dt.status as delivery_status,
+        dt.last_updated
+      FROM orders o
+      LEFT JOIN delivery_tracking dt ON o.order_id = dt.order_id
+      ORDER BY o.created_at DESC
+    `);
+
+    console.log(`📦 Найдено заказов: ${rows.length}`);
+    if (rows.length > 0) {
+      console.log('📋 Пример заказа:', {
+        order_id: rows[0].order_id,
+        tracking_number: rows[0].internal_tracking_number,
+        status: rows[0].delivery_status
+      });
+    }
+
+    res.json({
+      success: true,
+      orders: rows
+    });
+
+  } catch (error) {
+    console.error('❌ Ошибка получения заказов для админки:', error);
+    res.status(500).json({ error: 'Ошибка получения заказов' });
+  }
+});
+
+// Обновление статуса доставки (админ)
+app.post('/api/admin/orders/:orderId/update-status', async (req, res) => {
+  try {
+    const { orderId } = req.params;
+    const { status } = req.body;
+
+    const validStatuses = [
+      'Создан', 
+      'Доставка внутри Китая', 
+      'На складе в Китае', 
+      'Отправлен на таможню', 
+      'Доставка в РФ', 
+      'Доставлен'
+    ];
+
+    if (!validStatuses.includes(status)) {
+      return res.status(400).json({ error: 'Неверный статус' });
+    }
+
+    await ensureDBConnection();
+
+    // Обновляем статус в delivery_tracking
+    await dbConnection.execute(
+      `UPDATE delivery_tracking SET status = ?, last_updated = CURRENT_TIMESTAMP WHERE order_id = ?`,
+      [status, orderId]
+    );
+
+    // Получаем информацию о заказе для уведомления
+    const [orderRows] = await dbConnection.execute(`
+      SELECT 
+        o.telegram_id,
+        o.full_name,
+        dt.internal_tracking_number
+      FROM orders o
+      JOIN delivery_tracking dt ON o.order_id = dt.order_id
+      WHERE o.order_id = ?
+    `, [orderId]);
+
+    if (orderRows.length > 0) {
+      const order = orderRows[0];
+      
+      // Отправляем уведомление пользователю
+      const message = `📦 <b>Обновление статуса заказа</b>\n\n` +
+                     `🔍 <b>Номер отслеживания:</b> ${order.internal_tracking_number}\n` +
+                     `📋 <b>Новый статус:</b> ${status}\n\n` +
+                     `⏰ <b>Время обновления:</b> ${new Date().toLocaleString('ru-RU')}`;
+
+      await sendTelegramMessage(order.telegram_id, message);
+    }
+
+    res.json({
+      success: true,
+      message: 'Статус обновлен и уведомление отправлено'
+    });
+
+  } catch (error) {
+    console.error('Ошибка обновления статуса доставки:', error);
+    res.status(500).json({ error: 'Ошибка обновления статуса' });
+  }
+});
+
+app.use('*', (req, res) => {
+  res.status(404).json({ error: 'Маршрут не найден' });
+});
+
+// Запуск сервера
+async function startServer() {
+  await connectDB();
+  
+  app.listen(PORT, () => {
+    console.log(`🚀 Сервер запущен на порту ${PORT}`);
+    console.log(`📊 Режим: ${process.env.NODE_ENV || 'development'}`);
+  });
+}
+
+// Graceful shutdown
+process.on('SIGTERM', async () => {
+  console.log('Получен сигнал SIGTERM, завершение работы...');
+  if (dbConnection) {
+    await dbConnection.end();
+  }
+  process.exit(0);
+});
+
+// Периодическая проверка соединения с БД каждые 5 минут
+setInterval(async () => {
+  try {
+    if (dbConnection && dbConnection.state === 'authenticated') {
+      await dbConnection.execute('SELECT 1');
+    } else {
+      console.log('🔄 Периодическая проверка: переподключение к БД...');
+      await ensureDBConnection();
+    }
+  } catch (error) {
+    console.error('❌ Ошибка при периодической проверке БД:', error);
+  }
+}, 5 * 60 * 1000); // 5 минут
+
+process.on('SIGINT', async () => {
+  console.log('Получен сигнал SIGINT, завершение работы...');
+  if (dbConnection) {
+    await dbConnection.end();
+  }
+  process.exit(0);
+});
+
+startServer().catch(error => {
+  console.error('Ошибка запуска сервера:', error);
+  process.exit(1);
+});

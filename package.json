@@ -1,0 +1,14 @@
+{
+  "name": "poizonic-mini-app",
+  "version": "1.0.0",
+  "description": "Telegram Mini App для заказов с Poizon",
+  "scripts": {
+    "start": "node start-local.js",
+    "install-all": "npm install && cd backend && npm install && cd ../frontend && npm install",
+    "build": "cd frontend && npm run build"
+  },
+  "keywords": ["telegram", "mini-app", "poizon", "orders"],
+  "author": "Poizonic Team",
+  "license": "MIT"
+}
+
