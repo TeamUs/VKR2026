@@ -652,7 +652,7 @@ const ReferralSystem: React.FC<ReferralSystemProps> = ({ onNavigate, toggleTheme
           • Пригласивший получает скидку на 1 неделю
         </InfoText>
         <InfoText>
-          • Комиссия снижается с 5% до 4% для обеих сторон
+          • Комиссия снижается с 5% до 2% для обеих сторон
         </InfoText>
         <InfoText>
           • Скидки можно накапливать при приглашении новых пользователей

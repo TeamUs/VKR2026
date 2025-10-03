@@ -104,50 +104,31 @@ const Content = styled.div`
 `;
 
 const Section = styled.div`
-  background: linear-gradient(135deg, 
-    rgba(255, 255, 255, 0.1) 0%, 
-    rgba(255, 255, 255, 0.05) 50%, 
-    rgba(0, 0, 0, 0.1) 100%);
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  border-radius: 20px;
-  padding: 28px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: 16px;
+  padding: 25px;
   margin-bottom: 24px;
-  backdrop-filter: blur(25px);
+  backdrop-filter: blur(10px);
   box-shadow: 
-    0 8px 32px rgba(0, 0, 0, 0.3),
-    0 2px 8px rgba(0, 0, 0, 0.2),
-    inset 0 1px 0 rgba(255, 255, 255, 0.1);
+    0 4px 20px var(--shadow-card),
+    0 2px 8px var(--shadow-soft);
   position: relative;
-  transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   animation: ${fadeIn} 0.6s ease-out forwards;
-  overflow: hidden;
-  
-  &::before {
-    content: '';
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    height: 1px;
-    background: linear-gradient(90deg, 
-      transparent, 
-      rgba(255, 255, 255, 0.3), 
-      transparent);
-  }
   
   &:hover {
-    transform: translateY(-4px);
+    transform: translateY(-2px);
     box-shadow: 
-      0 12px 40px rgba(0, 0, 0, 0.4),
-      0 4px 12px rgba(0, 0, 0, 0.3),
-      inset 0 1px 0 rgba(255, 255, 255, 0.2);
-    border-color: rgba(255, 255, 255, 0.3);
+      0 8px 30px var(--shadow-card),
+      0 4px 12px var(--shadow-soft);
+    border-color: var(--matte-red);
   }
   
   @media (max-width: 480px) {
-    padding: 24px;
+    padding: 20px;
     margin-bottom: 20px;
-    border-radius: 16px;
+    border-radius: 12px;
   }
 `;
 
@@ -200,11 +181,9 @@ const ContactSection = styled.div`
 `;
 
 const ContactButton = styled.button`
-  background: linear-gradient(135deg, 
-    var(--matte-red) 0%, 
-    var(--terracotta) 100%);
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  border-radius: 10px;
+  background: var(--matte-red);
+  border: 1px solid var(--matte-red);
+  border-radius: 12px;
   padding: 10px 18px;
   color: white;
   font-size: 0.9rem;
@@ -215,41 +194,17 @@ const ContactButton = styled.button`
   align-items: center;
   justify-content: center;
   box-shadow: 
-    0 4px 12px rgba(0, 0, 0, 0.2),
-    0 2px 4px rgba(0, 0, 0, 0.1),
-    inset 0 1px 0 rgba(255, 255, 255, 0.2);
+    0 4px 12px var(--shadow-card),
+    0 2px 6px var(--shadow-soft);
   margin-left: 16px;
-  position: relative;
-  overflow: hidden;
-  
-  &::before {
-    content: '';
-    position: absolute;
-    top: 0;
-    left: -100%;
-    width: 100%;
-    height: 100%;
-    background: linear-gradient(90deg, 
-      transparent, 
-      rgba(255, 255, 255, 0.2), 
-      transparent);
-    transition: left 0.5s;
-  }
   
   &:hover {
     transform: translateY(-2px);
     box-shadow: 
-      0 6px 20px rgba(0, 0, 0, 0.3),
-      0 3px 8px rgba(0, 0, 0, 0.2),
-      inset 0 1px 0 rgba(255, 255, 255, 0.3);
-    background: linear-gradient(135deg, 
-      var(--terracotta) 0%, 
-      var(--matte-red) 100%);
-    border-color: rgba(255, 255, 255, 0.3);
-  }
-  
-  &:hover::before {
-    left: 100%;
+      0 6px 20px var(--shadow-card),
+      0 3px 10px var(--shadow-soft);
+    background: var(--terracotta);
+    border-color: var(--terracotta);
   }
   
   @media (max-width: 480px) {
@@ -275,35 +230,18 @@ const ContactRow = styled.div`
   justify-content: space-between;
   margin-bottom: 20px;
   padding: 16px 20px;
-  background: linear-gradient(135deg, 
-    rgba(255, 255, 255, 0.05) 0%, 
-    rgba(255, 255, 255, 0.02) 100%);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
   border-radius: 12px;
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-  position: relative;
-  overflow: hidden;
-  
-  &::before {
-    content: '';
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    height: 1px;
-    background: linear-gradient(90deg, 
-      transparent, 
-      rgba(255, 255, 255, 0.2), 
-      transparent);
-  }
   
   &:hover {
     transform: translateY(-2px);
-    background: linear-gradient(135deg, 
-      rgba(255, 255, 255, 0.08) 0%, 
-      rgba(255, 255, 255, 0.04) 100%);
-    border-color: rgba(255, 255, 255, 0.2);
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+    background: var(--bg-card);
+    border-color: var(--matte-red);
+    box-shadow: 
+      0 4px 16px var(--shadow-card),
+      0 2px 8px var(--shadow-soft);
   }
   
   &:last-child {
