@@ -825,6 +825,19 @@ const QuickStatLabel = styled.div<{ $isDark: boolean }>`
   letter-spacing: 0.5px;
 `;
 
+// Глобальные стили для скрытия скроллбара
+const GlobalStyles = styled.div`
+  /* Скрытие скроллбара для WebKit браузеров */
+  .hide-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+  
+  /* Скрытие скроллбара для Firefox */
+  .hide-scrollbar {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+`;
 
 // Интерфейсы
 interface AdminStats {
@@ -892,6 +905,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
   const [yuanPurchases, setYuanPurchases] = useState<YuanPurchase[]>([]);
   const [pendingOrders, setPendingOrders] = useState<Order[]>([]);
   const [pendingYuanPurchases, setPendingYuanPurchases] = useState<YuanPurchase[]>([]);
+  const [pendingFilter, setPendingFilter] = useState<string>('all');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState('dashboard');
@@ -930,6 +944,14 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
   const [loadingDelivery, setLoadingDelivery] = useState(false);
   const [deliveryStatusFilter, setDeliveryStatusFilter] = useState<string>('all');
   const [pendingStatusUpdate, setPendingStatusUpdate] = useState<{orderId: number, status: string} | null>(null);
+  
+  // Состояния для рефералов
+  const [referralsData, setReferralsData] = useState<any[]>([]);
+  const [loadingReferrals, setLoadingReferrals] = useState(false);
+  const [referralsFilter, setReferralsFilter] = useState<string>('all');
+  const [extendDays, setExtendDays] = useState('');
+  const [selectedUserForExtension, setSelectedUserForExtension] = useState('');
+  const [showExtensionConfirm, setShowExtensionConfirm] = useState(false);
   
   // Состояния для модального окна заказа
   const [selectedOrder, setSelectedOrder] = useState<any>(null);
@@ -1430,6 +1452,119 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
     }
   };
 
+  // Загрузка данных рефералов
+  const loadReferralsData = async () => {
+    setLoadingReferrals(true);
+    try {
+      const response = await fetch('/api/admin/referrals-data', {
+        headers: {
+          'X-Telegram-User-Id': window.Telegram?.WebApp?.initDataUnsafe?.user?.id?.toString() || ''
+        }
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        setReferralsData(data.referrals || []);
+      } else {
+        console.error('Ошибка загрузки данных рефералов');
+      }
+    } catch (error) {
+      console.error('Ошибка загрузки данных рефералов:', error);
+    } finally {
+      setLoadingReferrals(false);
+    }
+  };
+
+  // Показ подтверждения продления скидки
+  const showExtensionConfirmation = () => {
+    if (!selectedUserForExtension || !extendDays) {
+      alert('Выберите пользователя и введите количество дней');
+      return;
+    }
+
+    const days = parseInt(extendDays);
+    if (isNaN(days) || days < 1 || days > 365) {
+      alert('Количество дней должно быть числом от 1 до 365');
+      return;
+    }
+
+    setShowExtensionConfirm(true);
+  };
+
+  // Подтвержденное продление скидочной комиссии
+  const confirmExtendDiscount = async () => {
+    if (!selectedUserForExtension || !extendDays) return;
+
+    const days = parseInt(extendDays);
+    if (isNaN(days) || days < 1 || days > 365) return;
+
+    try {
+      const response = await fetch('/api/admin/extend-discount', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Telegram-User-Id': window.Telegram?.WebApp?.initDataUnsafe?.user?.id?.toString() || ''
+        },
+        body: JSON.stringify({
+          telegramId: selectedUserForExtension,
+          days: days
+        })
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        alert(result.message);
+        setExtendDays('');
+        setSelectedUserForExtension('');
+        setShowExtensionConfirm(false);
+        HapticFeedback.success();
+        // Перезагружаем данные рефералов
+        loadReferralsData();
+      } else {
+        const error = await response.json();
+        alert(error.error || 'Ошибка продления скидки');
+        HapticFeedback.error();
+      }
+    } catch (error) {
+      console.error('Ошибка продления скидки:', error);
+      alert('Ошибка продления скидки');
+      HapticFeedback.error();
+    }
+  };
+
+  // Отмена продления скидки
+  const cancelExtension = () => {
+    setShowExtensionConfirm(false);
+  };
+
+  // Скролл к форме продления скидки
+  const scrollToExtensionForm = () => {
+    const extensionForm = document.getElementById('extension-form');
+    if (extensionForm) {
+      extensionForm.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  };
+
+  // Скролл к началу раздела
+  const scrollToSection = (tabName: string) => {
+    setTimeout(() => {
+      const section = document.getElementById(`${tabName}-section`);
+      if (section) {
+        section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    }, 100);
+  };
+
+  // Быстрое продление скидки
+  const quickExtendDiscount = (telegramId: string, days: number) => {
+    setSelectedUserForExtension(telegramId);
+    setExtendDays(days.toString());
+    setShowExtensionConfirm(true);
+    setTimeout(() => {
+      scrollToExtensionForm();
+    }, 100);
+  };
+
   // Выбор заказа для расчета прибыли
   const selectOrderForProfit = (order: any) => {
     setSelectedOrderForProfit(order);
@@ -1447,6 +1582,14 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
     setCalculatedProfit(null);
     setCustomerTotal(0);
     setMyTotal(0);
+    
+    // Автоскролл к окнам ввода данных
+    setTimeout(() => {
+      const inputsSection = document.getElementById('profit-calculator-inputs');
+      if (inputsSection) {
+        inputsSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    }, 100);
     
     HapticFeedback.light();
   };
@@ -1778,6 +1921,18 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
     setCurrentPage(1);
   }, [searchTerm, sortBy, sortOrder, activeTab]);
 
+  // Автоскролл к разделу при изменении activeTab
+  useEffect(() => {
+    if (activeTab) {
+      setTimeout(() => {
+        const section = document.getElementById(`${activeTab}-section`);
+        if (section) {
+          section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+      }, 100);
+    }
+  }, [activeTab]);
+
   const handleSort = (field: string) => {
     if (sortBy === field) {
       setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
@@ -1826,6 +1981,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
 
   return (
     <AdminContainer>
+      <GlobalStyles />
       <Header>
         <BackButton onClick={() => onNavigate('profile')}>
           ‹
@@ -1847,7 +2003,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
             border: '1px solid var(--border-color)',
             boxShadow: '0 4px 16px rgba(0, 0, 0, 0.08)'
           }}>
-            {/* Основное */}
+            {/* Требуют действия */}
             <div style={{ marginBottom: '12px' }}>
               <div style={{ 
                 fontSize: '0.85rem', 
@@ -1858,12 +2014,12 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
                 opacity: 0.9,
                 letterSpacing: '1px'
               }}>
-                ОСНОВНОЕ
+                ТРЕБУЮТ ДЕЙСТВИЯ
               </div>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px' }}>
-                <TabButton $active={activeTab === 'dashboard'} $isDark={isDarkTheme} onClick={() => setActiveTab('dashboard')}>
-                  <div style={{ fontSize: '20px', marginBottom: '4px' }}>📊</div>
-                  <div>Дашборд</div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '8px' }}>
+                <TabButton $active={activeTab === 'delivery'} $isDark={isDarkTheme} onClick={() => { setActiveTab('delivery'); loadDeliveryOrders(); }}>
+                  <div style={{ fontSize: '20px', marginBottom: '4px' }}>🚚</div>
+                  <div>Доставка</div>
                 </TabButton>
                 <TabButton $active={activeTab === 'pending'} $isDark={isDarkTheme} onClick={() => setActiveTab('pending')}>
                   <div style={{ fontSize: '20px', marginBottom: '4px' }}>⏳</div>
@@ -1884,9 +2040,41 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
                     </div>
                   )}
                 </TabButton>
-                <TabButton $active={activeTab === 'notifications'} $isDark={isDarkTheme} onClick={() => setActiveTab('notifications')}>
-                  <div style={{ fontSize: '20px', marginBottom: '4px' }}>📢</div>
-                  <div>Уведомл.</div>
+              </div>
+            </div>
+
+            {/* Разделитель */}
+            <div style={{ 
+              height: '1px', 
+              background: 'linear-gradient(90deg, transparent, var(--border-color), transparent)',
+              margin: '12px 0'
+            }} />
+
+            {/* Общее */}
+            <div style={{ marginBottom: '12px' }}>
+              <div style={{ 
+                fontSize: '0.85rem', 
+                fontWeight: '700', 
+                color: 'var(--matte-red)', 
+                marginBottom: '8px',
+                paddingLeft: '4px',
+                opacity: 0.9,
+                letterSpacing: '1px'
+              }}>
+                ОБЩЕЕ
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px' }}>
+                <TabButton $active={activeTab === 'dashboard'} $isDark={isDarkTheme} onClick={() => setActiveTab('dashboard')}>
+                  <div style={{ fontSize: '20px', marginBottom: '4px' }}>🏠</div>
+                  <div>Дашборд</div>
+                </TabButton>
+                <TabButton $active={activeTab === 'analytics'} $isDark={isDarkTheme} onClick={() => { setActiveTab('analytics'); loadSalesAnalytics(analyticsPeriod); }}>
+                  <div style={{ fontSize: '20px', marginBottom: '4px' }}>📈</div>
+                  <div>Аналитика</div>
+                </TabButton>
+                <TabButton $active={activeTab === 'monitoring'} $isDark={isDarkTheme} onClick={() => { setActiveTab('monitoring'); loadSystemStatus(); }}>
+                  <div style={{ fontSize: '20px', marginBottom: '4px' }}>🔧</div>
+                  <div>Монитор.</div>
                 </TabButton>
               </div>
             </div>
@@ -1924,9 +2112,9 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
                   <div style={{ fontSize: '20px', marginBottom: '4px' }}>💰</div>
                   <div>Юани</div>
                 </TabButton>
-                <TabButton $active={activeTab === 'delivery'} $isDark={isDarkTheme} onClick={() => { setActiveTab('delivery'); loadDeliveryOrders(); }}>
-                  <div style={{ fontSize: '20px', marginBottom: '4px' }}>🚚</div>
-                  <div>Доставка</div>
+                <TabButton $active={activeTab === 'referrals'} $isDark={isDarkTheme} onClick={() => { setActiveTab('referrals'); loadReferralsData(); }}>
+                  <div style={{ fontSize: '20px', marginBottom: '4px' }}>🔗</div>
+                  <div>Рефералы</div>
                 </TabButton>
               </div>
             </div>
@@ -1938,7 +2126,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
               margin: '12px 0'
             }} />
 
-            {/* Аналитика и управление */}
+            {/* Уведомления и управление */}
             <div style={{ marginBottom: '12px' }}>
               <div style={{ 
                 fontSize: '0.85rem', 
@@ -1949,16 +2137,12 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
                 opacity: 0.9,
                 letterSpacing: '1px'
               }}>
-                АНАЛИТИКА & УПРАВЛЕНИЕ
+                УВЕДОМЛЕНИЯ & УПРАВЛЕНИЕ
               </div>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px' }}>
-                <TabButton $active={activeTab === 'monitoring'} $isDark={isDarkTheme} onClick={() => { setActiveTab('monitoring'); loadSystemStatus(); }}>
-                  <div style={{ fontSize: '20px', marginBottom: '4px' }}>🔧</div>
-                  <div>Монитор.</div>
-                </TabButton>
-                <TabButton $active={activeTab === 'analytics'} $isDark={isDarkTheme} onClick={() => { setActiveTab('analytics'); loadSalesAnalytics(analyticsPeriod); }}>
-                  <div style={{ fontSize: '20px', marginBottom: '4px' }}>📊</div>
-                  <div>Аналитика</div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '8px' }}>
+                <TabButton $active={activeTab === 'notifications'} $isDark={isDarkTheme} onClick={() => setActiveTab('notifications')}>
+                  <div style={{ fontSize: '20px', marginBottom: '4px' }}>📢</div>
+                  <div>Уведомл.</div>
                 </TabButton>
                 <TabButton $active={activeTab === 'user-management'} $isDark={isDarkTheme} onClick={() => setActiveTab('user-management')}>
                   <div style={{ fontSize: '20px', marginBottom: '4px' }}>⚙️</div>
@@ -2002,7 +2186,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
         </RefreshButton>
 
         {activeTab === 'dashboard' && stats && (
-          <Section $isDark={isDarkTheme}>
+          <Section id="dashboard-section" $isDark={isDarkTheme}>
             <SectionTitle>📊 Общая статистика</SectionTitle>
             <QuickStatsGrid>
               <QuickStatCard $isDark={isDarkTheme}>
@@ -2050,7 +2234,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
         )}
 
         {activeTab === 'pending' && (
-          <Section $isDark={isDarkTheme}>
+          <Section id="pending-section" $isDark={isDarkTheme}>
             <SectionTitle>⏳ Заказы, ожидающие подтверждения</SectionTitle>
             
             <SearchContainer>
@@ -2061,6 +2245,11 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
               />
+              <FilterSelect $isDark={isDarkTheme} value={pendingFilter} onChange={(e) => setPendingFilter(e.target.value)}>
+                <option value="all">Все</option>
+                <option value="orders">Оформление заказов</option>
+                <option value="yuan">Покупка юаней</option>
+              </FilterSelect>
               <FilterSelect $isDark={isDarkTheme} value={sortBy} onChange={(e) => setSortBy(e.target.value)}>
                 <option value="created_at">По дате</option>
                 <option value="full_name">По имени</option>
@@ -2075,7 +2264,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
             </SearchContainer>
             
             {/* Заказы товаров */}
-            {pendingOrders.length > 0 && (
+            {pendingOrders.length > 0 && (pendingFilter === 'all' || pendingFilter === 'orders') && (
               <div style={{ marginBottom: '32px' }}>
                 <h3 style={{ color: 'var(--text-primary)', marginBottom: '16px', fontSize: '1.2rem' }}>
                   📦 Заказы товаров ({pendingOrders.length})
@@ -2232,7 +2421,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
             )}
 
             {/* Покупки юаней */}
-            {pendingYuanPurchases.length > 0 && (
+            {pendingYuanPurchases.length > 0 && (pendingFilter === 'all' || pendingFilter === 'yuan') && (
               <div>
                 <h3 style={{ color: 'var(--text-primary)', marginBottom: '16px', fontSize: '1.2rem' }}>
                   💰 Покупки юаней ({pendingYuanPurchases.length})
@@ -2371,17 +2560,28 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
         )}
 
         {activeTab === 'users' && (
-          <Section $isDark={isDarkTheme}>
+          <Section id="users-section" $isDark={isDarkTheme}>
             <SectionTitle>👥 Пользователи ({users.length})</SectionTitle>
             
-            <SearchContainer>
-              <SearchInput
-                $isDark={isDarkTheme}
-                type="text"
-                placeholder="🔍 Поиск по имени, username, ID, заказам, экономии..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-              />
+            {/* Фильтры в одной строке */}
+            <div style={{ 
+              display: 'flex',
+              gap: '12px', 
+              marginBottom: '16px',
+              width: '100%',
+              alignItems: 'center',
+              flexWrap: 'wrap'
+            }}>
+              <div style={{ flex: '1 1 auto', minWidth: '200px' }}>
+                <SearchInput
+                  $isDark={isDarkTheme}
+                  type="text"
+                  placeholder="🔍 Поиск по имени, username, ID, заказам, экономии..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  style={{ width: '100%' }}
+                />
+              </div>
               <FilterSelect $isDark={isDarkTheme} value={sortBy} onChange={(e) => setSortBy(e.target.value)}>
                 <option value="created_at">По дате</option>
                 <option value="full_name">По имени</option>
@@ -2398,10 +2598,16 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
                 <option value={20}>20 на странице</option>
                 <option value={50}>50 на странице</option>
               </FilterSelect>
-            </SearchContainer>
+            </div>
             
-            {users.length > 0 ? (
-              <CompactTable $isDark={isDarkTheme}>
+            {/* Ограниченное окно со скроллом */}
+            <div className="hide-scrollbar" style={{ 
+              maxHeight: '500px',
+              overflowY: 'auto',
+              paddingRight: '8px'
+            }}>
+              {users.length > 0 ? (
+                <CompactTable $isDark={isDarkTheme}>
                   <thead>
                     <tr>
                       <CompactTableHeader $isDark={isDarkTheme} onClick={() => handleSort('telegram_id')}>
@@ -2469,42 +2675,20 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
                     ))}
                   </tbody>
                 </CompactTable>
-            ) : (
-              <EmptyState>Пользователи не найдены</EmptyState>
-            )}
-            
-            {/* Пагинация для пользователей */}
-            {users.length > 0 && (
-              <PaginationContainer $isDark={isDarkTheme}>
-                <PaginationInfo $isDark={isDarkTheme}>
-                  Показано {startIndex + 1}-{Math.min(endIndex, filteredAndSortedData.length)} из {filteredAndSortedData.length}
-                </PaginationInfo>
-                <PaginationControls>
-                  <PageButton
-                    $isDark={isDarkTheme}
-                    onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
-                    disabled={currentPage === 1}
-                  >
-                    ←
-                  </PageButton>
-                  <PageButton $isDark={isDarkTheme} $active>
-                    {currentPage}
-                  </PageButton>
-                  <PageButton
-                    $isDark={isDarkTheme}
-                    onClick={() => setCurrentPage(Math.min(totalPages, currentPage + 1))}
-                    disabled={currentPage === totalPages}
-                  >
-                    →
-                  </PageButton>
-                </PaginationControls>
-              </PaginationContainer>
-            )}
+              ) : (
+                <EmptyState>Пользователи не найдены</EmptyState>
+              )}
+            </div>
             
             {/* Мобильные карточки для пользователей */}
             {users.length > 0 && (
-              <MobileCardContainer $isDark={isDarkTheme}>
-                {paginatedData.map((user, index) => (
+              <div className="hide-scrollbar" style={{ 
+                maxHeight: '500px',
+                overflowY: 'auto',
+                paddingRight: '8px'
+              }}>
+                <MobileCardContainer $isDark={isDarkTheme}>
+                  {filteredAndSortedData.map((user, index) => (
                   <MobileCard key={`mobile-user-${user.telegram_id}-${index}`} $isDark={isDarkTheme}>
                     <MobileCardHeader $isDark={isDarkTheme}>
                       <MobileCardTitle $isDark={isDarkTheme}>
@@ -2571,14 +2755,15 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
                       </MobileCardRow>
                     </MobileCardContent>
                   </MobileCard>
-                ))}
-              </MobileCardContainer>
+                  ))}
+                </MobileCardContainer>
+              </div>
             )}
           </Section>
         )}
 
         {activeTab === 'orders' && (
-          <Section $isDark={isDarkTheme}>
+          <Section id="orders-section" $isDark={isDarkTheme}>
             <SectionTitle>📦 Заказы ({orders.length})</SectionTitle>
             
             {/* Поиск */}
@@ -2632,8 +2817,14 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
               </div>
             </div>
             
-            {orders.length > 0 ? (
-              <CompactTable $isDark={isDarkTheme}>
+            {/* Ограниченное окно со скроллом */}
+            <div className="hide-scrollbar" style={{ 
+              maxHeight: '500px',
+              overflowY: 'auto',
+              paddingRight: '8px'
+            }}>
+              {orders.length > 0 ? (
+                <CompactTable $isDark={isDarkTheme}>
                   <thead>
                     <tr>
                       <CompactTableHeader $isDark={isDarkTheme} onClick={() => handleSort('order_id')}>
@@ -2707,43 +2898,21 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
                       </CompactTableRow>
                     ))}
                   </tbody>
-              </CompactTable>
-            ) : (
-              <EmptyState>Заказы не найдены</EmptyState>
-            )}
-            
-            {/* Пагинация для заказов */}
-            {orders.length > 0 && (
-              <PaginationContainer $isDark={isDarkTheme}>
-                <PaginationInfo $isDark={isDarkTheme}>
-                  Показано {startIndex + 1}-{Math.min(endIndex, filteredAndSortedData.length)} из {filteredAndSortedData.length}
-                </PaginationInfo>
-                <PaginationControls>
-                  <PageButton
-                    $isDark={isDarkTheme}
-                    onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
-                    disabled={currentPage === 1}
-                  >
-                    ←
-                  </PageButton>
-                  <PageButton $isDark={isDarkTheme} $active>
-                    {currentPage}
-                  </PageButton>
-                  <PageButton
-                    $isDark={isDarkTheme}
-                    onClick={() => setCurrentPage(Math.min(totalPages, currentPage + 1))}
-                    disabled={currentPage === totalPages}
-                  >
-                    →
-                  </PageButton>
-                </PaginationControls>
-              </PaginationContainer>
-            )}
+                </CompactTable>
+              ) : (
+                <EmptyState>Заказы не найдены</EmptyState>
+              )}
+            </div>
             
             {/* Мобильные карточки для заказов */}
             {orders.length > 0 && (
-              <MobileCardContainer $isDark={isDarkTheme}>
-                {paginatedData.map((order, index) => (
+              <div className="hide-scrollbar" style={{ 
+                maxHeight: '500px',
+                overflowY: 'auto',
+                paddingRight: '8px'
+              }}>
+                <MobileCardContainer $isDark={isDarkTheme}>
+                  {filteredAndSortedData.map((order, index) => (
                   <MobileCard key={`mobile-order-${order.order_id}-${index}`} $isDark={isDarkTheme}>
                     <MobileCardHeader $isDark={isDarkTheme}>
                       <MobileCardTitle $isDark={isDarkTheme}>
@@ -2835,24 +3004,36 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
                       </MobileCardRow>
                     </MobileCardContent>
                   </MobileCard>
-                ))}
-              </MobileCardContainer>
+                  ))}
+                </MobileCardContainer>
+              </div>
             )}
           </Section>
         )}
 
         {activeTab === 'yuan' && (
-          <Section $isDark={isDarkTheme}>
+          <Section id="yuan-section" $isDark={isDarkTheme}>
             <SectionTitle>💰 Покупки юаней ({yuanPurchases.length})</SectionTitle>
             
-            <SearchContainer>
-              <SearchInput
-                $isDark={isDarkTheme}
-                type="text"
-                placeholder="🔍 Поиск по имени, username, ID, сумме, статусу..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-              />
+            {/* Фильтры в одной строке */}
+            <div style={{ 
+              display: 'flex',
+              gap: '12px', 
+              marginBottom: '16px',
+              width: '100%',
+              alignItems: 'center',
+              flexWrap: 'wrap'
+            }}>
+              <div style={{ flex: '1 1 auto', minWidth: '200px' }}>
+                <SearchInput
+                  $isDark={isDarkTheme}
+                  type="text"
+                  placeholder="🔍 Поиск по имени, username, ID, сумме, статусу..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  style={{ width: '100%' }}
+                />
+              </div>
               <FilterSelect $isDark={isDarkTheme} value={sortBy} onChange={(e) => setSortBy(e.target.value)}>
                 <option value="created_at">По дате</option>
                 <option value="full_name">По имени</option>
@@ -2869,9 +3050,15 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
                 <option value={20}>20 на странице</option>
                 <option value={50}>50 на странице</option>
               </FilterSelect>
-            </SearchContainer>
+            </div>
             
-            {yuanPurchases.length > 0 ? (
+            {/* Ограниченное окно со скроллом */}
+            <div className="hide-scrollbar" style={{ 
+              maxHeight: '500px',
+              overflowY: 'auto',
+              paddingRight: '8px'
+            }}>
+              {yuanPurchases.length > 0 ? (
               <CompactTable $isDark={isDarkTheme}>
                   <thead>
                     <tr>
@@ -2926,43 +3113,21 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
                       </CompactTableRow>
                     ))}
                   </tbody>
-              </CompactTable>
-            ) : (
-              <EmptyState>Покупки юаней не найдены</EmptyState>
-            )}
-            
-            {/* Пагинация для покупок юаней */}
-            {yuanPurchases.length > 0 && (
-              <PaginationContainer $isDark={isDarkTheme}>
-                <PaginationInfo $isDark={isDarkTheme}>
-                  Показано {startIndex + 1}-{Math.min(endIndex, filteredAndSortedData.length)} из {filteredAndSortedData.length}
-                </PaginationInfo>
-                <PaginationControls>
-                  <PageButton
-                    $isDark={isDarkTheme}
-                    onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
-                    disabled={currentPage === 1}
-                  >
-                    ←
-                  </PageButton>
-                  <PageButton $isDark={isDarkTheme} $active>
-                    {currentPage}
-                  </PageButton>
-                  <PageButton
-                    $isDark={isDarkTheme}
-                    onClick={() => setCurrentPage(Math.min(totalPages, currentPage + 1))}
-                    disabled={currentPage === totalPages}
-                  >
-                    →
-                  </PageButton>
-                </PaginationControls>
-              </PaginationContainer>
-            )}
+                </CompactTable>
+              ) : (
+                <EmptyState>Покупки юаней не найдены</EmptyState>
+              )}
+            </div>
             
             {/* Мобильные карточки для покупок юаней */}
             {yuanPurchases.length > 0 && (
-              <MobileCardContainer $isDark={isDarkTheme}>
-                {paginatedData.map((purchase, index) => (
+              <div className="hide-scrollbar" style={{ 
+                maxHeight: '500px',
+                overflowY: 'auto',
+                paddingRight: '8px'
+              }}>
+                <MobileCardContainer $isDark={isDarkTheme}>
+                  {filteredAndSortedData.map((purchase, index) => (
                   <MobileCard key={`mobile-yuan-${purchase.id}-${index}`} $isDark={isDarkTheme}>
                     <MobileCardHeader $isDark={isDarkTheme}>
                       <MobileCardTitle $isDark={isDarkTheme}>
@@ -3011,14 +3176,15 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
                       </MobileCardRow>
                     </MobileCardContent>
                   </MobileCard>
-                ))}
-              </MobileCardContainer>
+                  ))}
+                </MobileCardContainer>
+              </div>
             )}
           </Section>
         )}
 
         {activeTab === 'notifications' && (
-          <Section $isDark={isDarkTheme}>
+          <Section id="notifications-section" $isDark={isDarkTheme}>
             <SectionTitle>📢 Отправка уведомлений</SectionTitle>
             
             <div style={{ marginBottom: '24px' }}>
@@ -3107,9 +3273,13 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
               </label>
               <textarea
                 value={notificationMessage}
-                onChange={(e) => setNotificationMessage(e.target.value)}
+                onChange={(e) => {
+                  setNotificationMessage(e.target.value);
+                  // Автоувеличение высоты
+                  e.target.style.height = 'auto';
+                  e.target.style.height = Math.max(100, e.target.scrollHeight) + 'px';
+                }}
                 placeholder="Введите текст уведомления..."
-                rows={4}
                 style={{
                   width: '100%',
                   padding: '12px',
@@ -3118,8 +3288,9 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
                   backgroundColor: 'var(--bg-card)',
                   color: 'var(--text-primary)',
                   fontSize: '1rem',
-                  resize: 'vertical',
-                  minHeight: '100px'
+                  resize: 'none',
+                  minHeight: '100px',
+                  overflow: 'hidden'
                 }}
               />
             </div>
@@ -3132,7 +3303,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
                 padding: '16px',
                 borderRadius: '12px',
                 border: 'none',
-                backgroundColor: sendingNotification ? 'var(--text-secondary)' : 'var(--primary-color)',
+                backgroundColor: sendingNotification ? 'var(--text-secondary)' : 'var(--matte-red)',
                 color: 'white',
                 fontSize: '1.1rem',
                 fontWeight: 'bold',
@@ -3162,7 +3333,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
         )}
 
         {activeTab === 'monitoring' && (
-          <Section $isDark={isDarkTheme}>
+          <Section id="monitoring-section" $isDark={isDarkTheme}>
             <SectionTitle>🔧 Мониторинг системы</SectionTitle>
             
             {systemStatus ? (
@@ -3256,7 +3427,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
         )}
 
         {activeTab === 'analytics' && (
-          <Section $isDark={isDarkTheme}>
+          <Section id="analytics-section" $isDark={isDarkTheme}>
             <SectionTitle>📊 Аналитика продаж</SectionTitle>
             
             {/* Компактный блок фильтров */}
@@ -3843,7 +4014,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
         )}
 
         {activeTab === 'user-management' && (
-          <Section $isDark={isDarkTheme}>
+          <Section id="user-management-section" $isDark={isDarkTheme}>
             <SectionTitle>👤 Управление пользователями</SectionTitle>
             
             {/* Изменение комиссии */}
@@ -3963,7 +4134,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
                       padding: '12px 20px',
                       borderRadius: '8px',
                       border: 'none',
-                      backgroundColor: (selectedUserForHistory && !loadingUserHistory) ? 'var(--primary-color)' : 'var(--text-secondary)',
+                      backgroundColor: (selectedUserForHistory && !loadingUserHistory) ? 'var(--matte-red)' : 'var(--text-secondary)',
                       color: 'white',
                       fontSize: '1rem',
                       fontWeight: 'bold',
@@ -4042,13 +4213,9 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
                               borderRadius: '8px',
                               cursor: 'pointer',
                               transition: 'all 0.3s ease',
-                              border: '1px solid transparent',
-                              ':hover': {
-                                backgroundColor: 'var(--primary-color)',
-                                color: 'white',
-                                transform: 'translateY(-2px)',
-                                boxShadow: '0 4px 12px rgba(0,0,0,0.15)'
-                              }
+                              border: '2px solid var(--matte-red)',
+                              boxShadow: '0 4px 12px rgba(220, 38, 38, 0.2)',
+                              transform: 'scale(1.02)'
                             }}
                             onMouseEnter={(e) => {
                               e.currentTarget.style.backgroundColor = 'var(--primary-color)';
@@ -4112,7 +4279,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
 
         {/* Калькулятор прибыли */}
         {activeTab === 'profit-calculator' && (
-          <Section $isDark={isDarkTheme}>
+          <Section id="profit-calculator-section" $isDark={isDarkTheme}>
             <SectionTitle>💰 Калькулятор прибыли</SectionTitle>
             
             <p style={{ 
@@ -4221,7 +4388,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
             </div>
 
             {selectedOrderForProfit && (
-              <>
+              <div id="profit-calculator-inputs">
                 {/* Сколько заплатил покупатель */}
                 <div style={{ 
                   marginBottom: '20px',
@@ -4710,7 +4877,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
                     </div>
                   </div>
                 )}
-              </>
+              </div>
             )}
           </Section>
         )}
@@ -4727,21 +4894,26 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
           bottom: 0,
           backgroundColor: 'rgba(0, 0, 0, 0.5)',
           display: 'flex',
-          alignItems: 'center',
+          alignItems: 'flex-start',
           justifyContent: 'center',
           zIndex: 1000,
-          padding: '20px'
+          padding: '20px',
+          backdropFilter: 'blur(5px)',
+          overflowY: 'auto'
         }}>
           <div style={{
             backgroundColor: 'var(--bg-card)',
             borderRadius: '16px',
             padding: '24px',
-            maxWidth: '500px',
+            maxWidth: '90vw',
+            maxHeight: '90vh',
             width: '100%',
-            maxHeight: '80vh',
             overflowY: 'auto',
             border: '1px solid var(--border-color)',
-            boxShadow: '0 20px 40px rgba(0, 0, 0, 0.3)'
+            boxShadow: '0 20px 40px rgba(0, 0, 0, 0.3)',
+            position: 'relative',
+            marginTop: '5vh',
+            marginBottom: '5vh'
           }}>
             {/* Заголовок модального окна */}
             <div style={{
@@ -5003,7 +5175,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
 
         {/* Раздел доставки */}
         {activeTab === 'delivery' && (
-          <Section $isDark={isDarkTheme}>
+          <Section id="delivery-section" $isDark={isDarkTheme}>
             <SectionTitle>🚚 Управление доставкой</SectionTitle>
             
             <p style={{ 
@@ -5014,25 +5186,27 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
               Отслеживание и обновление статусов доставки всех заказов
             </p>
 
-            {/* Фильтр по статусу */}
+            {/* Фильтры в одной строке */}
             <div style={{ 
-              marginBottom: '20px',
-              padding: '12px',
-              backgroundColor: 'var(--bg-secondary)',
-              borderRadius: '8px',
-              border: '1px solid var(--border-color)'
+              display: 'flex',
+              gap: '12px', 
+              marginBottom: '16px',
+              width: '100%',
+              alignItems: 'center',
+              flexWrap: 'wrap'
             }}>
-              <label style={{ 
-                display: 'block', 
-                marginBottom: '8px',
-                color: 'var(--text-secondary)',
-                fontSize: '0.85rem',
-                fontWeight: '500'
-              }}>
-                🔍 Фильтр по статусу:
-              </label>
-              <select
-                value={deliveryStatusFilter}
+              <div style={{ flex: '1 1 auto', minWidth: '200px' }}>
+                <label style={{ 
+                  display: 'block', 
+                  marginBottom: '4px',
+                  color: 'var(--text-secondary)',
+                  fontSize: '0.85rem',
+                  fontWeight: '500'
+                }}>
+                  🔍 Фильтр по статусу:
+                </label>
+                <select
+                  value={deliveryStatusFilter}
                 onChange={(e) => setDeliveryStatusFilter(e.target.value)}
                 style={{
                   width: '100%',
@@ -5052,7 +5226,8 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
                 <option value="Отправлен на таможню">🏛️ Отправлен на таможню</option>
                 <option value="Доставка в РФ">🇷🇺 Доставка в РФ</option>
                 <option value="Доставлен">✅ Доставлен</option>
-              </select>
+                </select>
+              </div>
             </div>
 
             {loadingDelivery ? (
@@ -5296,6 +5471,331 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
             )}
           </Section>
         )}
+
+        {/* Раздел рефералов */}
+        {activeTab === 'referrals' && (
+          <Section id="referrals-section" $isDark={isDarkTheme}>
+            <SectionTitle>🔗 Реферальная система</SectionTitle>
+            
+            {/* Продление скидки */}
+            <div id="extension-form" style={{ 
+              marginBottom: '8px',
+              padding: '16px',
+              background: 'var(--bg-secondary)',
+              borderRadius: '12px',
+              border: '1px solid var(--border-color)'
+            }}>
+              <h3 style={{ color: 'var(--text-primary)', marginBottom: '8px', fontSize: '1.1rem' }}>⏰ Продление скидочной комиссии</h3>
+              
+              <div style={{ display: 'grid', gap: '8px' }}>
+                <div>
+                  <label style={{ display: 'block', marginBottom: '4px', color: 'var(--text-primary)', fontWeight: 'bold' }}>
+                    Выберите пользователя:
+                  </label>
+                  <select
+                    value={selectedUserForExtension}
+                    onChange={(e) => setSelectedUserForExtension(e.target.value)}
+                    style={{
+                      width: '100%',
+                      padding: '12px',
+                      borderRadius: '8px',
+                      border: '1px solid var(--border-color)',
+                      background: 'var(--bg-card)',
+                      color: 'var(--text-primary)',
+                      fontSize: '1rem'
+                    }}
+                  >
+                    <option value="">Выберите пользователя...</option>
+                    {users.map((user) => (
+                      <option key={user.telegram_id} value={user.telegram_id}>
+                        {user.full_name || user.username || `ID: ${user.telegram_id}`}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', marginBottom: '4px', color: 'var(--text-primary)', fontWeight: 'bold' }}>
+                    Количество дней для продления:
+                  </label>
+                  <input
+                    type="number"
+                    value={extendDays}
+                    onChange={(e) => setExtendDays(e.target.value)}
+                    placeholder="7"
+                    min="1"
+                    max="365"
+                    style={{
+                      width: '100%',
+                      padding: '12px',
+                      borderRadius: '8px',
+                      border: '1px solid var(--border-color)',
+                      background: 'var(--bg-card)',
+                      color: 'var(--text-primary)',
+                      fontSize: '1rem'
+                    }}
+                  />
+                </div>
+
+                <button
+                  onClick={showExtensionConfirmation}
+                  disabled={!selectedUserForExtension || !extendDays}
+                  style={{
+                    width: '100%',
+                    padding: '12px',
+                    borderRadius: '8px',
+                    border: 'none',
+                    backgroundColor: selectedUserForExtension && extendDays ? 'var(--matte-red)' : 'var(--text-secondary)',
+                    color: 'white',
+                    fontSize: '1rem',
+                    fontWeight: 'bold',
+                    cursor: selectedUserForExtension && extendDays ? 'pointer' : 'not-allowed',
+                    opacity: selectedUserForExtension && extendDays ? 1 : 0.7,
+                    transition: 'all 0.3s ease'
+                  }}
+                >
+                  ⏰ Продлить скидку
+                </button>
+
+                {/* Подтверждение продления скидки */}
+                {showExtensionConfirm && (
+                  <div style={{
+                    marginTop: '8px',
+                    padding: '12px',
+                    borderRadius: '8px',
+                    border: '1px solid var(--border-color)',
+                    background: 'var(--bg-card)',
+                    textAlign: 'center'
+                  }}>
+                    <h4 style={{
+                      color: 'var(--text-primary)',
+                      marginBottom: '8px',
+                      fontSize: '1.1rem'
+                    }}>
+                      ⚠️ Подтверждение продления скидки
+                    </h4>
+                    
+                    <div style={{
+                      marginBottom: '8px',
+                      color: 'var(--text-secondary)',
+                      fontSize: '0.95rem'
+                    }}>
+                      <p><strong>Пользователь:</strong> {users.find(u => u.telegram_id === selectedUserForExtension)?.full_name || users.find(u => u.telegram_id === selectedUserForExtension)?.username || `ID: ${selectedUserForExtension}`}</p>
+                      <p><strong>Продлить на:</strong> {extendDays} дн.</p>
+                    </div>
+
+                    <div style={{ display: 'flex', gap: '12px', justifyContent: 'center' }}>
+                      <button
+                        onClick={confirmExtendDiscount}
+                        style={{
+                          padding: '10px 20px',
+                          borderRadius: '6px',
+                          border: 'none',
+                          backgroundColor: 'var(--matte-red)',
+                          color: 'white',
+                          fontSize: '0.95rem',
+                          fontWeight: 'bold',
+                          cursor: 'pointer',
+                          transition: 'all 0.3s ease'
+                        }}
+                      >
+                        ✅ Подтвердить
+                      </button>
+                      
+                      <button
+                        onClick={cancelExtension}
+                        style={{
+                          padding: '10px 20px',
+                          borderRadius: '6px',
+                          border: '1px solid var(--border-color)',
+                          backgroundColor: 'var(--bg-card)',
+                          color: 'var(--text-primary)',
+                          fontSize: '0.95rem',
+                          fontWeight: 'bold',
+                          cursor: 'pointer',
+                          transition: 'all 0.3s ease'
+                        }}
+                      >
+                        ❌ Отменить
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+            
+            {/* Фильтры в одной строке */}
+            <div style={{ 
+              display: 'flex',
+              gap: '12px', 
+              marginBottom: '16px',
+              width: '100%',
+              alignItems: 'center',
+              flexWrap: 'wrap'
+            }}>
+              <div style={{ flex: '1 1 auto', minWidth: '200px' }}>
+                <select
+                  value={referralsFilter}
+                  onChange={(e) => setReferralsFilter(e.target.value)}
+                  style={{
+                    width: '100%',
+                    padding: '8px 12px',
+                    borderRadius: '8px',
+                    border: '1px solid var(--border-color)',
+                    background: 'var(--bg-card)',
+                    color: 'var(--text-primary)',
+                    fontSize: '0.9rem'
+                  }}
+                >
+                <option value="all">Все рефералы</option>
+                <option value="active">Активные скидки</option>
+                <option value="expired">Истекшие скидки</option>
+                <option value="new">Новые (сегодня)</option>
+                </select>
+              </div>
+            </div>
+
+            {loadingReferrals ? (
+              <div style={{ textAlign: 'center', padding: '40px' }}>
+                <div style={{ fontSize: '2rem', marginBottom: '10px' }}>⏳</div>
+                <p style={{ color: 'var(--text-secondary)' }}>Загрузка данных рефералов...</p>
+              </div>
+            ) : (
+              <div>
+                {(() => {
+                  // Фильтрация данных рефералов
+                  let filteredReferrals = referralsData;
+                  
+                  if (referralsFilter === 'active') {
+                    filteredReferrals = referralsData.filter(r => r.is_expired === 0);
+                  } else if (referralsFilter === 'expired') {
+                    filteredReferrals = referralsData.filter(r => r.is_expired === 1);
+                  } else if (referralsFilter === 'new') {
+                    const today = new Date();
+                    today.setHours(0, 0, 0, 0);
+                    filteredReferrals = referralsData.filter(r => {
+                      const activatedDate = new Date(r.activated_at);
+                      activatedDate.setHours(0, 0, 0, 0);
+                      return activatedDate.getTime() === today.getTime();
+                    });
+                  }
+                  
+                  return filteredReferrals.length === 0 ? (
+                    <div style={{ textAlign: 'center', padding: '40px' }}>
+                      <div style={{ fontSize: '2rem', marginBottom: '10px' }}>🔗</div>
+                      <p style={{ color: 'var(--text-secondary)' }}>Нет данных о рефералах</p>
+                    </div>
+                  ) : (
+                    <div style={{ 
+                      maxHeight: '400px',
+                      overflowY: 'auto',
+                      paddingRight: '8px'
+                    }}>
+                      <div style={{ display: 'grid', gap: '12px' }}>
+                        {filteredReferrals.map((referral, index) => (
+                      <div
+                        key={index}
+                        style={{
+                          background: 'var(--bg-secondary)',
+                          border: '1px solid var(--border-color)',
+                          borderRadius: '12px',
+                          padding: '16px',
+                          transition: 'all 0.3s ease'
+                        }}
+                      >
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '12px' }}>
+                          <div>
+                            <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '4px' }}>Реферер</div>
+                            <div style={{ fontWeight: 'bold', color: 'var(--text-primary)' }}>
+                              {referral.referrer_name || referral.referrer_username || `ID: ${referral.referrer_id}`}
+                            </div>
+                            <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+                              ID: {referral.referrer_id}
+                            </div>
+                          </div>
+                          <div>
+                            <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '4px' }}>Реферал</div>
+                            <div style={{ fontWeight: 'bold', color: 'var(--text-primary)' }}>
+                              {referral.referral_name || referral.referral_username || `ID: ${referral.referral_id}`}
+                            </div>
+                            <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+                              ID: {referral.referral_id}
+                            </div>
+                          </div>
+                        </div>
+                        
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px', fontSize: '0.9rem', marginBottom: '12px' }}>
+                          <div>
+                            <div style={{ color: 'var(--text-secondary)', marginBottom: '2px' }}>Дата активации</div>
+                            <div style={{ color: 'var(--text-primary)' }}>
+                              {new Date(referral.activated_at).toLocaleDateString('ru-RU')}
+                            </div>
+                          </div>
+                          <div>
+                            <div style={{ color: 'var(--text-secondary)', marginBottom: '2px' }}>Комиссия реферала</div>
+                            <div style={{ color: 'var(--matte-red)', fontWeight: 'bold' }}>
+                              {(referral.referral_commission * 100).toFixed(1)}%
+                            </div>
+                          </div>
+                          <div>
+                            <div style={{ color: 'var(--text-secondary)', marginBottom: '2px' }}>Истекает</div>
+                            <div style={{ 
+                              color: referral.is_expired ? 'var(--matte-red)' : 'var(--text-primary)',
+                              fontWeight: referral.is_expired ? 'bold' : 'normal'
+                            }}>
+                              {referral.is_expired ? 'Истекла' : new Date(referral.expires_at).toLocaleDateString('ru-RU')}
+                            </div>
+                          </div>
+                        </div>
+                        
+                        {/* Кнопка продления скидки */}
+                        <div style={{ display: 'flex', gap: '8px' }}>
+                          <button
+                            onClick={() => quickExtendDiscount(referral.referral_id, 7)}
+                            style={{
+                              flex: 1,
+                              padding: '8px 12px',
+                              borderRadius: '6px',
+                              border: '1px solid var(--matte-red)',
+                              background: 'transparent',
+                              color: 'var(--matte-red)',
+                              fontSize: '0.8rem',
+                              fontWeight: 'bold',
+                              cursor: 'pointer',
+                              transition: 'all 0.3s ease'
+                            }}
+                          >
+                            ⏰ Продлить на 7 дн.
+                          </button>
+                          <button
+                            onClick={() => quickExtendDiscount(referral.referral_id, 30)}
+                            style={{
+                              flex: 1,
+                              padding: '8px 12px',
+                              borderRadius: '6px',
+                              border: '1px solid var(--matte-red)',
+                              background: 'transparent',
+                              color: 'var(--matte-red)',
+                              fontSize: '0.8rem',
+                              fontWeight: 'bold',
+                              cursor: 'pointer',
+                              transition: 'all 0.3s ease'
+                            }}
+                          >
+                            ⏰ Продлить на 30 дн.
+                          </button>
+                        </div>
+                      </div>
+                      ))}
+                      </div>
+                    </div>
+                  );
+                })()}
+              </div>
+            )}
+          </Section>
+        )}
+
 
     </AdminContainer>
   );

@@ -121,6 +121,55 @@ const WelcomeSubtitle = styled.p`
   }
 `;
 
+const AboutUsButton = styled.button`
+  position: fixed;
+  top: 10px;
+  left: 20px;
+  padding: 12px 20px;
+  border: 1px solid var(--border-color);
+  border-radius: 15px;
+  background: var(--bg-card);
+  color: var(--text-primary);
+  font-family: 'Noto Sans SC', 'Inter', Arial, sans-serif;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 
+    0 4px 12px var(--shadow-card),
+    0 2px 6px var(--shadow-soft);
+  backdrop-filter: blur(10px);
+  letter-spacing: 0.02em;
+  z-index: 1000;
+  min-width: 80px;
+  
+  @media (max-width: 480px) {
+    padding: 10px 16px;
+    font-size: 0.9rem;
+    top: 8px;
+    left: 15px;
+    min-width: 70px;
+  }
+  
+  &:hover {
+    transform: translateY(-2px);
+    box-shadow: 
+      0 6px 20px var(--shadow-card),
+      0 3px 10px var(--shadow-soft);
+    background: var(--sand);
+    border-color: var(--matte-red);
+    color: var(--text-primary);
+  }
+  
+  &:active {
+    transform: translateY(-1px);
+    box-shadow: 
+      0 4px 15px var(--shadow-card),
+      0 2px 8px var(--shadow-soft);
+  }
+`;
+
+
 const MenuGrid = styled.div`
   display: grid;
   grid-template-columns: repeat(2, 1fr);
@@ -411,12 +460,6 @@ const MainMenu: React.FC<MainMenuProps> = ({ onNavigate, toggleTheme, isDarkThem
             <ChineseAccent>匯</ChineseAccent>
           </MenuButton>
           
-          <MenuButton onClick={() => handleButtonClick('about')}>
-            <ButtonIcon>🐉</ButtonIcon>
-            <ButtonText>О нас</ButtonText>
-            <ChineseAccent>德</ChineseAccent>
-          </MenuButton>
-          
           <MenuButton onClick={() => handleButtonClick('reviews')}>
             <ButtonIcon>⭐</ButtonIcon>
             <ButtonText>Отзывы</ButtonText>
@@ -424,6 +467,10 @@ const MainMenu: React.FC<MainMenuProps> = ({ onNavigate, toggleTheme, isDarkThem
           </MenuButton>
         </MenuGrid>
       </ContentWrapper>
+      
+      <AboutUsButton onClick={() => handleButtonClick('about')}>
+        О нас
+      </AboutUsButton>
       
       <ThemeToggle onClick={toggleTheme}>
         <ToggleIcon $isDark={isDarkTheme}>🌙</ToggleIcon>

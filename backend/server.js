@@ -1414,7 +1414,7 @@ app.post('/api/calculate-from-link', async (req, res) => {
         
         if (rows.length > 0) {
           const user = rows[0];
-          if (user.access_expires_at && new Date() < user.access_expires_at) {
+          if (user.access_expires_at && new Date() < new Date(user.access_expires_at)) {
             commission = user.commission;
           }
         }
@@ -1654,7 +1654,7 @@ app.post('/api/get-price-with-size', async (req, res) => {
         
         if (rows.length > 0) {
           const user = rows[0];
-          if (user.access_expires_at && new Date() < user.access_expires_at) {
+          if (user.access_expires_at && new Date() < new Date(user.access_expires_at)) {
             commission = user.commission;
           }
         }
@@ -1864,7 +1864,7 @@ app.post('/api/calculate-price', async (req, res) => {
         
         if (rows.length > 0) {
           const user = rows[0];
-          if (user.access_expires_at && new Date() < user.access_expires_at) {
+          if (user.access_expires_at && new Date() < new Date(user.access_expires_at)) {
             commission = user.commission;
           }
         }
@@ -2167,20 +2167,91 @@ app.post('/api/referral', async (req, res) => {
         );
 
         if (existingUser.length > 0) {
+          // Отправляем уведомление пользователю, что он уже не может воспользоваться реферальной ссылкой
+          const alreadyRegisteredMessage = `❌ <b>Реферальная ссылка недоступна</b>\n\n` +
+                                          `Вы уже зарегистрированы в Poizonic и не можете воспользоваться реферальной ссылкой.\n\n` +
+                                          `💡 Реферальная программа доступна только для новых пользователей.`;
+
+          await sendTelegramMessage(telegramId, alreadyRegisteredMessage);
+          
           return res.status(400).json({ error: 'Пользователь уже зарегистрирован' });
         }
 
-        // Создаем пользователя с реферальной скидкой
+        // Получаем информацию о реферере для уведомления
+        const [referrerInfo] = await dbConnection.execute(
+          'SELECT username, full_name FROM users WHERE telegram_id = ?',
+          [referralId]
+        );
+
+        // Создаем пользователя с реферальной скидкой на 2 недели
         await dbConnection.execute(
           `INSERT INTO users (telegram_id, commission, referred_by, access_expires_at) 
-           VALUES (?, 0.04, ?, DATE_ADD(NOW(), INTERVAL 7 DAY))`,
+           VALUES (?, 0.02, ?, DATE_ADD(NOW(), INTERVAL 14 DAY))`,
           [telegramId, referralId]
         );
+
+        // Продлеваем скидку реферера на 1 неделю (или даем первую скидку)
+        const [referrerCurrentDiscount] = await dbConnection.execute(
+          'SELECT access_expires_at FROM users WHERE telegram_id = ?',
+          [referralId]
+        );
+
+        if (referrerCurrentDiscount.length > 0 && referrerCurrentDiscount[0].access_expires_at) {
+          const currentExpiry = new Date(referrerCurrentDiscount[0].access_expires_at);
+          const now = new Date();
+          
+          if (currentExpiry > now) {
+            // У реферера есть активная скидка - продлеваем на 7 дней
+            const newExpiry = new Date(currentExpiry.getTime() + 7 * 24 * 60 * 60 * 1000);
+            await dbConnection.execute(
+              'UPDATE users SET commission = 0.02, access_expires_at = ? WHERE telegram_id = ?',
+              [newExpiry, referralId]
+            );
+          } else {
+            // У реферера была скидка, но она истекла - даем новую на 7 дней
+            await dbConnection.execute(
+              'UPDATE users SET commission = 0.02, access_expires_at = DATE_ADD(NOW(), INTERVAL 7 DAY) WHERE telegram_id = ?',
+              [referralId]
+            );
+          }
+        } else {
+          // У реферера никогда не было скидки - даем первую на 7 дней
+          await dbConnection.execute(
+            'UPDATE users SET commission = 0.02, access_expires_at = DATE_ADD(NOW(), INTERVAL 7 DAY) WHERE telegram_id = ?',
+            [referralId]
+          );
+        }
+
+        // Отправляем уведомление новому пользователю
+        const newUserMessage = `🎉 <b>Добро пожаловать в Poizonic!</b>\n\n` +
+                               `Вы активировали реферальную программу!\n\n` +
+                               `💰 <b>Ваша комиссия:</b> 2% (вместо 5%)\n` +
+                               `⏰ <b>Действует до:</b> ${new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toLocaleString('ru-RU')}\n\n` +
+                               `💡 Теперь вы можете делать заказы по сниженной комиссии!`;
+
+        await sendTelegramMessage(telegramId, newUserMessage);
+
+        // Получаем обновленную информацию о скидке реферера для уведомления
+        const [updatedReferrerInfo] = await dbConnection.execute(
+          'SELECT access_expires_at FROM users WHERE telegram_id = ?',
+          [referralId]
+        );
+
+        const referrerExpiry = updatedReferrerInfo[0]?.access_expires_at;
+        const expiryDate = referrerExpiry ? new Date(referrerExpiry).toLocaleString('ru-RU') : 'неизвестно';
+
+        // Отправляем уведомление рефереру
+        const referrerMessage = `🎉 <b>Новый реферал!</b>\n\n` +
+                                `Вашу реферальную ссылку активировали!\n\n` +
+                                `🎁 <b>Ваша скидка продлена до:</b> ${expiryDate}\n\n` +
+                                `💡 Спасибо, что приглашаете друзей в Poizonic!`;
+
+        await sendTelegramMessage(referralId, referrerMessage);
 
         // Логируем активность пользователя
         await logUserActivity(telegramId, 'referral_activated', {
           referredBy: referralId,
-          commission: 0.04
+          commission: 0.02
         });
 
         // Логируем активность реферера
@@ -2196,7 +2267,7 @@ app.post('/api/referral', async (req, res) => {
 
         res.json({ 
           success: true, 
-          message: 'Реферальная программа активирована!'
+          message: 'Реферальная программа активирована! Уведомления отправлены.'
         });
       } catch (dbError) {
         console.error('Ошибка работы с базой данных:', dbError);
@@ -2234,7 +2305,7 @@ app.get('/api/user/:telegramId', async (req, res) => {
         }
 
         const user = rows[0];
-        const hasDiscount = user.access_expires_at && new Date() < user.access_expires_at;
+        const hasDiscount = user.access_expires_at && new Date() < new Date(user.access_expires_at);
         
         res.json({
           telegramId: user.telegram_id,
@@ -4422,16 +4493,29 @@ app.post('/api/admin/update-user-commission', async (req, res) => {
           return res.status(404).json({ error: 'Пользователь не найден' });
         }
 
+        // Получаем старую комиссию для уведомления
+        const oldCommission = users[0].commission || 0.05;
+
         // Обновляем комиссию
         await dbConnection.execute(
           'UPDATE users SET commission = ? WHERE telegram_id = ?',
           [commission, telegramId]
         );
 
+        // Отправляем уведомление пользователю
+        const notificationMessage = `💰 <b>Изменение комиссии</b>\n\n` +
+                                   `Ваша комиссия была изменена:\n` +
+                                   `📉 <b>Было:</b> ${(oldCommission * 100).toFixed(1)}%\n` +
+                                   `📈 <b>Стало:</b> ${(commission * 100).toFixed(1)}%\n\n` +
+                                   `⏰ <b>Время изменения:</b> ${new Date().toLocaleString('ru-RU')}\n\n` +
+                                   `💡 Теперь при расчете стоимости заказов будет использоваться новая комиссия.`;
+
+        await sendTelegramMessage(telegramId, notificationMessage);
+
         // Логируем изменение
         await createSystemLog('info', `Комиссия пользователя ${telegramId} изменена на ${(commission * 100).toFixed(1)}%`, {
           telegramId,
-          oldCommission: users[0].commission,
+          oldCommission: oldCommission,
           newCommission: commission,
           username: users[0].username,
           fullName: users[0].full_name
@@ -4439,7 +4523,7 @@ app.post('/api/admin/update-user-commission', async (req, res) => {
 
         res.json({ 
           success: true, 
-          message: `Комиссия пользователя изменена на ${(commission * 100).toFixed(1)}%`
+          message: `Комиссия пользователя изменена на ${(commission * 100).toFixed(1)}% и уведомление отправлено`
         });
       } catch (dbError) {
         console.error('Ошибка работы с базой данных:', dbError);
@@ -4862,10 +4946,40 @@ app.post('/api/admin/update-order-status', async (req, res) => {
 
     if (dbConnection) {
       try {
+        // Получаем информацию о заказе и пользователе перед обновлением
+        const [orderRows] = await dbConnection.execute(
+          'SELECT o.*, u.telegram_id, u.full_name, u.username FROM orders o LEFT JOIN users u ON o.telegram_id = u.telegram_id WHERE o.order_id = ?',
+          [orderId]
+        );
+
+        if (orderRows.length === 0) {
+          return res.status(404).json({ error: 'Заказ не найден' });
+        }
+
+        const order = orderRows[0];
+
+        // Обновляем статус заказа
         await dbConnection.execute(
           'UPDATE orders SET status = ? WHERE order_id = ?',
           [status, orderId]
         );
+
+        // Отправляем уведомление пользователю в Telegram
+        if (order.telegram_id) {
+          const userName = order.full_name || order.username || `ID: ${order.telegram_id}`;
+          const message = `📦 Обновление статуса заказа\n\n` +
+                         `Заказ №${orderId}\n` +
+                         `Новый статус: ${status}\n\n` +
+                         `Следите за обновлениями вашего заказа!`;
+
+          try {
+            await sendTelegramMessage(order.telegram_id, message);
+            console.log(`✅ Уведомление отправлено пользователю ${order.telegram_id} о смене статуса заказа ${orderId}`);
+          } catch (telegramError) {
+            console.error('❌ Ошибка отправки уведомления в Telegram:', telegramError);
+            // Не прерываем выполнение, если уведомление не отправилось
+          }
+        }
 
         res.json({ success: true, message: 'Статус заказа обновлен' });
       } catch (dbError) {
@@ -5305,6 +5419,126 @@ app.get('/api/admin/delivery', async (req, res) => {
   }
 });
 
+// Получение данных рефералов для админ-панели
+app.get('/api/admin/referrals-data', async (req, res) => {
+  try {
+    await ensureDBConnection();
+    
+    if (!dbConnection) {
+      return res.status(500).json({ error: 'Нет соединения с базой данных' });
+    }
+
+    // Получаем все реферальные связи с информацией о пользователях
+    const [referrals] = await dbConnection.execute(`
+      SELECT 
+        r.telegram_id as referral_id,
+        r.username as referral_username,
+        r.full_name as referral_name,
+        r.commission as referral_commission,
+        r.access_expires_at as expires_at,
+        r.created_at as activated_at,
+        ref.telegram_id as referrer_id,
+        ref.username as referrer_username,
+        ref.full_name as referrer_name,
+        CASE 
+          WHEN r.access_expires_at IS NULL THEN 1
+          WHEN r.access_expires_at <= NOW() THEN 1
+          ELSE 0
+        END as is_expired
+      FROM users r
+      LEFT JOIN users ref ON r.referred_by = ref.telegram_id
+      WHERE r.referred_by IS NOT NULL
+      ORDER BY r.created_at DESC
+    `);
+
+    res.json({ 
+      success: true, 
+      referrals: referrals 
+    });
+
+  } catch (error) {
+    console.error('Ошибка получения данных рефералов:', error);
+    res.status(500).json({ error: 'Ошибка получения данных рефералов' });
+  }
+});
+
+// Ручное продление скидочной комиссии
+app.post('/api/admin/extend-discount', async (req, res) => {
+  try {
+    const { telegramId, days } = req.body;
+    
+    if (!telegramId || !days) {
+      return res.status(400).json({ error: 'Необходимы telegram ID и количество дней' });
+    }
+
+    if (days < 1 || days > 365) {
+      return res.status(400).json({ error: 'Количество дней должно быть от 1 до 365' });
+    }
+
+    await ensureDBConnection();
+    
+    if (!dbConnection) {
+      return res.status(500).json({ error: 'Нет соединения с базой данных' });
+    }
+
+    // Проверяем, существует ли пользователь
+    const [users] = await dbConnection.execute(
+      'SELECT telegram_id, username, full_name, access_expires_at, commission FROM users WHERE telegram_id = ?',
+      [telegramId]
+    );
+
+    if (users.length === 0) {
+      return res.status(404).json({ error: 'Пользователь не найден' });
+    }
+
+    const user = users[0];
+    const now = new Date();
+    let newExpiryDate;
+
+    if (user.access_expires_at && new Date(user.access_expires_at) > now) {
+      // У пользователя есть активная скидка - продлеваем
+      const currentExpiry = new Date(user.access_expires_at);
+      newExpiryDate = new Date(currentExpiry.getTime() + days * 24 * 60 * 60 * 1000);
+    } else {
+      // У пользователя нет активной скидки - даем новую
+      newExpiryDate = new Date(now.getTime() + days * 24 * 60 * 60 * 1000);
+    }
+
+    // Обновляем срок действия скидки
+    await dbConnection.execute(
+      'UPDATE users SET access_expires_at = ?, commission = 0.02 WHERE telegram_id = ?',
+      [newExpiryDate, telegramId]
+    );
+
+    // Отправляем уведомление пользователю
+    const extensionMessage = `🎉 <b>Скидочная комиссия продлена!</b>\n\n` +
+                            `Ваша скидочная комиссия 2% продлена на ${days} дн.\n\n` +
+                            `⏰ <b>Новый срок действия:</b> ${newExpiryDate.toLocaleString('ru-RU')}\n\n` +
+                            `💰 <b>Ваша комиссия:</b> 2% (вместо 5%)\n\n` +
+                            `💡 Продолжайте делать заказы по сниженной цене!`;
+
+    await sendTelegramMessage(telegramId, extensionMessage);
+
+    // Логируем продление
+    await createSystemLog('info', `Админ продлил скидку пользователю ${telegramId} на ${days} дней`, {
+      telegramId,
+      days,
+      newExpiryDate: newExpiryDate.toISOString(),
+      username: user.username,
+      fullName: user.full_name
+    });
+
+    res.json({ 
+      success: true, 
+      message: `Скидочная комиссия продлена на ${days} дней до ${newExpiryDate.toLocaleString('ru-RU')}`
+    });
+
+  } catch (error) {
+    console.error('Ошибка продления скидочной комиссии:', error);
+    res.status(500).json({ error: 'Ошибка продления скидочной комиссии' });
+  }
+});
+
 // Обновление статуса доставки (админ)
 app.post('/api/admin/orders/:orderId/update-status', async (req, res) => {
   try {
@@ -5389,6 +5623,94 @@ process.on('SIGTERM', async () => {
   process.exit(0);
 });
 
+// Функция для проверки истечения скидочной комиссии
+async function checkExpiredCommissions() {
+  try {
+    await ensureDBConnection();
+    
+    if (!dbConnection) {
+      console.log('⚠️ Нет соединения с БД для проверки комиссий');
+      return;
+    }
+
+    const now = new Date();
+    const threeDaysFromNow = new Date(now.getTime() + 3 * 24 * 60 * 60 * 1000);
+
+    // 1. Проверяем пользователей, у которых скидка истекает через 3 дня
+    const [warningUsers] = await dbConnection.execute(`
+      SELECT telegram_id, username, full_name, access_expires_at, commission
+      FROM users 
+      WHERE access_expires_at IS NOT NULL 
+        AND access_expires_at > NOW() 
+        AND access_expires_at <= ?
+        AND commission < 0.05
+    `, [threeDaysFromNow]);
+
+    // Отправляем предупреждения
+    for (const user of warningUsers) {
+      const expiresAt = new Date(user.access_expires_at);
+      const daysLeft = Math.ceil((expiresAt - now) / (24 * 60 * 60 * 1000));
+      
+      const warningMessage = `⚠️ <b>Скидочная комиссия истекает!</b>\n\n` +
+                            `Ваша сниженная комиссия ${(user.commission * 100).toFixed(1)}% истекает через ${daysLeft} дн.\n\n` +
+                            `⏰ <b>Истекает:</b> ${expiresAt.toLocaleString('ru-RU')}\n\n` +
+                            `💰 После истечения комиссия вернется к 5%\n\n` +
+                            `🛍️ <b>Успевайте оформить заказ по сниженной цене!</b>`;
+
+      await sendTelegramMessage(user.telegram_id, warningMessage);
+      
+      // Логируем предупреждение
+      await createSystemLog('info', `Отправлено предупреждение об истечении скидки пользователю ${user.telegram_id}`, {
+        telegramId: user.telegram_id,
+        daysLeft: daysLeft,
+        expiresAt: user.access_expires_at
+      });
+    }
+
+    // 2. Проверяем пользователей, у которых скидка уже истекла
+    const [expiredUsers] = await dbConnection.execute(`
+      SELECT telegram_id, username, full_name, commission
+      FROM users 
+      WHERE access_expires_at IS NOT NULL 
+        AND access_expires_at <= NOW() 
+        AND commission < 0.05
+    `);
+
+    // Возвращаем комиссию к 5% и отправляем уведомления
+    for (const user of expiredUsers) {
+      const oldCommission = user.commission;
+      
+      // Обновляем комиссию
+      await dbConnection.execute(
+        'UPDATE users SET commission = 0.05, access_expires_at = NULL WHERE telegram_id = ?',
+        [user.telegram_id]
+      );
+
+      // Отправляем уведомление
+      const expiryMessage = `📅 <b>Скидочная комиссия истекла</b>\n\n` +
+                           `Ваша сниженная комиссия ${(oldCommission * 100).toFixed(1)}% истекла.\n\n` +
+                           `💰 <b>Текущая комиссия:</b> 5%\n\n` +
+                           `💡 Вы можете снова получить скидку, пригласив друга по реферальной ссылке!`;
+
+      await sendTelegramMessage(user.telegram_id, expiryMessage);
+      
+      // Логируем возврат комиссии
+      await createSystemLog('info', `Комиссия пользователя ${user.telegram_id} возвращена к 5% после истечения скидки`, {
+        telegramId: user.telegram_id,
+        oldCommission: oldCommission,
+        newCommission: 0.05
+      });
+    }
+
+    if (warningUsers.length > 0 || expiredUsers.length > 0) {
+      console.log(`✅ Проверка комиссий: ${warningUsers.length} предупреждений, ${expiredUsers.length} возвратов`);
+    }
+
+  } catch (error) {
+    console.error('❌ Ошибка при проверке истечения комиссий:', error);
+  }
+}
+
 // Периодическая проверка соединения с БД каждые 5 минут
 setInterval(async () => {
   try {
@@ -5402,6 +5724,22 @@ setInterval(async () => {
     console.error('❌ Ошибка при периодической проверке БД:', error);
   }
 }, 5 * 60 * 1000); // 5 минут
+
+// Периодическая проверка истечения комиссий каждые 6 часов
+setInterval(checkExpiredCommissions, 6 * 60 * 60 * 1000); // 6 часов
+
+// Ручной endpoint для тестирования проверки комиссий
+app.post('/api/admin/check-expired-commissions', async (req, res) => {
+  try {
+    console.log('🔍 Ручная проверка истечения комиссий...');
+    await checkExpiredCommissions();
+    res.json({ success: true, message: 'Проверка комиссий выполнена' });
+  } catch (error) {
+    console.error('Ошибка ручной проверки комиссий:', error);
+    res.status(500).json({ error: 'Ошибка проверки комиссий' });
+  }
+});
+
 
 process.on('SIGINT', async () => {
   console.log('Получен сигнал SIGINT, завершение работы...');
