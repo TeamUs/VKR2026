@@ -10,7 +10,7 @@ interface BottomNavigationProps {
 
 const NavigationContainer = styled.div<{ $isDark: boolean }>`
   position: fixed;
-  bottom: 0;
+  bottom: -1px;
   left: 0;
   right: 0;
   width: 100%;
