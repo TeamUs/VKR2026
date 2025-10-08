@@ -733,13 +733,123 @@ const ToggleIconDark = styled.span<{ $isDark: boolean }>`
   color: var(--text-accent);
 `;
 
+// Стили для модального окна помощи (точно как в OrderForm)
+const VideoModalOverlay = styled.div<{ $modalPosition: { top: string; transform: string } }>`
+  position: fixed;
+  top: -100px;
+  left: 0;
+  right: 0;
+  bottom: -100px;
+  background: rgba(0, 0, 0, 0.8);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  z-index: 1000;
+  overflow-y: auto;
+  animation: ${fadeIn} 0.3s ease-out;
+`;
+
+const LinkHelpModal = styled.div<{ $modalPosition: { top: string; transform: string } }>`
+  background: var(--bg-card);
+  border-radius: 20px;
+  padding: 0;
+  max-width: 95vw;
+  max-height: 85vh;
+  width: 95vw;
+  text-align: center;
+  border: 1px solid var(--border-color);
+  box-shadow: 
+    0 20px 40px rgba(0, 0, 0, 0.3),
+    0 10px 20px var(--shadow-card);
+  overflow: hidden;
+  position: absolute;
+  top: ${props => props.$modalPosition.top};
+  left: 50%;
+  transform: ${props => props.$modalPosition.transform} translateX(-50%);
+  display: flex;
+  flex-direction: column;
+`;
+
+const VideoCloseIcon = styled.button`
+  background: var(--bg-secondary);
+  border: 1px solid var(--matte-red);
+  border-radius: 50%;
+  width: 36px;
+  height: 36px;
+  min-width: 36px;
+  min-height: 36px;
+  color: var(--matte-red);
+  font-size: 18px;
+  font-weight: bold;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+  flex-shrink: 0;
+
+  &:hover {
+    background: var(--matte-red);
+    color: white;
+    transform: scale(1.1);
+  }
+
+  &:active {
+    transform: scale(0.95);
+  }
+`;
+
+const LinkHelpHeader = styled.div`
+  background: var(--bg-card);
+  border-radius: 20px 20px 0 0;
+  padding: 20px 24px;
+  border-bottom: 1px solid var(--border-color);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-shrink: 0;
+`;
+
+const LinkHelpTitle = styled.h3`
+  font-family: 'Noto Sans SC', 'Inter', Arial, sans-serif;
+  font-size: 22px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0;
+`;
+
+const LinkHelpBody = styled.div`
+  flex: 1;
+  overflow-y: auto;
+  padding: 24px;
+`;
+
+const LinkHelpText = styled.p`
+  font-family: 'Inter', Arial, sans-serif;
+  font-size: 1rem;
+  color: var(--text-secondary);
+  line-height: 1.6;
+  margin: 0 0 20px 0;
+`;
+
+const LinkHelpImage = styled.img`
+  width: 100%;
+  max-width: 350px;
+  height: auto;
+  border-radius: 12px;
+  box-shadow: 0 4px 12px var(--shadow-soft);
+  margin: 0 auto;
+  display: block;
+`;
+
 interface PriceCalculatorProps {
   onNavigate: (page: string) => void;
   toggleTheme: () => void;
   isDarkTheme: boolean;
+  onModalStateChange?: (isOpen: boolean) => void;
 }
 
-const PriceCalculator: React.FC<PriceCalculatorProps> = ({ onNavigate, toggleTheme, isDarkTheme }) => {
+const PriceCalculator: React.FC<PriceCalculatorProps> = ({ onNavigate, toggleTheme, isDarkTheme, onModalStateChange }) => {
   const [price, setPrice] = useState('');
   const [category, setCategory] = useState('');
   const [result, setResult] = useState<any>(null);
@@ -747,6 +857,7 @@ const PriceCalculator: React.FC<PriceCalculatorProps> = ({ onNavigate, toggleThe
   const [priceError, setPriceError] = useState('');
   const [categoryError, setCategoryError] = useState('');
   const [showHelpModal, setShowHelpModal] = useState(false);
+  const [helpModalPosition, setHelpModalPosition] = useState({ top: '50%', transform: 'translateY(-50%)' });
   
 
   const categories = [
@@ -991,7 +1102,18 @@ const PriceCalculator: React.FC<PriceCalculatorProps> = ({ onNavigate, toggleThe
         
         <HelpButton onClick={() => {
           HapticFeedback.selection();
+          
+          const scrollTop = window.pageYOffset || document.documentElement.scrollTop;
+          const windowHeight = window.innerHeight;
+          const modalTop = scrollTop + (windowHeight / 2) + 50;
+          
+          setHelpModalPosition({
+            top: `${modalTop}px`,
+            transform: 'translateY(-50%)'
+          });
+          
           setShowHelpModal(true);
+          onModalStateChange?.(true);
         }}>
           Где найти цену в юанях ❓
         </HelpButton>
@@ -1085,28 +1207,33 @@ const PriceCalculator: React.FC<PriceCalculatorProps> = ({ onNavigate, toggleThe
       </InfoCard>
 
       {showHelpModal && (
-        <ModalOverlay>
-          <HelpModal>
-            <HelpTitle>Где найти цену в юанях?</HelpTitle>
-            <HelpText>
-              Цена указана на <strong>голубой кнопке</strong> - у каждого размера своя цена!
-            </HelpText>
-            <HelpImage 
-              src="/images/shoes_clothing.jpg" 
-              alt="Пример страницы товара с ценой в юанях"
-              onError={(e) => {
-                // Fallback если изображение не найдено
-                e.currentTarget.style.display = 'none';
-              }}
-            />
-            <CloseButton onClick={() => {
-              HapticFeedback.selection();
-              setShowHelpModal(false);
-            }}>
-              Понятно
-            </CloseButton>
-          </HelpModal>
-        </ModalOverlay>
+        <VideoModalOverlay $modalPosition={helpModalPosition}>
+          <LinkHelpModal $modalPosition={helpModalPosition}>
+            <LinkHelpHeader>
+              <LinkHelpTitle>Где найти цену в юанях?</LinkHelpTitle>
+              <VideoCloseIcon onClick={() => {
+                HapticFeedback.selection();
+                setShowHelpModal(false);
+                onModalStateChange?.(false);
+              }}>
+                ×
+              </VideoCloseIcon>
+            </LinkHelpHeader>
+            <LinkHelpBody>
+              <LinkHelpText>
+                Цена указана на <strong>голубой кнопке</strong> - у каждого размера своя цена!
+              </LinkHelpText>
+              <LinkHelpImage 
+                src="/images/shoes_clothing.jpg" 
+                alt="Пример страницы товара с ценой в юанях"
+                onError={(e) => {
+                  console.log('Изображение не загрузилось');
+                  e.currentTarget.style.display = 'none';
+                }}
+              />
+            </LinkHelpBody>
+          </LinkHelpModal>
+        </VideoModalOverlay>
       )}
     </CalculatorContainer>
   );

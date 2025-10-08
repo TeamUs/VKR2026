@@ -6,9 +6,10 @@ interface BottomNavigationProps {
   activeTab: string;
   onTabChange: (tab: string) => void;
   isDarkTheme: boolean;
+  hideNavigation?: boolean;
 }
 
-const NavigationContainer = styled.div<{ $isDark: boolean }>`
+const NavigationContainer = styled.div<{ $isDark: boolean; $hideNavigation?: boolean }>`
   position: fixed;
   bottom: -1px;
   left: 0;
@@ -22,7 +23,7 @@ const NavigationContainer = styled.div<{ $isDark: boolean }>`
   backdrop-filter: blur(25px) saturate(1.3) brightness(1.1);
   z-index: 9999;
   padding: 4px 0 6px 0;
-  display: block;
+  display: ${props => props.$hideNavigation ? 'none' : 'block'};
   margin: 0;
 `;
 
@@ -82,7 +83,8 @@ const NavLabel = styled.span<{ $active: boolean }>`
 const BottomNavigation: React.FC<BottomNavigationProps> = ({ 
   activeTab, 
   onTabChange, 
-  isDarkTheme 
+  isDarkTheme,
+  hideNavigation = false
 }) => {
   const handleTabClick = (tab: string) => {
     // Haptic feedback
@@ -112,7 +114,7 @@ const BottomNavigation: React.FC<BottomNavigationProps> = ({
   ];
 
   return (
-    <NavigationContainer $isDark={isDarkTheme}>
+    <NavigationContainer $isDark={isDarkTheme} $hideNavigation={hideNavigation}>
       <NavigationContent>
         {navItems.map((item) => (
           <NavItem

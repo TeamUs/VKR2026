@@ -973,9 +973,10 @@ interface OrderFormProps {
   onNavigate: (page: string) => void;
   toggleTheme: () => void;
   isDarkTheme: boolean;
+  onModalStateChange?: (isOpen: boolean) => void;
 }
 
-const OrderForm: React.FC<OrderFormProps> = ({ onNavigate, toggleTheme, isDarkTheme }) => {
+const OrderForm: React.FC<OrderFormProps> = ({ onNavigate, toggleTheme, isDarkTheme, onModalStateChange }) => {
   const [currentStep, setCurrentStep] = useState(1);
   const [formData, setFormData] = useState({
     items: [
@@ -1295,6 +1296,7 @@ const OrderForm: React.FC<OrderFormProps> = ({ onNavigate, toggleTheme, isDarkTh
       transform: 'translateY(-50%)'
     });
     setShowVideoModal(true);
+    onModalStateChange?.(true);
   };
 
   const handleCloseSuccessModal = () => {
@@ -1306,6 +1308,7 @@ const OrderForm: React.FC<OrderFormProps> = ({ onNavigate, toggleTheme, isDarkTh
   const handleCloseVideoModal = () => {
     HapticFeedback.selection();
     setShowVideoModal(false);
+    onModalStateChange?.(false);
   };
 
   const handleLinkHelpClick = () => {
@@ -1320,11 +1323,13 @@ const OrderForm: React.FC<OrderFormProps> = ({ onNavigate, toggleTheme, isDarkTh
       transform: 'translateY(-50%)'
     });
     setShowLinkHelpModal(true);
+    onModalStateChange?.(true);
   };
 
   const handleCloseLinkHelpModal = () => {
     HapticFeedback.selection();
     setShowLinkHelpModal(false);
+    onModalStateChange?.(false);
   };
 
   const pickupPoints = [
