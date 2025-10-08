@@ -6,6 +6,7 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 const https = require('https');
+// Используем встроенный fetch в Node.js 18+
 require('dotenv').config();
 
 const app = express();
@@ -105,6 +106,142 @@ async function sendManagerMessage(message) {
   }
 }
 
+// Функция проверки прав бота в канале
+async function testBotPermissions() {
+  try {
+    const channelId = '-1002499442701';
+    const botToken = process.env.BOT_TOKEN || '8113129973:AAHePXZqOW2MnajUEnporDpoYULAEyX1N_8';
+    
+    console.log('🔍 Проверяем права бота в канале...');
+    
+    // Проверяем информацию о канале
+    const getChatUrl = `https://api.telegram.org/bot${botToken}/getChat`;
+    const response = await fetch(getChatUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chat_id: channelId })
+    });
+    
+    if (response.ok) {
+      const chatInfo = await response.json();
+      console.log('✅ Бот имеет доступ к каналу:', chatInfo.result.title);
+      return true;
+    } else {
+      const error = await response.text();
+      console.error('❌ Бот не имеет доступа к каналу:', error);
+      return false;
+    }
+  } catch (error) {
+    console.error('❌ Ошибка проверки прав бота:', error);
+    return false;
+  }
+}
+
+// Функция отправки отзыва в канал отзывов
+async function sendReviewToFeedbackChannel(reviewData, userInfo) {
+  try {
+    // Сначала проверяем права бота
+    const hasPermissions = await testBotPermissions();
+    if (!hasPermissions) {
+      console.error('❌ Бот не имеет прав для публикации в канале');
+      return;
+    }
+    
+    const channelId = '-1002499442701'; // ID вашего канала с отзывами
+    const stars = '⭐'.repeat(reviewData.rating);
+    
+    let message = `⭐ Оценка: ${stars} (${reviewData.rating}/5)\n\n📝 Отзыв:\n${reviewData.review_text}\n\n👤 От: ${reviewData.full_name || userInfo.username || 'Пользователь'}`;
+    
+    // Если есть фото, пытаемся отправить с фото
+    if (reviewData.photo_url) {
+      try {
+        // Формируем полный URL для фото (будет работать когда будет домен)
+        const fullPhotoUrl = `${process.env.FRONTEND_URL || 'http://localhost:3000'}${reviewData.photo_url}`;
+        await sendTelegramPhoto(channelId, fullPhotoUrl, message);
+      } catch (photoError) {
+        console.error('❌ Ошибка отправки фото, отправляем только текст:', photoError.message);
+        console.log('💡 Примечание: Фото будет работать когда будет настроен домен с SSL');
+        // Если фото не отправилось, отправляем только текст
+        await sendTelegramMessage(channelId, message);
+      }
+    } else {
+      // Отправляем только текст
+      console.log('📝 Отправляем текст в канал');
+      await sendTelegramMessage(channelId, message);
+    }
+    
+    console.log('✅ Отзыв успешно отправлен в канал отзывов');
+  } catch (error) {
+    console.error('❌ Ошибка отправки отзыва в канал:', error);
+  }
+}
+
+// Функция отправки фото в Telegram по URL
+async function sendTelegramPhoto(chatId, photoUrl, caption = '') {
+  const botToken = process.env.BOT_TOKEN || '8113129973:AAHePXZqOW2MnajUEnporDpoYULAEyX1N_8';
+  const telegramApiUrl = `https://api.telegram.org/bot${botToken}/sendPhoto`;
+  
+  const response = await fetch(telegramApiUrl, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      chat_id: chatId,
+      photo: photoUrl,
+      caption: caption,
+      parse_mode: 'HTML'
+    })
+  });
+  
+  if (!response.ok) {
+    const errorData = await response.text();
+    console.error('❌ Telegram API Photo Error:', {
+      status: response.status,
+      statusText: response.statusText,
+      error: errorData,
+      chatId: chatId,
+      photoUrl: photoUrl
+    });
+    throw new Error(`Telegram API error: ${response.status} - ${errorData}`);
+  }
+  
+  return await response.json();
+}
+
+// Функция отправки текстового сообщения в Telegram
+async function sendTelegramMessage(chatId, message) {
+  const botToken = process.env.BOT_TOKEN || '8113129973:AAHePXZqOW2MnajUEnporDpoYULAEyX1N_8';
+  const telegramApiUrl = `https://api.telegram.org/bot${botToken}/sendMessage`;
+  
+  const response = await fetch(telegramApiUrl, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      chat_id: chatId,
+      text: message,
+      parse_mode: 'HTML',
+      disable_web_page_preview: true
+    })
+  });
+  
+  if (!response.ok) {
+    const errorData = await response.text();
+    console.error('❌ Telegram API Message Error:', {
+      status: response.status,
+      statusText: response.statusText,
+      error: errorData,
+      chatId: chatId,
+      message: message
+    });
+    throw new Error(`Telegram API error: ${response.status} - ${errorData}`);
+  }
+  
+  return await response.json();
+}
+
 async function connectDB() {
   try {
     dbConnection = await mysql.createConnection({
@@ -113,8 +250,15 @@ async function connectDB() {
       password: process.env.DB_PASSWORD || '',
       database: process.env.DB_NAME || 'poizonic',
       port: process.env.DB_PORT || 3306,
-      charset: 'utf8mb4'
+      charset: 'utf8mb4',
+      // Настройка collation для правильной работы с emoji и международными символами
+      collation: 'utf8mb4_unicode_ci'
     });
+    
+    // Устанавливаем UTF8MB4 для текущей сессии
+    await dbConnection.execute("SET NAMES 'utf8mb4'");
+    await dbConnection.execute("SET CHARACTER SET utf8mb4");
+    await dbConnection.execute("SET character_set_connection=utf8mb4");
     
     // Обработчики событий соединения
     dbConnection.on('error', (err) => {
@@ -125,7 +269,7 @@ async function connectDB() {
       }
     });
     
-    console.log('✅ База данных подключена успешно');
+    console.log('✅ База данных подключена успешно (UTF8MB4 активирован)');
   } catch (error) {
     console.error('❌ Ошибка подключения к базе данных:', error);
     dbConnection = null;
@@ -2336,22 +2480,69 @@ app.get('/api/user/:telegramId', async (req, res) => {
 });
 
 // API для отзывов
-// Получение всех одобренных отзывов
+// Получение отзывов с пагинацией
 app.get('/api/reviews', async (req, res) => {
   try {
     await ensureDBConnection();
     
-    const [rows] = await dbConnection.execute(`
-      SELECT review_id, telegram_id, username, full_name, rating, review_text, photo_url, created_at
-      FROM reviews 
-      WHERE is_approved = 1 
-      ORDER BY created_at DESC
-    `);
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 5;
+    const offset = (page - 1) * limit;
     
-    res.json({ reviews: rows });
+          // Получаем общее количество одобренных отзывов
+          const [totalRows] = await dbConnection.execute(`
+            SELECT COUNT(*) as total FROM reviews WHERE is_approved = 1
+          `);
+          const total = totalRows[0].total;
+          
+          // Получаем только одобренные отзывы с пагинацией
+          const [rows] = await dbConnection.execute(`
+            SELECT review_id, telegram_id, username, full_name, rating, review_text, photo_url, created_at, moderated_at
+            FROM reviews 
+            WHERE is_approved = 1
+            ORDER BY moderated_at DESC, created_at DESC
+            LIMIT ${limit} OFFSET ${offset}
+          `);
+    
+    const totalPages = Math.ceil(total / limit);
+    
+    res.json({ 
+      reviews: rows,
+      total: total,
+      page: page,
+      limit: limit,
+      totalPages: totalPages
+    });
   } catch (error) {
     console.error('Ошибка получения отзывов:', error);
     res.status(500).json({ error: 'Ошибка получения отзывов' });
+  }
+});
+
+// Получение средней оценки отзывов
+app.get('/api/reviews/average-rating', async (req, res) => {
+  try {
+    await ensureDBConnection();
+    
+          const [rows] = await dbConnection.execute(`
+            SELECT AVG(rating) as averageRating, COUNT(*) as totalReviews
+            FROM reviews
+            WHERE is_approved = 1
+          `);
+    
+    const averageRating = rows[0].averageRating || 0;
+    const totalReviews = rows[0].totalReviews || 0;
+    
+    // Проверяем, что averageRating - число
+    const numericRating = parseFloat(averageRating) || 0;
+    
+    res.json({ 
+      averageRating: parseFloat(numericRating.toFixed(1)),
+      totalReviews: totalReviews
+    });
+  } catch (error) {
+    console.error('❌ Ошибка получения средней оценки:', error);
+    res.status(500).json({ error: 'Ошибка получения средней оценки' });
   }
 });
 
@@ -2360,7 +2551,15 @@ app.post('/api/reviews', upload.single('photo'), async (req, res) => {
   try {
     await ensureDBConnection();
     
-    const { telegram_id, username, full_name, rating, review_text } = req.body;
+    console.log('📝 Получен отзыв:', req.body);
+    console.log('📸 Файл:', req.file ? req.file.filename : 'нет');
+    
+    // Поддержка обоих форматов данных (camelCase и snake_case)
+    const telegram_id = req.body.telegram_id || req.body.telegramId;
+    const username = req.body.username;
+    const full_name = req.body.full_name || req.body.fullName;
+    const rating = req.body.rating;
+    const review_text = req.body.review_text || req.body.reviewText || req.body.comment;
     
     console.log('Получены данные отзыва:', {
       telegram_id,
@@ -2398,7 +2597,7 @@ app.post('/api/reviews', upload.single('photo'), async (req, res) => {
     
     const [result] = await dbConnection.execute(`
       INSERT INTO reviews (telegram_id, username, full_name, rating, review_text, photo_url, is_approved)
-      VALUES (?, ?, ?, ?, ?, ?, 1)
+      VALUES (?, ?, ?, ?, ?, ?, 0)
     `, [telegram_id, username, full_name, rating, review_text, photo_url]);
     
     // Логируем активность пользователя
@@ -2415,6 +2614,24 @@ app.post('/api/reviews', upload.single('photo'), async (req, res) => {
       rating
     }, telegram_id);
     
+    // Отправляем уведомление менеджеру о новом отзыве
+    const stars = '⭐'.repeat(parseInt(rating));
+    const managerMessage = `📝 <b>Новый отзыв (требует модерации)!</b>\n\n` +
+                          `${stars} <b>Оценка:</b> ${rating}/5\n` +
+                          `👤 <b>От:</b> ${full_name || username || 'Аноним'} (@${username || 'без username'})\n` +
+                          `🆔 <b>ID:</b> ${telegram_id}\n\n` +
+                          `💬 <b>Отзыв:</b>\n${review_text || 'Без текста'}\n\n` +
+                          `${photo_url ? `📸 <b>С фото</b>\n\n` : ''}` +
+                          `⏰ <b>Время:</b> ${new Date().toLocaleString('ru-RU')}\n\n` +
+                          `🆔 <b>ID отзыва:</b> ${result.insertId}\n` +
+                          `⚠️ <b>Статус:</b> Ожидает модерации`;
+    
+    await sendManagerMessage(managerMessage);
+    console.log('✅ Уведомление менеджеру о новом отзыве отправлено');
+    
+    // НЕ отправляем отзыв в канал - только после модерации
+    console.log('⏳ Отзыв ожидает модерации, публикация в канал отложена');
+    
     res.json({ 
       success: true, 
       review_id: result.insertId,
@@ -2423,6 +2640,173 @@ app.post('/api/reviews', upload.single('photo'), async (req, res) => {
   } catch (error) {
     console.error('Ошибка создания отзыва:', error);
     res.status(500).json({ error: 'Ошибка создания отзыва' });
+  }
+});
+
+// ==================== МОДЕРАЦИЯ ОТЗЫВОВ ====================
+
+// Получение всех отзывов для модерации (админка)
+app.get('/api/admin/reviews', async (req, res) => {
+  try {
+    await ensureDBConnection();
+    
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const offset = (page - 1) * limit;
+    const status = req.query.status || 'all'; // all, pending, approved
+    
+    let whereClause = '';
+    if (status === 'pending') {
+      whereClause = 'WHERE is_approved = 0';
+    } else if (status === 'approved') {
+      whereClause = 'WHERE is_approved = 1';
+    }
+    
+    // Получаем общее количество отзывов
+    const [totalRows] = await dbConnection.execute(`
+      SELECT COUNT(*) as total FROM reviews ${whereClause}
+    `);
+    const total = totalRows[0].total;
+    
+    // Получаем отзывы с пагинацией
+    const [rows] = await dbConnection.execute(`
+      SELECT review_id, telegram_id, username, full_name, rating, review_text, photo_url, 
+             created_at, is_approved, moderated_at, moderated_by
+      FROM reviews 
+      ${whereClause}
+      ORDER BY created_at DESC
+      LIMIT ${limit} OFFSET ${offset}
+    `);
+    
+    const totalPages = Math.ceil(total / limit);
+    
+    res.json({ 
+      reviews: rows,
+      total: total,
+      page: page,
+      limit: limit,
+      totalPages: totalPages,
+      status: status
+    });
+  } catch (error) {
+    console.error('❌ Ошибка получения отзывов для модерации:', error);
+    res.status(500).json({ error: 'Ошибка получения отзывов' });
+  }
+});
+
+// Одобрение отзыва
+app.post('/api/admin/reviews/:reviewId/approve', async (req, res) => {
+  try {
+    await ensureDBConnection();
+    
+    const reviewId = req.params.reviewId;
+    const moderatorId = req.body.moderatorId || 'admin'; // ID модератора
+    
+    // Обновляем статус отзыва
+    await dbConnection.execute(`
+      UPDATE reviews 
+      SET is_approved = 1, moderated_at = NOW(), moderated_by = ?
+      WHERE review_id = ?
+    `, [moderatorId, reviewId]);
+    
+    // Получаем данные отзыва для отправки в канал
+    const [reviewRows] = await dbConnection.execute(`
+      SELECT telegram_id, username, full_name, rating, review_text, photo_url
+      FROM reviews 
+      WHERE review_id = ?
+    `, [reviewId]);
+    
+    if (reviewRows.length > 0) {
+      const review = reviewRows[0];
+      
+      // Отправляем отзыв в канал отзывов
+      const reviewData = {
+        rating: parseInt(review.rating),
+        review_text: review.review_text,
+        full_name: review.full_name,
+        photo_url: review.photo_url
+      };
+      
+      const userInfo = {
+        username: review.username,
+        telegram_id: review.telegram_id
+      };
+      
+      await sendReviewToFeedbackChannel(reviewData, userInfo);
+      
+      // Уведомляем менеджера об одобрении
+      await sendManagerMessage(`✅ Отзыв #${reviewId} одобрен и опубликован в канале!`);
+    }
+    
+    res.json({ 
+      success: true, 
+      message: 'Отзыв одобрен и опубликован!' 
+    });
+  } catch (error) {
+    console.error('❌ Ошибка одобрения отзыва:', error);
+    res.status(500).json({ error: 'Ошибка одобрения отзыва' });
+  }
+});
+
+// Удаление отзыва
+app.delete('/api/admin/reviews/:reviewId', async (req, res) => {
+  try {
+    await ensureDBConnection();
+    
+    const reviewId = req.params.reviewId;
+    
+    // Удаляем отзыв из базы данных
+    await dbConnection.execute(`
+      DELETE FROM reviews WHERE review_id = ?
+    `, [reviewId]);
+    
+    // Уведомляем менеджера об удалении
+    await sendManagerMessage(`🗑️ Отзыв #${reviewId} удален администратором`);
+    
+    res.json({ 
+      success: true, 
+      message: 'Отзыв удален!' 
+    });
+  } catch (error) {
+    console.error('❌ Ошибка удаления отзыва:', error);
+    res.status(500).json({ error: 'Ошибка удаления отзыва' });
+  }
+});
+
+// Получение статистики отзывов для админки
+app.get('/api/admin/reviews/stats', async (req, res) => {
+  try {
+    await ensureDBConnection();
+    
+    // Общая статистика
+    const [totalStats] = await dbConnection.execute(`
+      SELECT 
+        COUNT(*) as total_reviews,
+        SUM(CASE WHEN is_approved = 1 THEN 1 ELSE 0 END) as approved_reviews,
+        SUM(CASE WHEN is_approved = 0 THEN 1 ELSE 0 END) as pending_reviews,
+        AVG(CASE WHEN is_approved = 1 THEN rating ELSE NULL END) as average_rating
+      FROM reviews
+    `);
+    
+    // Статистика по дням (последние 7 дней)
+    const [dailyStats] = await dbConnection.execute(`
+      SELECT 
+        DATE(created_at) as date,
+        COUNT(*) as total,
+        SUM(CASE WHEN is_approved = 1 THEN 1 ELSE 0 END) as approved
+      FROM reviews 
+      WHERE created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)
+      GROUP BY DATE(created_at)
+      ORDER BY date DESC
+    `);
+    
+    res.json({
+      total: totalStats[0],
+      daily: dailyStats
+    });
+  } catch (error) {
+    console.error('❌ Ошибка получения статистики отзывов:', error);
+    res.status(500).json({ error: 'Ошибка получения статистики' });
   }
 });
 
@@ -5597,6 +5981,64 @@ app.post('/api/admin/orders/:orderId/update-status', async (req, res) => {
   } catch (error) {
     console.error('Ошибка обновления статуса доставки:', error);
     res.status(500).json({ error: 'Ошибка обновления статуса' });
+  }
+});
+
+// Получение отзывов с пагинацией
+app.get('/api/reviews', async (req, res) => {
+  try {
+    console.log('🚀 ЭНДПОИНТ /api/reviews ВЫЗВАН!');
+    await ensureDBConnection();
+    
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 5;
+    const offset = (page - 1) * limit;
+    
+    console.log(`🔍 Параметры запроса: page=${page} (${typeof page}), limit=${limit} (${typeof limit}), offset=${offset} (${typeof offset})`);
+    
+    console.log(`📊 Запрос отзывов: page=${page}, limit=${limit}, offset=${offset}`);
+    
+    // Получаем общее количество отзывов
+    const [totalRows] = await dbConnection.execute(`
+      SELECT COUNT(*) as total FROM reviews
+    `);
+    const total = totalRows[0].total;
+    
+    console.log(`📊 Всего отзывов в БД: ${total}`);
+    
+    // Получаем отзывы с пагинацией
+    console.log(`🔍 SQL параметры: limit=${limit}, offset=${offset}`);
+    
+    // Проверяем, что параметры - числа
+    if (isNaN(limit) || isNaN(offset)) {
+      console.error('❌ Ошибка: limit или offset не являются числами!');
+      return res.status(400).json({ error: 'Неверные параметры пагинации' });
+    }
+    
+    const [rows] = await dbConnection.execute(`
+      SELECT review_id, telegram_id, username, full_name, rating, review_text, photo_url, created_at
+      FROM reviews 
+      ORDER BY created_at DESC
+      LIMIT ? OFFSET ?
+    `, [limit, offset]);
+    console.log(`🔍 SQL результат: получено ${rows.length} строк`);
+    
+    const totalPages = Math.ceil(total / limit);
+    console.log(`📊 Возвращаем: ${rows.length} отзывов, totalPages=${totalPages}`);
+    
+    const response = { 
+      reviews: rows,
+      total: total,
+      page: page,
+      limit: limit,
+      totalPages: totalPages
+    };
+    
+    console.log('📤 Отправляем ответ:', JSON.stringify(response, null, 2));
+    res.json(response);
+  } catch (error) {
+    console.error('❌ Ошибка получения отзывов:', error);
+    res.status(500).json({ error: 'Ошибка получения отзывов' });
   }
 });
 

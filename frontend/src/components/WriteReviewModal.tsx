@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import styled, { keyframes } from 'styled-components';
 import { HapticFeedback } from '../utils/hapticFeedback';
 
@@ -38,9 +38,30 @@ const ModalOverlay = styled.div`
   animation: ${fadeIn} 0.3s ease-out;
   padding: 20px;
   box-sizing: border-box;
+  min-height: 100vh;
+  overflow: auto;
+  
+  /* Адаптивность для маленьких экранов */
+  @media (max-height: 700px) {
+    align-items: flex-start;
+    padding-top: 20px;
+    padding-bottom: 20px;
+  }
+  
+  @media (max-height: 500px) {
+    align-items: flex-start;
+    padding-top: 10px;
+    padding-bottom: 10px;
+  }
+  
+  @media (max-width: 480px) {
+    padding: 10px;
+    align-items: flex-start;
+    padding-top: 20px;
+  }
 `;
 
-const ModalContainer = styled.div`
+const ModalContainer = styled.div<{ $scrollPosition: number }>`
   background: var(--bg-card);
   border-radius: 20px;
   padding: 30px;
@@ -52,8 +73,51 @@ const ModalContainer = styled.div`
   box-shadow: 
     0 20px 40px rgba(0, 0, 0, 0.3),
     0 10px 20px var(--shadow-card);
-  animation: ${slideIn} 0.4s ease-out;
   position: relative;
+  margin: auto;
+  transform: translateY(var(--scroll-position, 0px));
+  
+  /* Плавная анимация появления */
+  animation: modalFadeIn 0.4s ease-out;
+  
+  @keyframes modalFadeIn {
+    from {
+      opacity: 0;
+      transform: translateY(var(--scroll-position, 0px)) scale(0.95);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(var(--scroll-position, 0px)) scale(1);
+    }
+  }
+  
+  /* Динамическое позиционирование */
+  @media (max-height: 700px) {
+    max-height: calc(100vh - 40px);
+    margin-top: 20px;
+    margin-bottom: 20px;
+  }
+  
+  @media (max-height: 500px) {
+    max-height: calc(100vh - 20px);
+    margin-top: 10px;
+    margin-bottom: 10px;
+    padding: 20px;
+  }
+  
+  @media (max-width: 480px) {
+    padding: 20px;
+    margin: 10px;
+    max-width: calc(100vw - 20px);
+    max-height: calc(100vh - 20px);
+  }
+  
+  @media (max-width: 360px) {
+    padding: 15px;
+    margin: 5px;
+    max-width: calc(100vw - 10px);
+    max-height: calc(100vh - 10px);
+  }
 `;
 
 const ModalHeader = styled.div`
@@ -140,7 +204,7 @@ const TextArea = styled.textarea`
   transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
   backdrop-filter: blur(5px);
   min-height: 120px;
-  resize: vertical;
+  resize: none;
   font-family: 'Inter', Arial, sans-serif;
   
   &:focus {
@@ -249,6 +313,41 @@ const ErrorMessage = styled.div`
 `;
 
 const SuccessMessage = styled.div`
+  background: linear-gradient(135deg, rgba(76, 175, 80, 0.1), rgba(76, 175, 80, 0.05));
+  border: 2px solid rgba(76, 175, 80, 0.3);
+  border-radius: 12px;
+  padding: 16px 20px;
+  margin-bottom: 15px;
+  text-align: center;
+  color: #4CAF50;
+  font-size: 1rem;
+  font-weight: 600;
+  box-shadow: 
+    0 4px 12px rgba(76, 175, 80, 0.15),
+    0 2px 6px rgba(76, 175, 80, 0.1);
+  backdrop-filter: blur(10px);
+  animation: ${fadeIn} 0.5s ease-out;
+  position: relative;
+  overflow: hidden;
+  
+  &::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -100%;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.1), transparent);
+    animation: shimmer 2s infinite;
+  }
+  
+  @keyframes shimmer {
+    0% { left: -100%; }
+    100% { left: 100%; }
+  }
+`;
+
+const SuccessMessageOld = styled.div`
   color: var(--text-primary);
   font-size: 0.9rem;
   margin-top: 10px;
@@ -259,13 +358,15 @@ const SuccessMessage = styled.div`
   border: 1px solid var(--border-color);
 `;
 
+
 interface WriteReviewModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSuccess: () => void;
+  scrollPosition: number;
 }
 
-const WriteReviewModal: React.FC<WriteReviewModalProps> = ({ isOpen, onClose, onSuccess }) => {
+const WriteReviewModal: React.FC<WriteReviewModalProps> = ({ isOpen, onClose, onSuccess, scrollPosition }) => {
   const [rating, setRating] = useState(0);
   const [reviewText, setReviewText] = useState('');
   const [photo, setPhoto] = useState<File | null>(null);
@@ -273,8 +374,9 @@ const WriteReviewModal: React.FC<WriteReviewModalProps> = ({ isOpen, onClose, on
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
-  
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
 
   const handlePhotoChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -338,7 +440,18 @@ const WriteReviewModal: React.FC<WriteReviewModalProps> = ({ isOpen, onClose, on
       });
 
       if (response.ok) {
-        setSuccess('Отзыв успешно добавлен! Спасибо за ваш отзыв.');
+        // Показываем сообщение об успехе
+        setSuccessMessage('Спасибо за ваш отзыв!');
+        
+        // Сбрасываем все поля формы
+        setRating(0);
+        setReviewText('');
+        setPhoto(null);
+        setPhotoPreview(null);
+        setError(null);
+        setSuccess(null);
+        
+        // Закрываем модальное окно через 2 секунды
         setTimeout(() => {
           onSuccess();
           onClose();
@@ -358,21 +471,47 @@ const WriteReviewModal: React.FC<WriteReviewModalProps> = ({ isOpen, onClose, on
 
   const handleClose = () => {
     if (!isSubmitting) {
+      // Сбрасываем все поля формы
       setRating(0);
       setReviewText('');
       setPhoto(null);
       setPhotoPreview(null);
       setError(null);
       setSuccess(null);
+      setSuccessMessage(null);
       onClose();
     }
   };
 
+
+  // Тактильная обратная связь при открытии и сброс формы при закрытии
+  React.useEffect(() => {
+    if (isOpen && HapticFeedback.light) {
+      HapticFeedback.light();
+    } else if (!isOpen) {
+      // Сбрасываем форму при закрытии модального окна
+      setRating(0);
+      setReviewText('');
+      setPhoto(null);
+      setPhotoPreview(null);
+      setError(null);
+      setSuccess(null);
+      setSuccessMessage(null);
+    }
+  }, [isOpen]);
+
   if (!isOpen) return null;
 
   return (
-    <ModalOverlay onClick={handleClose}>
-      <ModalContainer onClick={(e) => e.stopPropagation()}>
+    <>
+      <ModalOverlay onClick={handleClose}>
+        <ModalContainer 
+          $scrollPosition={scrollPosition} 
+          onClick={(e) => e.stopPropagation()}
+          style={{
+            '--scroll-position': `${scrollPosition}px`
+          } as React.CSSProperties}
+        >
         <ModalHeader>
           <ModalTitle>Написать отзыв</ModalTitle>
           <CloseButton onClick={handleClose} disabled={isSubmitting}>
@@ -437,6 +576,7 @@ const WriteReviewModal: React.FC<WriteReviewModalProps> = ({ isOpen, onClose, on
 
         {error && <ErrorMessage>{error}</ErrorMessage>}
         {success && <SuccessMessage>{success}</SuccessMessage>}
+        {successMessage && <SuccessMessage>{successMessage}</SuccessMessage>}
 
         <SubmitButton 
           onClick={handleSubmit} 
@@ -453,6 +593,9 @@ const WriteReviewModal: React.FC<WriteReviewModalProps> = ({ isOpen, onClose, on
         </SubmitButton>
       </ModalContainer>
     </ModalOverlay>
+
+      
+    </>
   );
 };
 

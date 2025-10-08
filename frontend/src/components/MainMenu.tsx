@@ -123,49 +123,44 @@ const WelcomeSubtitle = styled.p`
 
 const AboutUsButton = styled.button`
   position: fixed;
-  top: 10px;
-  left: 20px;
-  padding: 12px 20px;
-  border: 1px solid var(--border-color);
-  border-radius: 15px;
-  background: var(--bg-card);
+  top: 20px;
+  left: 24px;
+  padding: 10px 18px;
+  border: 1px solid rgba(139, 69, 19, 0.2);
+  border-radius: 12px;
+  background: linear-gradient(135deg, rgba(139, 69, 19, 0.08), rgba(139, 69, 19, 0.04));
   color: var(--text-primary);
   font-family: 'Noto Sans SC', 'Inter', Arial, sans-serif;
-  font-size: 1rem;
+  font-size: 0.9rem;
   font-weight: 600;
   cursor: pointer;
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-  box-shadow: 
-    0 4px 12px var(--shadow-card),
-    0 2px 6px var(--shadow-soft);
-  backdrop-filter: blur(10px);
+  backdrop-filter: blur(12px);
   letter-spacing: 0.02em;
   z-index: 1000;
-  min-width: 80px;
+  min-width: 70px;
+  box-shadow: 0 2px 8px rgba(139, 69, 19, 0.1);
   
   @media (max-width: 480px) {
-    padding: 10px 16px;
-    font-size: 0.9rem;
-    top: 8px;
-    left: 15px;
-    min-width: 70px;
+    padding: 8px 14px;
+    font-size: 0.85rem;
+    top: 16px;
+    left: 20px;
+    min-width: 60px;
   }
   
   &:hover {
+    background: linear-gradient(135deg, rgba(139, 69, 19, 0.12), rgba(139, 69, 19, 0.08));
+    border-color: rgba(139, 69, 19, 0.3);
+    color: var(--matte-red);
     transform: translateY(-2px);
-    box-shadow: 
-      0 6px 20px var(--shadow-card),
-      0 3px 10px var(--shadow-soft);
-    background: var(--sand);
-    border-color: var(--matte-red);
-    color: var(--text-primary);
+    box-shadow: 0 4px 16px rgba(139, 69, 19, 0.15);
   }
   
   &:active {
     transform: translateY(-1px);
-    box-shadow: 
-      0 4px 15px var(--shadow-card),
-      0 2px 8px var(--shadow-soft);
+    background: linear-gradient(135deg, rgba(139, 69, 19, 0.1), rgba(139, 69, 19, 0.06));
+    box-shadow: 0 2px 8px rgba(139, 69, 19, 0.12);
   }
 `;
 

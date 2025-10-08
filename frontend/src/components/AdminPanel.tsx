@@ -892,6 +892,20 @@ interface YuanPurchase {
   full_name: string;
 }
 
+interface Review {
+  review_id: number;
+  telegram_id: string;
+  username: string;
+  full_name: string;
+  rating: number;
+  review_text: string;
+  photo_url: string | null;
+  is_approved: boolean;
+  created_at: string;
+  moderated_at: string | null;
+  moderated_by: string | null;
+}
+
 interface AdminPanelProps {
   onNavigate: (page: string) => void;
   toggleTheme: () => void;
@@ -909,6 +923,11 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState('dashboard');
+  
+  // Состояния для модерации отзывов
+  const [reviews, setReviews] = useState<Review[]>([]);
+  const [pendingReviewsCount, setPendingReviewsCount] = useState(0);
+  const [reviewsFilter, setReviewsFilter] = useState<string>('pending'); // pending, approved, all
   
   // Новые состояния для улучшенного UX
   const [searchTerm, setSearchTerm] = useState('');
@@ -1039,6 +1058,81 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
       HapticFeedback.error();
     } finally {
       setLoading(false);
+    }
+  };
+
+  // Функции для работы с отзывами
+  const loadReviewsForModeration = async () => {
+    try {
+      setLoading(true);
+      const response = await fetch('/api/admin/reviews', {
+        headers: {
+          'X-Telegram-User-Id': window.Telegram?.WebApp?.initDataUnsafe?.user?.id?.toString() || ''
+        }
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        setReviews(data.reviews || []);
+        
+        // Подсчитываем количество ожидающих модерации
+        const pendingCount = data.reviews?.filter((review: any) => !review.is_approved).length || 0;
+        setPendingReviewsCount(pendingCount);
+      } else {
+        console.error('Failed to load reviews');
+      }
+    } catch (error) {
+      console.error('Error loading reviews:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const approveReview = async (reviewId: number) => {
+    try {
+      const response = await fetch(`/api/admin/reviews/${reviewId}/approve`, {
+        method: 'POST',
+        headers: {
+          'X-Telegram-User-Id': window.Telegram?.WebApp?.initDataUnsafe?.user?.id?.toString() || ''
+        }
+      });
+      
+      if (response.ok) {
+        // Обновляем список отзывов
+        await loadReviewsForModeration();
+        alert('Отзыв одобрен и опубликован!');
+      } else {
+        alert('Ошибка одобрения отзыва');
+      }
+    } catch (error) {
+      console.error('Error approving review:', error);
+      alert('Ошибка одобрения отзыва');
+    }
+  };
+
+  const deleteReview = async (reviewId: number) => {
+    if (!confirm('Вы уверены, что хотите удалить этот отзыв? Это действие нельзя отменить.')) {
+      return;
+    }
+    
+    try {
+      const response = await fetch(`/api/admin/reviews/${reviewId}`, {
+        method: 'DELETE',
+        headers: {
+          'X-Telegram-User-Id': window.Telegram?.WebApp?.initDataUnsafe?.user?.id?.toString() || ''
+        }
+      });
+      
+      if (response.ok) {
+        // Обновляем список отзывов
+        await loadReviewsForModeration();
+        alert('Отзыв удален!');
+      } else {
+        alert('Ошибка удаления отзыва');
+      }
+    } catch (error) {
+      console.error('Error deleting review:', error);
+      alert('Ошибка удаления отзыва');
     }
   };
 
@@ -1818,7 +1912,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
     // Фильтрация по поисковому запросу
     if (searchTerm) {
       data = data.filter(item => {
-        const searchFields = [];
+        const searchFields: string[] = [];
         
         // Для пользователей
         if (activeTab === 'users') {
@@ -1871,7 +1965,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
         }
         
         return searchFields.some(field => 
-          field.toString().toLowerCase().includes(searchTerm.toLowerCase())
+          field.toLowerCase().includes(searchTerm.toLowerCase())
         );
       });
     }
@@ -2016,7 +2110,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
               }}>
                 ТРЕБУЮТ ДЕЙСТВИЯ
               </div>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '8px' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px' }}>
                 <TabButton $active={activeTab === 'delivery'} $isDark={isDarkTheme} onClick={() => { setActiveTab('delivery'); loadDeliveryOrders(); }}>
                   <div style={{ fontSize: '20px', marginBottom: '4px' }}>🚚</div>
                   <div>Доставка</div>
@@ -2037,6 +2131,25 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
                       fontWeight: '700'
                     }}>
                       {pendingOrders.length + pendingYuanPurchases.length}
+                    </div>
+                  )}
+                </TabButton>
+                <TabButton $active={activeTab === 'reviews'} $isDark={isDarkTheme} onClick={() => { setActiveTab('reviews'); loadReviewsForModeration(); }}>
+                  <div style={{ fontSize: '20px', marginBottom: '4px' }}>⭐</div>
+                  <div>Отзывы</div>
+                  {pendingReviewsCount > 0 && (
+                    <div style={{ 
+                      position: 'absolute', 
+                      top: '6px', 
+                      right: '6px', 
+                      background: 'var(--matte-red)', 
+                      color: 'white', 
+                      borderRadius: '10px', 
+                      padding: '2px 6px', 
+                      fontSize: '0.65rem',
+                      fontWeight: '700'
+                    }}>
+                      {pendingReviewsCount}
                     </div>
                   )}
                 </TabButton>
@@ -5467,6 +5580,262 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
                     </div>
                   </>
                 )}
+              </div>
+            )}
+          </Section>
+        )}
+
+        {/* Раздел отзывов */}
+        {activeTab === 'reviews' && (
+          <Section id="reviews-section" $isDark={isDarkTheme}>
+            <SectionTitle>⭐ Модерация отзывов</SectionTitle>
+            
+            <p style={{ 
+              color: 'var(--text-secondary)', 
+              marginBottom: '16px',
+              fontSize: '0.9rem'
+            }}>
+              Управление отзывами: одобрение новых и удаление нежелательных
+            </p>
+
+            {/* Фильтры */}
+            <div style={{ 
+              display: 'flex',
+              gap: '12px', 
+              marginBottom: '16px',
+              width: '100%',
+              alignItems: 'center',
+              flexWrap: 'wrap'
+            }}>
+              <div style={{ flex: '1 1 auto', minWidth: '200px' }}>
+                <label style={{ 
+                  display: 'block', 
+                  marginBottom: '4px',
+                  color: 'var(--text-secondary)',
+                  fontSize: '0.85rem',
+                  fontWeight: '500'
+                }}>
+                  🔍 Фильтр по статусу:
+                </label>
+                <select
+                  value={reviewsFilter}
+                  onChange={(e) => setReviewsFilter(e.target.value)}
+                  style={{
+                    width: '100%',
+                    padding: '8px 12px',
+                    borderRadius: '6px',
+                    border: '1px solid var(--border-color)',
+                    backgroundColor: 'var(--bg-card)',
+                    color: 'var(--text-primary)',
+                    fontSize: '0.9rem',
+                    outline: 'none'
+                  }}
+                >
+                  <option value="pending">⏳ Ожидают модерации</option>
+                  <option value="approved">✅ Одобренные</option>
+                  <option value="all">📋 Все отзывы</option>
+                </select>
+              </div>
+            </div>
+
+            {loading ? (
+              <div style={{ textAlign: 'center', padding: '40px' }}>
+                <div style={{ fontSize: '2rem', marginBottom: '16px' }}>⏳</div>
+                <p>Загрузка отзывов...</p>
+              </div>
+            ) : (
+              <div style={{ overflowX: 'auto' }}>
+                {(() => {
+                  const filteredReviews = reviews.filter((review: any) => {
+                    if (reviewsFilter === 'pending') return !review.is_approved;
+                    if (reviewsFilter === 'approved') return review.is_approved;
+                    return true; // all
+                  });
+
+                  return filteredReviews.length === 0 ? (
+                    <div style={{ 
+                      textAlign: 'center', 
+                      padding: '40px',
+                      color: 'var(--text-secondary)'
+                    }}>
+                      <div style={{ fontSize: '2rem', marginBottom: '16px' }}>⭐</div>
+                      <p>{reviews.length === 0 ? 'Нет отзывов для модерации' : 'Нет отзывов с выбранным статусом'}</p>
+                    </div>
+                  ) : (
+                    <div style={{ display: 'grid', gap: '16px' }}>
+                      {filteredReviews.map((review: any) => (
+                        <div
+                          key={review.review_id}
+                          style={{
+                            padding: '16px',
+                            backgroundColor: 'var(--bg-card)',
+                            borderRadius: '12px',
+                            border: '1px solid var(--border-color)',
+                            boxShadow: '0 2px 8px rgba(0, 0, 0, 0.05)',
+                            maxWidth: '100%',
+                            boxSizing: 'border-box'
+                          }}
+                        >
+                          {/* Заголовок карточки */}
+                          <div style={{ 
+                            display: 'flex', 
+                            justifyContent: 'space-between',
+                            alignItems: 'flex-start',
+                            marginBottom: '12px',
+                            paddingBottom: '12px',
+                            borderBottom: '1px solid var(--border-color)',
+                            gap: '8px'
+                          }}>
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <div style={{ 
+                                fontSize: '1.1rem', 
+                                fontWeight: 'bold', 
+                                color: 'var(--text-primary)',
+                                wordBreak: 'break-word'
+                              }}>
+                                Отзыв #{review.review_id}
+                              </div>
+                              <div style={{ 
+                                fontSize: '0.85rem', 
+                                color: 'var(--text-secondary)',
+                                marginTop: '4px'
+                              }}>
+                                {formatDateTime(review.created_at)}
+                              </div>
+                            </div>
+                            <div style={{ 
+                              padding: '6px 8px',
+                              borderRadius: '8px',
+                              background: review.is_approved ? '#28a745' : '#ffc107',
+                              color: 'white',
+                              fontSize: '0.75rem',
+                              fontWeight: 'bold',
+                              textAlign: 'center',
+                              whiteSpace: 'nowrap',
+                              flexShrink: 0
+                            }}>
+                              {review.is_approved ? '✅ Одобрен' : '⏳ Ожидает'}
+                            </div>
+                          </div>
+
+                          {/* Информация об отзыве */}
+                          <div style={{ marginBottom: '12px', display: 'grid', gap: '6px' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                              <span style={{ color: 'var(--text-secondary)', fontSize: '0.8rem' }}>👤 От:</span>
+                              <span style={{ 
+                                fontWeight: '500', 
+                                fontSize: '0.85rem'
+                              }}>
+                                {review.full_name || review.username || 'Аноним'}
+                              </span>
+                              {review.username && (
+                                <span style={{ 
+                                  color: 'var(--text-secondary)', 
+                                  fontSize: '0.75rem'
+                                }}>
+                                  (@{review.username})
+                                </span>
+                              )}
+                            </div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                              <span style={{ color: 'var(--text-secondary)', fontSize: '0.8rem' }}>⭐ Оценка:</span>
+                              <span style={{ 
+                                fontWeight: '500', 
+                                fontSize: '0.85rem'
+                              }}>
+                                {review.rating}/5
+                              </span>
+                            </div>
+                          </div>
+
+                          {/* Текст отзыва */}
+                          {review.review_text && (
+                            <div style={{ 
+                              marginBottom: '12px',
+                              padding: '12px',
+                              backgroundColor: 'var(--bg-secondary)',
+                              borderRadius: '8px',
+                              border: '1px solid var(--border-color)'
+                            }}>
+                              <div style={{ 
+                                fontSize: '0.85rem',
+                                lineHeight: '1.4',
+                                color: 'var(--text-primary)',
+                                whiteSpace: 'pre-wrap',
+                                wordBreak: 'break-word'
+                              }}>
+                                {review.review_text}
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Фото отзыва */}
+                          {review.photo_url && (
+                            <div style={{ marginBottom: '12px' }}>
+                              <img
+                                src={review.photo_url}
+                                alt="Фото отзыва"
+                                style={{
+                                  width: '100%',
+                                  maxWidth: '200px',
+                                  borderRadius: '8px',
+                                  border: '1px solid var(--border-color)'
+                                }}
+                              />
+                            </div>
+                          )}
+
+                          {/* Кнопки действий */}
+                          <div style={{ 
+                            display: 'flex', 
+                            gap: '8px',
+                            justifyContent: 'flex-end',
+                            flexWrap: 'wrap'
+                          }}>
+                            {!review.is_approved && (
+                              <button
+                                onClick={() => approveReview(review.review_id)}
+                                style={{
+                                  padding: '8px 16px',
+                                  borderRadius: '6px',
+                                  border: 'none',
+                                  backgroundColor: '#28a745',
+                                  color: 'white',
+                                  fontSize: '0.85rem',
+                                  fontWeight: '500',
+                                  cursor: 'pointer',
+                                  transition: 'background-color 0.2s'
+                                }}
+                                onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#218838'}
+                                onMouseOut={(e) => e.currentTarget.style.backgroundColor = '#28a745'}
+                              >
+                                ✅ Одобрить
+                              </button>
+                            )}
+                            <button
+                              onClick={() => deleteReview(review.review_id)}
+                              style={{
+                                padding: '8px 16px',
+                                borderRadius: '6px',
+                                border: 'none',
+                                backgroundColor: '#dc3545',
+                                color: 'white',
+                                fontSize: '0.85rem',
+                                fontWeight: '500',
+                                cursor: 'pointer',
+                                transition: 'background-color 0.2s'
+                              }}
+                              onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#c82333'}
+                              onMouseOut={(e) => e.currentTarget.style.backgroundColor = '#dc3545'}
+                            >
+                              🗑️ Удалить
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })()}
               </div>
             )}
           </Section>

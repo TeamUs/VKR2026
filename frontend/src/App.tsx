@@ -791,6 +791,8 @@ const App: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [isDarkTheme, setIsDarkTheme] = useState(false);
   const [randomWisdom, setRandomWisdom] = useState('');
+  const [isWriteModalOpen, setIsWriteModalOpen] = useState(false);
+  const [hideNavigation, setHideNavigation] = useState(false);
 
   const initializeUser = async (user: TelegramUser) => {
     try {
@@ -1060,11 +1062,11 @@ const App: React.FC = () => {
             </div>
             
             {currentView === 'order' && (
-              <OrderForm onNavigate={navigateTo} toggleTheme={toggleTheme} isDarkTheme={isDarkTheme} />
+              <OrderForm onNavigate={navigateTo} toggleTheme={toggleTheme} isDarkTheme={isDarkTheme} onModalStateChange={setHideNavigation} />
             )}
             
             {currentView === 'calculator' && (
-              <PriceCalculator onNavigate={navigateTo} toggleTheme={toggleTheme} isDarkTheme={isDarkTheme} />
+              <PriceCalculator onNavigate={navigateTo} toggleTheme={toggleTheme} isDarkTheme={isDarkTheme} onModalStateChange={setHideNavigation} />
             )}
             
             {currentView === 'tracking' && (
@@ -1094,7 +1096,13 @@ const App: React.FC = () => {
             )}
             
             {currentView === 'reviews' && (
-              <Reviews onNavigate={navigateTo} toggleTheme={toggleTheme} isDarkTheme={isDarkTheme} />
+              <Reviews 
+                onNavigate={navigateTo} 
+                toggleTheme={toggleTheme} 
+                isDarkTheme={isDarkTheme} 
+                hideNavigation={isWriteModalOpen}
+                onModalStateChange={setIsWriteModalOpen}
+              />
             )}
           </>
         )}
@@ -1139,7 +1147,8 @@ const App: React.FC = () => {
       <BottomNavigation 
         activeTab={activeTab} 
         onTabChange={handleTabChange} 
-        isDarkTheme={isDarkTheme} 
+        isDarkTheme={isDarkTheme}
+        hideNavigation={hideNavigation || isWriteModalOpen}
       />
     </>
   );
