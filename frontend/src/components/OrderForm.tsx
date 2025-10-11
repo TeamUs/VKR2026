@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import styled, { keyframes, css } from 'styled-components';
+import styled, { keyframes, css, createGlobalStyle } from 'styled-components';
 import { HapticFeedback } from '../utils/hapticFeedback';
+
 
 // Минималистичные анимации в стиле главного меню
 const fadeIn = keyframes`
@@ -468,6 +469,17 @@ const Button = styled.button<{ $variant?: 'primary' | 'secondary' }>`
           0 4px 12px var(--shadow-soft);
         border-color: var(--matte-red);
       }
+      
+      &:focus {
+        outline: none;
+        background: var(--matte-red);
+        color: var(--bg-primary);
+        box-shadow: 
+          0 4px 12px var(--shadow-soft),
+          0 2px 6px var(--shadow-card);
+        border-color: var(--border-color);
+        transform: none;
+      }
     `
     : css`
       background: var(--bg-card);
@@ -484,7 +496,22 @@ const Button = styled.button<{ $variant?: 'primary' | 'secondary' }>`
           0 4px 12px var(--shadow-soft);
         border-color: var(--matte-red);
       }
+      
+      &:focus {
+        outline: none;
+        background: var(--bg-card);
+        color: var(--text-primary);
+        box-shadow: 
+          0 4px 12px var(--shadow-soft),
+          0 2px 6px var(--shadow-card);
+        border-color: var(--border-color);
+        transform: none;
+      }
     `
+  }
+  
+  &:active {
+    transform: scale(0.98) !important;
   }
   
   &:disabled {
@@ -625,6 +652,17 @@ const VideoButton = styled.button`
     border-color: var(--matte-red);
     transform: translateY(-2px);
   }
+  
+  &:focus {
+    outline: none;
+    background: var(--sand);
+    border-color: var(--matte-red);
+    transform: translateY(-2px);
+  }
+  
+  &:active {
+    transform: scale(0.98);
+  }
 `;
 
 const LinkHelpButton = styled.button`
@@ -646,6 +684,17 @@ const LinkHelpButton = styled.button`
     background: var(--sand);
     border-color: var(--matte-red);
     transform: translateY(-2px);
+  }
+  
+  &:focus {
+    outline: none;
+    background: var(--sand);
+    border-color: var(--matte-red);
+    transform: translateY(-2px);
+  }
+  
+  &:active {
+    transform: scale(0.98);
   }
 `;
 
@@ -914,11 +963,29 @@ const AddItemButton = styled.button`
   transition: all 0.3s ease;
   width: 100%;
   margin-bottom: 8px;
+  outline: none;
   
   &:hover {
     border-color: var(--matte-red);
     background: var(--sand);
     color: var(--matte-red);
+  }
+  
+  &:active {
+    transform: scale(0.98);
+    border-color: var(--matte-red);
+    background: var(--sand);
+    color: var(--matte-red);
+  }
+  
+  /* Полностью убираем фокус */
+  &:focus {
+    outline: none;
+    border-color: var(--border-color);
+    background: var(--bg-card);
+    color: var(--text-primary);
+    box-shadow: none;
+    transform: none;
   }
 `;
 
@@ -955,8 +1022,16 @@ const QuantityButton = styled.button`
     transform: scale(1.1);
   }
   
+  &:focus {
+    outline: none;
+    background: var(--matte-red);
+    color: white;
+    transform: none;
+  }
+  
   &:active {
     transform: scale(0.95);
+    background: var(--terracotta);
   }
 `;
 
@@ -1005,6 +1080,12 @@ const OrderForm: React.FC<OrderFormProps> = ({ onNavigate, toggleTheme, isDarkTh
       ...prev,
       items: [...prev.items, { productLink: '', productSize: '', quantity: 1 }]
     }));
+    
+    // Простой способ убрать фокус - кликнуть в пустое место
+    setTimeout(() => {
+      const body = document.body;
+      body.click();
+    }, 50);
   };
 
   const removeItem = (index: number) => {
@@ -1023,6 +1104,12 @@ const OrderForm: React.FC<OrderFormProps> = ({ onNavigate, toggleTheme, isDarkTh
         i === index ? { ...item, [field]: value } : item
       )
     }));
+    
+    // Простой способ убрать фокус - кликнуть в пустое место
+    setTimeout(() => {
+      const body = document.body;
+      body.click();
+    }, 50);
   };
 
   const steps = [
@@ -1040,6 +1127,7 @@ const OrderForm: React.FC<OrderFormProps> = ({ onNavigate, toggleTheme, isDarkTh
       setShowSuccessModal(false);
     }
   }, [currentStep]);
+
 
   const validateStep = (step: number): boolean => {
     const newErrors: Record<string, string> = {};
@@ -1097,6 +1185,12 @@ const OrderForm: React.FC<OrderFormProps> = ({ onNavigate, toggleTheme, isDarkTh
     } else {
       HapticFeedback.error();
     }
+    
+    // Простой способ убрать фокус - кликнуть в пустое место
+    setTimeout(() => {
+      const body = document.body;
+      body.click();
+    }, 50);
   };
 
   const handleBack = () => {
@@ -1104,6 +1198,12 @@ const OrderForm: React.FC<OrderFormProps> = ({ onNavigate, toggleTheme, isDarkTh
     setCurrentStep(prev => Math.max(prev - 1, 1));
     // Сбрасываем модальное окно при возврате назад
     setShowSuccessModal(false);
+    
+    // Простой способ убрать фокус - кликнуть в пустое место
+    setTimeout(() => {
+      const body = document.body;
+      body.click();
+    }, 50);
   };
 
   const handleSubmit = async () => {
@@ -1115,6 +1215,11 @@ const OrderForm: React.FC<OrderFormProps> = ({ onNavigate, toggleTheme, isDarkTh
 
     setIsSubmitting(true);
     HapticFeedback.medium();
+    
+    // Сбрасываем фокус с кнопки после нажатия
+    if (document.activeElement instanceof HTMLElement) {
+      document.activeElement.blur();
+    }
 
     try {
       // Получаем данные пользователя из Telegram
@@ -1422,14 +1527,14 @@ const OrderForm: React.FC<OrderFormProps> = ({ onNavigate, toggleTheme, isDarkTh
                   <QuantityCounter>
                     <QuantityButton 
                       type="button" 
-                      onClick={() => updateItem(index, 'quantity', Math.max(1, item.quantity - 1))}
+                      onMouseDown={() => updateItem(index, 'quantity', Math.max(1, item.quantity - 1))}
                     >
                       −
                     </QuantityButton>
                     <QuantityDisplay>{item.quantity}</QuantityDisplay>
                     <QuantityButton 
                       type="button" 
-                      onClick={() => updateItem(index, 'quantity', Math.min(999, item.quantity + 1))}
+                      onMouseDown={() => updateItem(index, 'quantity', Math.min(999, item.quantity + 1))}
                     >
                       +
                     </QuantityButton>
@@ -1440,7 +1545,11 @@ const OrderForm: React.FC<OrderFormProps> = ({ onNavigate, toggleTheme, isDarkTh
             </ItemContainer>
           ))}
           
-          <AddItemButton type="button" onClick={addItem}>
+          <AddItemButton 
+            type="button" 
+            onMouseDown={addItem}
+            onTouchStart={addItem}
+          >
             + Добавить товар
           </AddItemButton>
           
@@ -1541,32 +1650,110 @@ const OrderForm: React.FC<OrderFormProps> = ({ onNavigate, toggleTheme, isDarkTh
           <div style={{ marginBottom: '20px' }}>
             <h3 style={{ color: 'var(--text-primary)', marginBottom: '15px' }}>Проверьте данные заказа:</h3>
             
-            <div style={{ background: 'var(--bg-secondary)', padding: '15px', borderRadius: '12px', marginBottom: '10px' }}>
-              <strong>Товары ({formData.items.length}):</strong>
+            <div style={{ 
+              background: 'var(--bg-secondary)', 
+              padding: '20px', 
+              borderRadius: '16px', 
+              marginBottom: '16px',
+              border: '1px solid var(--border-color)',
+              boxShadow: '0 4px 12px var(--shadow-soft)'
+            }}>
+              <div style={{ 
+                color: 'var(--text-primary)', 
+                fontSize: '1.1rem', 
+                fontWeight: '600', 
+                marginBottom: '15px',
+                paddingBottom: '8px',
+                borderBottom: '1px solid var(--border-color)'
+              }}>
+                Товары ({formData.items.length}):
+              </div>
               {formData.items.map((item, index) => (
-                <div key={index} style={{ marginTop: '10px', padding: '10px', background: 'var(--bg-card)', borderRadius: '8px' }}>
-                  <div><strong>Товар {index + 1}:</strong> {item.productLink}</div>
-                  {item.productSize && <div><strong>Размер:</strong> {item.productSize}</div>}
+                <div key={index} style={{ 
+                  marginTop: '12px', 
+                  padding: '15px', 
+                  background: 'var(--bg-card)', 
+                  borderRadius: '12px',
+                  border: '1px solid var(--border-color)',
+                  boxShadow: '0 2px 8px var(--shadow-soft)'
+                }}>
+                  <div style={{ marginBottom: '8px' }}><strong>Товар {index + 1}:</strong> {item.productLink}</div>
+                  {item.productSize && <div style={{ marginBottom: '8px' }}><strong>Размер:</strong> {item.productSize}</div>}
                   <div><strong>Количество:</strong> {item.quantity}</div>
                 </div>
               ))}
             </div>
             
-            <div style={{ background: 'var(--bg-secondary)', padding: '15px', borderRadius: '12px', marginBottom: '10px' }}>
-              <strong>Контактные данные:</strong><br/>
-              Имя: {formData.name}<br/>
-              Телефон: {formData.phone}
+            <div style={{ 
+              background: 'var(--bg-secondary)', 
+              padding: '20px', 
+              borderRadius: '16px', 
+              marginBottom: '16px',
+              border: '1px solid var(--border-color)',
+              boxShadow: '0 4px 12px var(--shadow-soft)'
+            }}>
+              <div style={{ 
+                color: 'var(--text-primary)', 
+                fontSize: '1.1rem', 
+                fontWeight: '600', 
+                marginBottom: '15px',
+                paddingBottom: '8px',
+                borderBottom: '1px solid var(--border-color)'
+              }}>
+                Контактные данные:
+              </div>
+              <div style={{ lineHeight: '1.6' }}>
+                <div style={{ marginBottom: '8px' }}><strong>Имя:</strong> {formData.name}</div>
+                <div><strong>Телефон:</strong> {formData.phone}</div>
+              </div>
             </div>
             
-            <div style={{ background: 'var(--bg-secondary)', padding: '15px', borderRadius: '12px', marginBottom: '10px' }}>
-              <strong>Доставка:</strong><br/>
-              Адрес: {formData.address}<br/>
-              Пункт выдачи: {formData.pickupPoint}
+            <div style={{ 
+              background: 'var(--bg-secondary)', 
+              padding: '20px', 
+              borderRadius: '16px', 
+              marginBottom: '16px',
+              border: '1px solid var(--border-color)',
+              boxShadow: '0 4px 12px var(--shadow-soft)'
+            }}>
+              <div style={{ 
+                color: 'var(--text-primary)', 
+                fontSize: '1.1rem', 
+                fontWeight: '600', 
+                marginBottom: '15px',
+                paddingBottom: '8px',
+                borderBottom: '1px solid var(--border-color)'
+              }}>
+                Доставка:
+              </div>
+              <div style={{ lineHeight: '1.6' }}>
+                <div style={{ marginBottom: '8px' }}><strong>Адрес:</strong> {formData.address}</div>
+                <div><strong>Пункт выдачи:</strong> {formData.pickupPoint}</div>
+              </div>
             </div>
             
             {formData.comments && (
-              <div style={{ background: 'var(--bg-secondary)', padding: '15px', borderRadius: '12px', marginBottom: '10px' }}>
-                <strong>Комментарии:</strong> {formData.comments}
+              <div style={{ 
+                background: 'var(--bg-secondary)', 
+                padding: '20px', 
+                borderRadius: '16px', 
+                marginBottom: '16px',
+                border: '1px solid var(--border-color)',
+                boxShadow: '0 4px 12px var(--shadow-soft)'
+              }}>
+                <div style={{ 
+                  color: 'var(--text-primary)', 
+                  fontSize: '1.1rem', 
+                  fontWeight: '600', 
+                  marginBottom: '15px',
+                  paddingBottom: '8px',
+                  borderBottom: '1px solid var(--border-color)'
+                }}>
+                  Комментарии:
+                </div>
+                <div style={{ lineHeight: '1.6' }}>
+                  {formData.comments}
+                </div>
               </div>
             )}
             
@@ -1576,19 +1763,27 @@ const OrderForm: React.FC<OrderFormProps> = ({ onNavigate, toggleTheme, isDarkTh
 
         <ButtonGroup>
           {currentStep > 1 && (
-            <Button type="button" onClick={handleBack} $variant="secondary">
+            <Button 
+              type="button" 
+              onMouseDown={handleBack} 
+              $variant="secondary"
+            >
               Назад
             </Button>
           )}
           
           {currentStep < steps.length ? (
-            <Button type="button" onClick={handleNext} $variant="primary">
+            <Button 
+              type="button" 
+              onMouseDown={handleNext} 
+              $variant="primary"
+            >
               Далее
             </Button>
           ) : (
             <Button 
               type="button" 
-              onClick={handleSubmit}
+              onMouseDown={handleSubmit}
               $variant="primary" 
               disabled={isSubmitting}
             >
