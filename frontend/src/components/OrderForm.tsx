@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useLayoutEffect } from 'react';
 import styled, { keyframes, css, createGlobalStyle } from 'styled-components';
 import { HapticFeedback } from '../utils/hapticFeedback';
 
@@ -535,19 +535,22 @@ const ButtonGroup = styled.div`
 // Модальное окно успеха
 const ModalOverlay = styled.div<{ $modalPosition: { top: string; transform: string } }>`
   position: fixed;
-  top: -100px;
+  top: 0;
   left: 0;
   right: 0;
-  bottom: -100px;
-  background: rgba(0, 0, 0, 0.8);
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(2px);
   display: flex;
   align-items: flex-start;
   justify-content: center;
   z-index: 1000;
   animation: ${fadeIn} 0.3s ease-out;
   padding: 20px;
+  padding-top: 0;
   box-sizing: border-box;
-  overflow: hidden;
+  overflow-y: auto;
+  overflow-x: hidden;
 `;
 
 const SuccessModal = styled.div<{ $modalPosition: { top: string; transform: string } }>`
@@ -555,7 +558,7 @@ const SuccessModal = styled.div<{ $modalPosition: { top: string; transform: stri
   border-radius: 20px;
   padding: 0;
   max-width: 95vw;
-  max-height: 85vh;
+  max-height: 90vh;
   width: 90%;
   text-align: center;
   border: 1px solid var(--border-color);
@@ -566,8 +569,23 @@ const SuccessModal = styled.div<{ $modalPosition: { top: string; transform: stri
   display: flex;
   flex-direction: column;
   position: absolute;
-  top: ${props => props.$modalPosition.top};
-  transform: ${props => props.$modalPosition.transform};
+  top: 20px;
+  left: 50%;
+  transform: translateY(var(--scroll-position, 0px)) translateX(-50%);
+  
+  /* Плавная анимация появления */
+  animation: successModalSlideIn 0.4s ease-out;
+  
+  @keyframes successModalSlideIn {
+    from {
+      opacity: 0;
+      transform: translateY(var(--scroll-position, 0px)) translateX(-50%) scale(0.95);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(var(--scroll-position, 0px)) translateX(-50%) scale(1);
+    }
+  }
 `;
 
 const SuccessHeader = styled.div`
@@ -707,19 +725,22 @@ const ButtonContainer = styled.div`
 
 const VideoModalOverlay = styled.div<{ $modalPosition: { top: string; transform: string } }>`
   position: fixed;
-  top: -100px;
+  top: 0;
   left: 0;
   right: 0;
-  bottom: -100px;
-  background: rgba(0, 0, 0, 0.8);
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(2px);
   display: flex;
   align-items: flex-start;
   justify-content: center;
   z-index: 1000;
   animation: ${fadeIn} 0.3s ease-out;
   padding: 20px;
+  padding-top: 0;
   box-sizing: border-box;
-  overflow: hidden;
+  overflow-y: auto;
+  overflow-x: hidden;
 `;
 
 const VideoModal = styled.div<{ $modalPosition: { top: string; transform: string } }>`
@@ -727,7 +748,7 @@ const VideoModal = styled.div<{ $modalPosition: { top: string; transform: string
   border-radius: 20px;
   padding: 0;
   max-width: 95vw;
-  max-height: 85vh;
+  max-height: 90vh;
   width: 95vw;
   text-align: center;
   border: 1px solid var(--border-color);
@@ -736,11 +757,25 @@ const VideoModal = styled.div<{ $modalPosition: { top: string; transform: string
     0 10px 20px var(--shadow-card);
   overflow: hidden;
   position: absolute;
-  top: ${props => props.$modalPosition.top};
+  top: 20px;
   left: 50%;
-  transform: ${props => props.$modalPosition.transform} translateX(-50%);
+  transform: translateY(var(--scroll-position, 0px)) translateX(-50%);
   display: flex;
   flex-direction: column;
+  
+  /* Плавная анимация появления */
+  animation: modalSlideIn 0.4s ease-out;
+  
+  @keyframes modalSlideIn {
+    from {
+      opacity: 0;
+      transform: translateY(var(--scroll-position, 0px)) translateX(-50%) scale(0.95);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(var(--scroll-position, 0px)) translateX(-50%) scale(1);
+    }
+  }
 `;
 
 const VideoHeader = styled.div`
@@ -806,8 +841,8 @@ const VideoCloseButton = styled.button`
   }
 `;
 
-const VideoCloseIcon = styled.button`
-  background: var(--bg-secondary);
+const VideoCloseIcon = styled.button<{ $isDark?: boolean }>`
+  background: ${props => props.$isDark ? 'var(--bg-secondary)' : 'transparent'};
   border: 1px solid var(--matte-red);
   border-radius: 50%;
   width: 36px;
@@ -836,7 +871,7 @@ const LinkHelpModal = styled.div<{ $modalPosition: { top: string; transform: str
   border-radius: 20px;
   padding: 0;
   max-width: 95vw;
-  max-height: 85vh;
+  max-height: 90vh;
   width: 95vw;
   text-align: center;
   border: 1px solid var(--border-color);
@@ -845,11 +880,25 @@ const LinkHelpModal = styled.div<{ $modalPosition: { top: string; transform: str
     0 10px 20px var(--shadow-card);
   overflow: hidden;
   position: absolute;
-  top: ${props => props.$modalPosition.top};
+  top: 20px;
   left: 50%;
-  transform: ${props => props.$modalPosition.transform} translateX(-50%);
+  transform: translateY(var(--scroll-position, 0px)) translateX(-50%);
   display: flex;
   flex-direction: column;
+  
+  /* Плавная анимация появления */
+  animation: linkHelpModalSlideIn 0.4s ease-out;
+  
+  @keyframes linkHelpModalSlideIn {
+    from {
+      opacity: 0;
+      transform: translateY(var(--scroll-position, 0px)) translateX(-50%) scale(0.95);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(var(--scroll-position, 0px)) translateX(-50%) scale(1);
+    }
+  }
 `;
 
 const LinkHelpHeader = styled.div`
@@ -896,14 +945,24 @@ const LinkHelpImage = styled.img`
 `;
 
 // Стили для работы с товарами
-const ItemContainer = styled.div`
+const ItemContainer = styled.div<{ $isDark?: boolean }>`
   background: var(--bg-card);
-  border: 1px solid var(--border-color);
+  border: 2px solid ${props => props.$isDark ? 'var(--matte-red)' : 'var(--terracotta)'};
   border-radius: 12px;
   padding: 20px;
   margin-bottom: 20px;
-  box-shadow: 0 2px 8px var(--shadow-soft);
+  box-shadow: ${props => props.$isDark 
+    ? '0 0 15px rgba(162, 59, 59, 0.4), 0 2px 8px var(--shadow-soft)' 
+    : '0 0 12px rgba(139, 69, 19, 0.3), 0 2px 8px var(--shadow-soft)'};
   backdrop-filter: blur(10px);
+  transition: all 0.3s ease;
+  
+  &:hover {
+    box-shadow: ${props => props.$isDark 
+      ? '0 0 20px rgba(162, 59, 59, 0.6), 0 4px 12px var(--shadow-card)' 
+      : '0 0 18px rgba(139, 69, 19, 0.5), 0 4px 12px var(--shadow-card)'};
+    transform: translateY(-2px);
+  }
 `;
 
 const ItemHeader = styled.div`
@@ -1001,13 +1060,13 @@ const QuantityCounter = styled.div`
   backdrop-filter: blur(10px);
 `;
 
-const QuantityButton = styled.button`
+const QuantityButton = styled.button<{ $isDark?: boolean }>`
   background: var(--matte-red);
   border: none;
   border-radius: 50%;
   width: 32px;
   height: 32px;
-  color: white;
+  color: ${props => props.$isDark ? '#000000' : '#FFFFFF'};
   font-size: 16px;
   font-weight: 600;
   cursor: pointer;
@@ -1256,18 +1315,19 @@ const OrderForm: React.FC<OrderFormProps> = ({ onNavigate, toggleTheme, isDarkTh
           setFormData(prev => ({ ...prev, trackingNumber: responseData.trackingNumber }));
         }
         
-        // Рассчитываем позицию модального окна по центру экрана
+        // Рассчитываем позицию модального окна точно по центру текущего экрана пользователя
         const scrollTop = window.pageYOffset || document.documentElement.scrollTop;
-        const windowHeight = window.innerHeight;
-        const modalTop = scrollTop + (windowHeight / 2);
+        const viewportHeight = window.innerHeight;
+        const centerPosition = scrollTop + (viewportHeight / 2);
         
         setSuccessModalPosition({
-          top: `${modalTop}px`,
+          top: `${centerPosition}px`,
           transform: 'translateY(-50%)'
         });
         
         // Показываем модальное окно только после успешной отправки
         setShowSuccessModal(true);
+        onModalStateChange?.(true);
       } else {
         throw new Error('Ошибка при отправке заказа');
       }
@@ -1392,12 +1452,8 @@ const OrderForm: React.FC<OrderFormProps> = ({ onNavigate, toggleTheme, isDarkTh
     HapticFeedback.selection();
     setVideoError(false);
     
-    const scrollTop = window.pageYOffset || document.documentElement.scrollTop;
-    const windowHeight = window.innerHeight;
-    const modalTop = scrollTop + (windowHeight / 2) + 50;
-    
     setVideoModalPosition({
-      top: `${modalTop}px`,
+      top: '50%',
       transform: 'translateY(-50%)'
     });
     setShowVideoModal(true);
@@ -1407,7 +1463,19 @@ const OrderForm: React.FC<OrderFormProps> = ({ onNavigate, toggleTheme, isDarkTh
   const handleCloseSuccessModal = () => {
     HapticFeedback.light();
     setShowSuccessModal(false);
+    onModalStateChange?.(false);
     onNavigate('main');
+  };
+
+  const handleCopyTrackingNumber = async () => {
+    try {
+      await navigator.clipboard.writeText(formData.trackingNumber);
+      HapticFeedback.success();
+      // Можно добавить уведомление о копировании
+    } catch (err) {
+      console.error('Failed to copy tracking number:', err);
+      HapticFeedback.error();
+    }
   };
 
   const handleCloseVideoModal = () => {
@@ -1419,12 +1487,8 @@ const OrderForm: React.FC<OrderFormProps> = ({ onNavigate, toggleTheme, isDarkTh
   const handleLinkHelpClick = () => {
     HapticFeedback.selection();
     
-    const scrollTop = window.pageYOffset || document.documentElement.scrollTop;
-    const windowHeight = window.innerHeight;
-    const modalTop = scrollTop + (windowHeight / 2) + 50;
-    
     setLinkHelpModalPosition({
-      top: `${modalTop}px`,
+      top: '50%',
       transform: 'translateY(-50%)'
     });
     setShowLinkHelpModal(true);
@@ -1486,7 +1550,7 @@ const OrderForm: React.FC<OrderFormProps> = ({ onNavigate, toggleTheme, isDarkTh
         <StepContent $active={currentStep === 1}>
           <Label>Товары в заказе*</Label>
           {formData.items.map((item, index) => (
-            <ItemContainer key={index}>
+            <ItemContainer key={index} $isDark={isDarkTheme}>
               <ItemHeader>
                 <ItemTitle>Товар {index + 1}</ItemTitle>
                 {formData.items.length > 1 && (
@@ -1528,6 +1592,7 @@ const OrderForm: React.FC<OrderFormProps> = ({ onNavigate, toggleTheme, isDarkTh
                     <QuantityButton 
                       type="button" 
                       onMouseDown={() => updateItem(index, 'quantity', Math.max(1, item.quantity - 1))}
+                      $isDark={isDarkTheme}
                     >
                       −
                     </QuantityButton>
@@ -1535,6 +1600,7 @@ const OrderForm: React.FC<OrderFormProps> = ({ onNavigate, toggleTheme, isDarkTh
                     <QuantityButton 
                       type="button" 
                       onMouseDown={() => updateItem(index, 'quantity', Math.min(999, item.quantity + 1))}
+                      $isDark={isDarkTheme}
                     >
                       +
                     </QuantityButton>
@@ -1672,10 +1738,12 @@ const OrderForm: React.FC<OrderFormProps> = ({ onNavigate, toggleTheme, isDarkTh
                 <div key={index} style={{ 
                   marginTop: '12px', 
                   padding: '15px', 
-                  background: 'var(--bg-card)', 
+                  background: isDarkTheme ? 'var(--bg-card)' : '#FFFFFF', 
                   borderRadius: '12px',
-                  border: '1px solid var(--border-color)',
-                  boxShadow: '0 2px 8px var(--shadow-soft)'
+                  border: `2px solid ${isDarkTheme ? 'var(--matte-red)' : 'var(--terracotta)'}`,
+                  boxShadow: isDarkTheme 
+                    ? '0 0 15px rgba(162, 59, 59, 0.3), 0 2px 8px var(--shadow-soft)' 
+                    : '0 0 12px rgba(139, 69, 19, 0.2), 0 2px 8px var(--shadow-soft)'
                 }}>
                   <div style={{ marginBottom: '8px' }}><strong>Товар {index + 1}:</strong> {item.productLink}</div>
                   {item.productSize && <div style={{ marginBottom: '8px' }}><strong>Размер:</strong> {item.productSize}</div>}
@@ -1795,8 +1863,17 @@ const OrderForm: React.FC<OrderFormProps> = ({ onNavigate, toggleTheme, isDarkTh
 
       {/* Модальное окно успеха - показывается только после успешной отправки заказа */}
       {showSuccessModal && currentStep === 4 && !isSubmitting && (
-        <ModalOverlay $modalPosition={successModalPosition} onClick={() => setShowSuccessModal(false)}>
-          <SuccessModal $modalPosition={successModalPosition} onClick={(e) => e.stopPropagation()}>
+        <ModalOverlay $modalPosition={successModalPosition} onClick={() => {
+          setShowSuccessModal(false);
+          onModalStateChange?.(false);
+        }}>
+          <SuccessModal 
+            $modalPosition={successModalPosition} 
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              '--scroll-position': `${window.pageYOffset || document.documentElement.scrollTop}px`
+            } as React.CSSProperties}
+          >
             <SuccessHeader>
               <SuccessTitle>Заказ оформлен!</SuccessTitle>
             </SuccessHeader>
@@ -1817,28 +1894,53 @@ const OrderForm: React.FC<OrderFormProps> = ({ onNavigate, toggleTheme, isDarkTh
                   textAlign: 'center'
                 }}>
                   <div style={{
-                    fontSize: '0.85rem',
+                    fontSize: '1rem',
                     color: 'var(--text-secondary)',
                     marginBottom: '8px',
                     fontWeight: '500'
                   }}>
                     🔍 Номер отслеживания:
                   </div>
-                  <div style={{
-                    fontSize: '1.2rem',
-                    fontWeight: 'bold',
-                    color: 'var(--matte-red)',
-                    fontFamily: 'JetBrains Mono, monospace',
-                    letterSpacing: '2px'
-                  }}>
+                  <div 
+                    onClick={handleCopyTrackingNumber}
+                    style={{
+                      fontSize: '1.4rem',
+                      fontWeight: 'bold',
+                      color: 'var(--matte-red)',
+                      fontFamily: 'JetBrains Mono, monospace',
+                      letterSpacing: '2px',
+                      cursor: 'pointer',
+                      padding: '8px 12px',
+                      borderRadius: '8px',
+                      transition: 'all 0.3s ease',
+                      backgroundColor: 'transparent',
+                      border: '1px solid transparent'
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.backgroundColor = 'var(--bg-card)';
+                      e.currentTarget.style.borderColor = 'var(--matte-red)';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.backgroundColor = 'transparent';
+                      e.currentTarget.style.borderColor = 'transparent';
+                    }}
+                  >
                     {formData.trackingNumber}
                   </div>
                   <div style={{
-                    fontSize: '0.75rem',
+                    fontSize: '0.9rem',
                     color: 'var(--text-secondary)',
                     marginTop: '8px'
                   }}>
                     Сохраните этот номер для отслеживания заказа
+                  </div>
+                  <div style={{
+                    fontSize: '0.85rem',
+                    color: 'var(--text-secondary)',
+                    marginTop: '4px',
+                    fontStyle: 'italic'
+                  }}>
+                    💡 Нажмите на номер для копирования
                   </div>
                 </div>
               )}
@@ -1853,11 +1955,17 @@ const OrderForm: React.FC<OrderFormProps> = ({ onNavigate, toggleTheme, isDarkTh
 
       {/* Модальное окно с видео-инструкцией */}
       {showVideoModal && (
-        <VideoModalOverlay $modalPosition={videoModalPosition}>
-          <VideoModal $modalPosition={videoModalPosition}>
+        <VideoModalOverlay $modalPosition={videoModalPosition} onClick={handleCloseVideoModal}>
+          <VideoModal 
+            $modalPosition={videoModalPosition}
+            style={{
+              '--scroll-position': `${window.pageYOffset || document.documentElement.scrollTop}px`
+            } as React.CSSProperties}
+            onClick={(e) => e.stopPropagation()}
+          >
             <VideoHeader>
               <VideoTitle>Видео-инструкция</VideoTitle>
-              <VideoCloseIcon onClick={handleCloseVideoModal}>
+              <VideoCloseIcon onClick={handleCloseVideoModal} $isDark={isDarkTheme}>
                 ×
               </VideoCloseIcon>
             </VideoHeader>
@@ -1932,11 +2040,17 @@ const OrderForm: React.FC<OrderFormProps> = ({ onNavigate, toggleTheme, isDarkTh
 
       {/* Модальное окно с помощью по поиску ссылки */}
       {showLinkHelpModal && (
-        <VideoModalOverlay $modalPosition={linkHelpModalPosition}>
-          <LinkHelpModal $modalPosition={linkHelpModalPosition}>
+        <VideoModalOverlay $modalPosition={linkHelpModalPosition} onClick={handleCloseLinkHelpModal}>
+          <LinkHelpModal 
+            $modalPosition={linkHelpModalPosition}
+            style={{
+              '--scroll-position': `${window.pageYOffset || document.documentElement.scrollTop}px`
+            } as React.CSSProperties}
+            onClick={(e) => e.stopPropagation()}
+          >
             <LinkHelpHeader>
               <LinkHelpTitle>Где найти ссылку</LinkHelpTitle>
-              <VideoCloseIcon onClick={handleCloseLinkHelpModal}>
+              <VideoCloseIcon onClick={handleCloseLinkHelpModal} $isDark={isDarkTheme}>
                 ×
               </VideoCloseIcon>
             </LinkHelpHeader>

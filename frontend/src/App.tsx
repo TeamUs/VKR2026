@@ -60,7 +60,7 @@ const GlobalStyle = createGlobalStyle`
     --shadow-card: rgba(164, 151, 132, 0.2);
     --glow-red: rgba(162, 59, 59, 0.3);
     --glow-terracotta: rgba(184, 107, 75, 0.5);
-    --pattern-color: rgba(139, 69, 19, 0.5);
+    --pattern-color: rgba(139, 69, 19, 0.8);
     --border-color: rgba(162, 59, 59, 0.2);
   }
 
@@ -1080,7 +1080,7 @@ const App: React.FC = () => {
             )}
             
             {currentView === 'instructions' && (
-              <Instructions onNavigate={navigateTo} toggleTheme={toggleTheme} isDarkTheme={isDarkTheme} />
+              <Instructions onNavigate={navigateTo} toggleTheme={toggleTheme} isDarkTheme={isDarkTheme} onModalStateChange={setHideNavigation} />
             )}
             
             {currentView === 'referral' && (
@@ -1115,6 +1115,7 @@ const App: React.FC = () => {
               isDarkTheme={isDarkTheme}
               toggleTheme={toggleTheme}
               onNavigate={navigateTo}
+              onModalStateChange={setHideNavigation}
             />
           </Suspense>
         )}
@@ -1137,6 +1138,7 @@ const App: React.FC = () => {
               telegramId={telegramUser?.id?.toString() || 'demo'} 
               isDarkTheme={isDarkTheme}
               toggleTheme={toggleTheme}
+              onModalStateChange={setHideNavigation}
             />
           </Suspense>
         )}

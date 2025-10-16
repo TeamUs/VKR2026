@@ -1,6 +1,5 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useLayoutEffect } from 'react';
 import styled, { keyframes } from 'styled-components';
-import AchievementsModal from './AchievementsModal';
 import LevelsModal from './LevelsModal';
 import { HapticFeedback } from '../utils/hapticFeedback';
 
@@ -72,6 +71,9 @@ interface ProfileData {
       total_bought_cny: number;
       total_savings: number;
     };
+    total_savings: {
+      total: number;
+    };
   };
   gamification: {
     level: string;
@@ -82,6 +84,7 @@ interface ProfileData {
       id: string;
       name: string;
       icon: string;
+      unlocked: boolean;
     }>;
   };
 }
@@ -91,6 +94,7 @@ interface ProfileProps {
   isDarkTheme: boolean;
   toggleTheme: () => void;
   onNavigate: (page: string) => void;
+  onModalStateChange?: (isOpen: boolean) => void;
 }
 
 const ProfileContainer = styled.div<{ $isDark: boolean }>`
@@ -394,23 +398,6 @@ const LevelProgress = styled.div`
   color: var(--text-secondary);
 `;
 
-const ProgressBar = styled.div<{ $isDark: boolean }>`
-  width: 100%;
-  height: 8px;
-  background: ${props => props.$isDark ? 'var(--bg-secondary)' : 'var(--bg-secondary)'};
-  border-radius: 4px;
-  overflow: hidden;
-  margin-top: 12px;
-`;
-
-const ProgressFill = styled.div<{ $progress: number; $isDark: boolean }>`
-  height: 100%;
-  width: ${props => props.$progress}%;
-  background: linear-gradient(90deg, var(--matte-red), var(--terracotta));
-  border-radius: 4px;
-  transition: width 0.8s cubic-bezier(0.4, 0, 0.2, 1);
-  box-shadow: 0 0 8px var(--glow-red);
-`;
 
 const AchievementsSection = styled.div<{ $isDark: boolean }>`
   background: ${props => props.$isDark ? 'rgba(42, 42, 42, 0.95)' : 'rgba(230, 211, 179, 0.95)'};
@@ -443,20 +430,22 @@ const Section = styled.div<{ $isDark: boolean }>`
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
 `;
 
-const AchievementsGrid = styled.div`
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-  gap: 12px;
-`;
 
 const AchievementItem = styled.div<{ $isDark: boolean }>`
   background: ${props => props.$isDark ? 'rgba(42, 42, 42, 0.95)' : 'rgba(230, 211, 179, 0.95)'};
-  border-radius: 12px;
-  padding: 16px;
+  border-radius: 8px;
+  padding: 8px;
   text-align: center;
   border: 1px solid var(--border-color);
   transition: all 0.3s ease;
   backdrop-filter: blur(10px);
+  width: 100px;
+  height: 100px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
   
   &:hover {
     transform: translateY(-2px);
@@ -471,6 +460,7 @@ const HistorySection = styled.div<{ $isDark: boolean }>`
   margin: 0 16px 20px 16px;
   border: 1px solid var(--border-color);
   backdrop-filter: blur(10px);
+  box-shadow: 0 4px 20px var(--shadow-card);
 `;
 
 const HistoryTitle = styled.div<{ $isDark: boolean }>`
@@ -485,10 +475,6 @@ const HistoryTitle = styled.div<{ $isDark: boolean }>`
   cursor: pointer;
   transition: all 0.3s ease;
   position: relative;
-  
-  &:hover {
-    color: var(--matte-red);
-  }
 `;
 
 const HistoryArrow = styled.span<{ $isExpanded: boolean }>`
@@ -513,6 +499,8 @@ const HistoryList = styled.div<{ $isExpanded: boolean }>`
   max-height: ${props => props.$isExpanded ? '400px' : '0'};
   overflow: ${props => props.$isExpanded ? 'auto' : 'hidden'};
   transition: max-height 0.3s ease;
+  padding-right: 8px;
+  margin-right: -8px;
   
   /* Стилизация скроллбара */
   &::-webkit-scrollbar {
@@ -534,12 +522,15 @@ const HistoryList = styled.div<{ $isExpanded: boolean }>`
 `;
 
 const HistoryItem = styled.div<{ $isDark: boolean }>`
-  background: ${props => props.$isDark ? 'rgba(42, 42, 42, 0.95)' : '#F8F5ED'};
+  background: ${props => props.$isDark ? 'rgba(35, 35, 35, 0.8)' : 'rgba(255, 255, 255, 0.7)'};
   border-radius: 12px;
   padding: 16px;
   margin-bottom: 12px;
-  border: none;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  border: 1px solid ${props => props.$isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)'};
+  box-shadow: 
+    0 2px 8px rgba(0, 0, 0, 0.15),
+    0 1px 3px rgba(0, 0, 0, 0.1);
+  backdrop-filter: blur(10px);
 `;
 
 const HistoryItemHeader = styled.div`
@@ -612,21 +603,10 @@ const HistoryDetail = styled.div<{ $isDark: boolean }>`
   }
 `;
 
-const AchievementIcon = styled.div`
-  font-size: 24px;
-  margin-bottom: 8px;
-`;
-
-const AchievementName = styled.div`
-  font-family: 'Noto Sans SC', 'Inter', Arial, sans-serif;
-  font-size: 12px;
-  font-weight: 500;
-  color: var(--text-primary);
-`;
 
 const ViewAllButton = styled.button<{ $isDark: boolean }>`
   background: var(--matte-red);
-  color: white;
+  color: ${props => props.$isDark ? 'black' : 'white'};
   border: none;
   border-radius: 12px;
   padding: 12px 24px;
@@ -694,7 +674,448 @@ const ErrorMessage = styled.div`
   font-family: 'Noto Sans SC', 'Inter', Arial, sans-serif;
 `;
 
-const Profile: React.FC<ProfileProps> = ({ telegramId, isDarkTheme, toggleTheme, onNavigate }) => {
+// Стили для модального окна достижений (точно как в Instructions)
+const VideoModalOverlay = styled.div<{ $modalPosition: { top: string; transform: string } }>`
+  position: fixed;
+  top: -20px;
+  left: 0;
+  right: 0;
+  bottom: -20px;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(2px);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  z-index: 1000;
+  animation: ${fadeIn} 0.3s ease-out;
+  padding: 80px 0 0 0;
+  box-sizing: border-box;
+  overflow-y: auto;
+  overflow-x: hidden;
+`;
+
+const VideoModal = styled.div<{ $modalPosition: { top: string; transform: string } }>`
+  background: var(--bg-card);
+  border-radius: 20px;
+  padding: 0;
+  max-width: 95vw;
+  max-height: 90vh;
+  width: 95vw;
+  text-align: center;
+  border: 1px solid var(--border-color);
+  box-shadow: 
+    0 20px 40px rgba(0, 0, 0, 0.3),
+    0 10px 20px var(--shadow-card);
+  overflow: hidden;
+  position: absolute;
+  top: 50px;
+  left: 50%;
+  transform: translateY(var(--scroll-position, 0px)) translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  
+  /* Плавная анимация появления */
+  animation: modalSlideIn 0.4s ease-out;
+  
+  @keyframes modalSlideIn {
+    from {
+      opacity: 0;
+      transform: translateY(var(--scroll-position, 0px)) translateX(-50%) scale(0.95);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(var(--scroll-position, 0px)) translateX(-50%) scale(1);
+    }
+  }
+`;
+
+const VideoHeader = styled.div`
+  background: var(--bg-card);
+  border-radius: 20px 20px 0 0;
+  padding: 20px 24px;
+  border-bottom: 1px solid var(--border-color);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-shrink: 0;
+`;
+
+const VideoTitle = styled.h3`
+  font-family: 'Noto Sans SC', 'Inter', Arial, sans-serif;
+  font-size: 22px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0;
+`;
+
+const VideoBody = styled.div`
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px 24px;
+`;
+
+const VideoCloseIcon = styled.button<{ $isDark?: boolean }>`
+  background: ${props => props.$isDark ? 'var(--bg-secondary)' : 'transparent'};
+  border: 1px solid var(--matte-red);
+  border-radius: 50%;
+  width: 36px;
+  height: 36px;
+  min-width: 36px;
+  min-height: 36px;
+  color: var(--matte-red);
+  font-size: 18px;
+  font-weight: bold;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+  flex-shrink: 0;
+
+  &:hover {
+    background: var(--matte-red);
+    color: white;
+    transform: scale(1.05);
+  }
+
+  &:active {
+    transform: scale(0.95);
+  }
+`;
+
+// Стили для оригинального дизайна достижений
+const CategorySection = styled.div`
+  margin-bottom: 20px;
+  padding: 0;
+  width: 100%;
+`;
+
+const CategoryTitle = styled.h3`
+  font-family: 'Noto Sans SC', 'Inter', Arial, sans-serif;
+  font-size: 1.3rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 0;
+  text-align: center;
+  letter-spacing: 0.03em;
+  position: relative;
+  padding: 16px 8px;
+  width: 100%;
+  
+  &::after {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 2px;
+    background: linear-gradient(90deg, transparent, var(--matte-red), transparent);
+    border-radius: 1px;
+    margin: 0 20px;
+  }
+`;
+
+const AchievementsGrid = styled.div`
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: center;
+`;
+
+const AchievementCard = styled.div<{ $isDark: boolean; $unlocked: boolean }>`
+  background: ${props => props.$unlocked 
+    ? (props.$isDark ? 'var(--bg-secondary)' : 'var(--bg-secondary)')
+    : 'var(--bg-secondary)'
+  };
+  border: 2px solid ${props => props.$unlocked ? 'var(--matte-red)' : 'var(--border-color)'};
+  border-radius: 12px;
+  padding: 16px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  opacity: ${props => props.$unlocked ? 1 : 0.6};
+  
+  &:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px var(--shadow-soft);
+  }
+`;
+
+const AchievementHeader = styled.div`
+  display: flex;
+  align-items: center;
+  margin-bottom: 16px;
+  gap: 16px;
+`;
+
+const AchievementIcon = styled.div<{ $unlocked: boolean }>`
+  font-size: 32px;
+  margin-bottom: 4px;
+  filter: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  text-shadow: 0 0 8px rgba(255, 215, 0, 0.4);
+  transition: all 0.3s ease;
+  
+  &:hover {
+    transform: scale(1.05);
+    text-shadow: 0 0 12px rgba(255, 215, 0, 0.6);
+  }
+`;
+
+const AchievementInfo = styled.div`
+  flex: 1;
+`;
+
+const AchievementName = styled.div<{ $unlocked: boolean }>`
+  font-family: 'Noto Sans SC', 'Inter', Arial, sans-serif;
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: ${props => props.$unlocked ? 'var(--text-primary)' : 'var(--text-secondary)'};
+  margin-bottom: 2px;
+  line-height: 1.1;
+  text-align: center;
+  word-wrap: break-word;
+  overflow: hidden;
+`;
+
+const AchievementDescription = styled.div`
+  font-family: 'Noto Sans SC', 'Inter', Arial, sans-serif;
+  font-size: 0.6rem;
+  color: var(--text-secondary);
+  line-height: 1.2;
+  text-align: center;
+  word-wrap: break-word;
+  overflow: hidden;
+  margin-bottom: 2px;
+`;
+
+const AchievementRequirement = styled.div`
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  color: var(--text-accent);
+  background: var(--bg-primary);
+  padding: 4px 8px;
+  border-radius: 6px;
+  display: inline-block;
+`;
+
+// Стили для модального окна достижений
+const ModalAchievementsGrid = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin-top: 20px;
+  padding: 0;
+  width: 100%;
+`;
+
+const ModalAchievementHeader = styled.div`
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  width: 100%;
+`;
+
+const ModalAchievementIcon = styled.div<{ $unlocked: boolean }>`
+  font-size: 32px;
+  filter: ${props => props.$unlocked ? 'none' : 'grayscale(100%)'};
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  flex-shrink: 0;
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: ${props => props.$unlocked 
+    ? 'linear-gradient(135deg, rgba(220, 38, 38, 0.15), rgba(220, 38, 38, 0.05))' 
+    : 'rgba(128, 128, 128, 0.08)'
+  };
+  border: 2px solid ${props => props.$unlocked 
+    ? 'rgba(220, 38, 38, 0.3)' 
+    : 'rgba(128, 128, 128, 0.15)'
+  };
+  opacity: ${props => props.$unlocked ? 1 : 0.6};
+  transition: all 0.3s ease;
+  position: relative;
+  
+  &::before {
+    content: '';
+    position: absolute;
+    top: -2px;
+    left: -2px;
+    right: -2px;
+    bottom: -2px;
+    border-radius: 50%;
+    background: ${props => props.$unlocked 
+      ? 'linear-gradient(135deg, var(--matte-red), transparent)' 
+      : 'transparent'
+    };
+    opacity: ${props => props.$unlocked ? 0.2 : 0};
+    z-index: -1;
+    transition: opacity 0.3s ease;
+  }
+  
+  &:hover {
+    transform: scale(1.08);
+    background: ${props => props.$unlocked 
+      ? 'linear-gradient(135deg, rgba(220, 38, 38, 0.2), rgba(220, 38, 38, 0.1))' 
+      : 'rgba(128, 128, 128, 0.12)'
+    };
+    border-color: ${props => props.$unlocked 
+      ? 'rgba(220, 38, 38, 0.4)' 
+      : 'rgba(128, 128, 128, 0.2)'
+    };
+    
+    &::before {
+      opacity: ${props => props.$unlocked ? 0.3 : 0};
+    }
+  }
+`;
+
+const ModalAchievementContent = styled.div`
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+`;
+
+const ModalAchievementName = styled.div<{ $unlocked: boolean }>`
+  font-family: 'Noto Sans SC', 'Inter', Arial, sans-serif;
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: ${props => props.$unlocked ? 'var(--text-primary)' : 'var(--text-secondary)'};
+  margin-bottom: 8px;
+  line-height: 1.4;
+  text-align: left;
+  word-wrap: break-word;
+  word-break: keep-all;
+  hyphens: auto;
+  letter-spacing: 0.01em;
+`;
+
+const ModalAchievementDescription = styled.div`
+  font-family: 'Noto Sans SC', 'Inter', Arial, sans-serif;
+  font-size: 0.95rem;
+  color: var(--text-secondary);
+  line-height: 1.5;
+  text-align: left;
+  word-wrap: break-word;
+  word-break: keep-all;
+  hyphens: auto;
+  opacity: 0.8;
+  letter-spacing: 0.01em;
+  font-weight: 500;
+`;
+
+const ModalAchievementRequirement = styled.div`
+  font-family: 'Noto Sans SC', 'Inter', Arial, sans-serif;
+  font-size: 0.9rem;
+  color: var(--matte-red);
+  background: rgba(162, 59, 59, 0.1);
+  border: 1px solid rgba(162, 59, 59, 0.3);
+  padding: 10px 18px;
+  border-radius: 12px;
+  display: inline-block;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  transition: all 0.2s ease;
+  align-self: center;
+  text-align: center;
+  
+  &:hover {
+    background: rgba(162, 59, 59, 0.15);
+    border-color: rgba(162, 59, 59, 0.4);
+  }
+`;
+
+const ModalAchievementCard = styled.div<{ $isDark: boolean; $unlocked: boolean }>`
+  background: ${props => props.$isDark 
+    ? 'rgba(255, 255, 255, 0.08)' 
+    : 'rgba(255, 255, 255, 0.9)'
+  };
+  border: 2px solid ${props => props.$unlocked 
+    ? 'var(--matte-red)' 
+    : 'var(--border-color)'
+  };
+  border-radius: 16px;
+  padding: 20px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  opacity: ${props => props.$unlocked ? 1 : 0.7};
+  margin-bottom: 4px;
+  position: relative;
+  backdrop-filter: blur(10px);
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  box-shadow: ${props => props.$unlocked 
+    ? '0 0 15px rgba(162, 59, 59, 0.2), 0 4px 12px rgba(0, 0, 0, 0.1)' 
+    : '0 2px 8px rgba(0, 0, 0, 0.05)'
+  };
+  
+  &::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    border-radius: 20px;
+    background: ${props => props.$unlocked 
+      ? 'linear-gradient(135deg, rgba(220, 38, 38, 0.05), transparent)' 
+      : 'transparent'
+    };
+    opacity: ${props => props.$unlocked ? 1 : 0};
+    transition: opacity 0.3s ease;
+  }
+  
+  &:hover {
+    background: ${props => props.$isDark 
+      ? 'rgba(255, 255, 255, 0.12)' 
+      : 'rgba(255, 255, 255, 0.95)'
+    };
+    border-color: ${props => props.$unlocked 
+      ? 'var(--matte-red)' 
+      : 'var(--matte-red)'
+    };
+    transform: translateY(-3px);
+    box-shadow: ${props => props.$unlocked 
+      ? '0 0 20px rgba(162, 59, 59, 0.3), 0 6px 16px rgba(0, 0, 0, 0.15)' 
+      : '0 0 12px rgba(162, 59, 59, 0.2), 0 4px 12px rgba(0, 0, 0, 0.1)'
+    };
+    
+    &::before {
+      opacity: ${props => props.$unlocked ? 1 : 0.3};
+    }
+  }
+`;
+
+
+
+const ProgressBar = styled.div<{ $isDark: boolean }>`
+  width: 100%;
+  height: 6px;
+  background: ${props => props.$isDark ? 'var(--bg-primary)' : 'var(--bg-primary)'};
+  border-radius: 3px;
+  overflow: hidden;
+  margin-top: 8px;
+`;
+
+const ProgressFill = styled.div<{ $progress: number }>`
+  height: 100%;
+  width: ${props => props.$progress}%;
+  background: linear-gradient(90deg, var(--matte-red), var(--terracotta));
+  border-radius: 3px;
+  transition: width 0.3s ease;
+`;
+
+const Profile: React.FC<ProfileProps> = ({ telegramId, isDarkTheme, toggleTheme, onNavigate, onModalStateChange }) => {
   const [profileData, setProfileData] = useState<ProfileData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -1123,6 +1544,12 @@ const Profile: React.FC<ProfileProps> = ({ telegramId, isDarkTheme, toggleTheme,
     }
   };
 
+  // Функция для расчета общей экономии
+  const calculateTotalSavings = (ordersCount: number, yuanSavings: number) => {
+    const ORDER_SAVINGS_CONSTANT = 5000; // 5000 рублей с каждого заказа
+    return (ordersCount * ORDER_SAVINGS_CONSTANT) + yuanSavings;
+  };
+
   const fetchProfileData = async () => {
     try {
       setLoading(true);
@@ -1144,7 +1571,7 @@ const Profile: React.FC<ProfileProps> = ({ telegramId, isDarkTheme, toggleTheme,
             preferred_currency: 'RUB',
             commission: 0.05,
             created_at: '2024-01-15T10:30:00Z',
-            avatar_url: null
+            avatar_url: undefined
           },
           statistics: {
             orders: {
@@ -1160,6 +1587,9 @@ const Profile: React.FC<ProfileProps> = ({ telegramId, isDarkTheme, toggleTheme,
               total_spent_rub: 72000,
               total_bought_cny: 5800,
               total_savings: 1230
+            },
+            total_savings: {
+              total: calculateTotalSavings(12, 1230) // 12 заказов * 5000р + экономия с юаней
             }
           },
           gamification: {
@@ -1168,11 +1598,11 @@ const Profile: React.FC<ProfileProps> = ({ telegramId, isDarkTheme, toggleTheme,
             nextLevel: 'Gold',
             ordersToNext: 9,
             achievements: [
-              { id: 'first_order', name: 'Первый заказ', icon: '🎯' },
-              { id: 'loyal_customer', name: 'Постоянный клиент', icon: '⭐' },
-              { id: 'vip_customer', name: 'VIP клиент', icon: '👑' },
-              { id: 'referrer', name: 'Пригласил друга', icon: '🤝' },
-              { id: 'yuan_buyer', name: 'Покупатель юаня', icon: '¥' }
+              { id: 'first_order', name: 'Первый заказ', icon: '🎯', unlocked: true },
+              { id: 'loyal_customer', name: 'Постоянный клиент', icon: '⭐', unlocked: true },
+              { id: 'vip_customer', name: 'VIP клиент', icon: '👑', unlocked: true },
+              { id: 'referrer', name: 'Пригласил друга', icon: '🤝', unlocked: true },
+              { id: 'yuan_buyer', name: 'Покупатель юаня', icon: '¥', unlocked: false }
             ]
           }
         };
@@ -1198,6 +1628,15 @@ const Profile: React.FC<ProfileProps> = ({ telegramId, isDarkTheme, toggleTheme,
       
       // Основные данные профиля уже содержат всю необходимую информацию
       // из таблиц users, orders, referrals, yuan_purchases
+      
+      // Рассчитываем общую экономию динамически
+      const totalSavings = calculateTotalSavings(
+        profileData.statistics.orders.total_orders,
+        profileData.statistics.yuan_purchases.total_savings
+      );
+      
+      // Добавляем рассчитанную экономию в данные профиля
+      profileData.statistics.total_savings = { total: totalSavings };
       
       setProfileData(profileData);
     } catch (err) {
@@ -1268,6 +1707,16 @@ const Profile: React.FC<ProfileProps> = ({ telegramId, isDarkTheme, toggleTheme,
   }, []);
 
   // Динамическое позиционирование модального окна пароля
+  // Очистка стилей при размонтировании компонента
+  useEffect(() => {
+    return () => {
+      // Восстанавливаем скролл страницы при размонтировании компонента
+      document.body.style.overflow = '';
+      document.body.style.position = '';
+      document.body.style.width = '';
+    };
+  }, []);
+
   useEffect(() => {
     const updateModalPosition = () => {
       const scrollY = window.scrollY || document.documentElement.scrollTop;
@@ -1460,6 +1909,12 @@ const Profile: React.FC<ProfileProps> = ({ telegramId, isDarkTheme, toggleTheme,
             });
             
             setShowLevels(true);
+            onModalStateChange?.(true);
+            
+            // Фиксируем скролл страницы при открытии модального окна
+            document.body.style.overflow = 'hidden';
+            document.body.style.position = 'fixed';
+            document.body.style.width = '100%';
           }}
           style={{ cursor: 'pointer' }}
         >
@@ -1470,7 +1925,7 @@ const Profile: React.FC<ProfileProps> = ({ telegramId, isDarkTheme, toggleTheme,
             <LevelText>
               <LevelName>{profileData.gamification.level} Уровень</LevelName>
               <LevelProgress>
-                {profileData.gamification.levelProgress.toFixed(0)}% до {profileData.gamification.nextLevel}
+                {(100 - profileData.gamification.levelProgress).toFixed(0)}% до {profileData.gamification.nextLevel}
               </LevelProgress>
             </LevelText>
           </LevelInfo>
@@ -1478,8 +1933,7 @@ const Profile: React.FC<ProfileProps> = ({ telegramId, isDarkTheme, toggleTheme,
         
         <ProgressBar $isDark={isDarkTheme}>
           <ProgressFill 
-            $progress={profileData.gamification.levelProgress} 
-            $isDark={isDarkTheme}
+            $progress={profileData.gamification.levelProgress}
           />
         </ProgressBar>
         
@@ -1506,25 +1960,26 @@ const Profile: React.FC<ProfileProps> = ({ telegramId, isDarkTheme, toggleTheme,
                 key={achievement.id} 
                 $isDark={isDarkTheme}
               >
-                <AchievementIcon>{achievement.icon}</AchievementIcon>
-                <AchievementName>{achievement.name}</AchievementName>
+                <AchievementIcon $unlocked={achievement.unlocked}>{achievement.icon}</AchievementIcon>
+                <AchievementName $unlocked={achievement.unlocked}>{achievement.name}</AchievementName>
               </AchievementItem>
             ))}
           </AchievementsGrid>
           <ViewAllButton 
             $isDark={isDarkTheme}
             onClick={() => {
-              // Вычисляем позицию модального окна чуть ниже центра видимой области
-              const scrollTop = window.pageYOffset || document.documentElement.scrollTop;
-              const windowHeight = window.innerHeight;
-              const modalTop = scrollTop + (windowHeight / 2) + 50; // Чуть ниже центра экрана
-              
               setAchievementsModalPosition({
-                top: `${modalTop}px`,
+                top: '50%',
                 transform: 'translateY(-50%)'
               });
               
               setShowAchievements(true);
+              onModalStateChange?.(true);
+              
+              // Фиксируем скролл страницы при открытии модального окна
+              document.body.style.overflow = 'hidden';
+              document.body.style.position = 'fixed';
+              document.body.style.width = '100%';
             }}
           >
             Посмотреть все достижения
@@ -1551,7 +2006,7 @@ const Profile: React.FC<ProfileProps> = ({ telegramId, isDarkTheme, toggleTheme,
                       {getStatusEmoji(order.delivery_status)} {order.delivery_status || 'Создан'}
                     </HistoryItemStatus>
                   </HistoryItemHeader>
-                  <HistoryItemContent>
+                  <div style={{ marginTop: '12px' }}>
                     <div style={{ marginBottom: '8px' }}>
                       <strong>🔍 Трек-номер:</strong> {order.internal_tracking_number || 'Не назначен'}
                     </div>
@@ -1577,7 +2032,7 @@ const Profile: React.FC<ProfileProps> = ({ telegramId, isDarkTheme, toggleTheme,
                     }}>
                       💡 Используйте трек-номер для отслеживания в разделе "Отследить заказ"
                     </div>
-                  </HistoryItemContent>
+                  </div>
                 </HistoryItem>
               ))}
           </HistoryList>
@@ -1666,21 +2121,114 @@ const Profile: React.FC<ProfileProps> = ({ telegramId, isDarkTheme, toggleTheme,
       )}
 
 
-      <AchievementsModal
-        isOpen={showAchievements}
-        onClose={() => setShowAchievements(false)}
-        achievements={allAchievements}
-        isDarkTheme={isDarkTheme}
-        modalPosition={achievementsModalPosition}
-      />
+      {/* Модальное окно с достижениями */}
+      {showAchievements && (
+        <VideoModalOverlay 
+          $modalPosition={achievementsModalPosition}
+          onClick={() => {
+            HapticFeedback.light();
+            setShowAchievements(false);
+            onModalStateChange?.(false);
+            
+            // Восстанавливаем скролл страницы при закрытии модального окна
+            document.body.style.overflow = '';
+            document.body.style.position = '';
+            document.body.style.width = '';
+          }}
+        >
+          <VideoModal 
+            $modalPosition={achievementsModalPosition}
+            style={{
+              '--scroll-position': `${window.pageYOffset || document.documentElement.scrollTop}px`
+            } as React.CSSProperties}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <VideoHeader>
+              <VideoTitle>🏆 Достижения</VideoTitle>
+              <VideoCloseIcon $isDark={isDarkTheme} onClick={() => {
+                HapticFeedback.light();
+                setShowAchievements(false);
+                onModalStateChange?.(false);
+                
+                // Восстанавливаем скролл страницы при закрытии модального окна
+                document.body.style.overflow = '';
+                document.body.style.position = '';
+                document.body.style.width = '';
+              }}>
+                ×
+              </VideoCloseIcon>
+            </VideoHeader>
+            <VideoBody>
+              {(() => {
+                // Группируем достижения по категориям
+                const groupedAchievements = allAchievements.reduce((acc, achievement) => {
+                  if (!acc[achievement.category]) {
+                    acc[achievement.category] = [];
+                  }
+                  acc[achievement.category].push(achievement);
+                  return acc;
+                }, {} as Record<string, typeof allAchievements>);
+
+                return (
+                  <>
+                    {Object.entries(groupedAchievements).map(([category, categoryAchievements]) => (
+                      <CategorySection key={category}>
+                        <CategoryTitle>{category}</CategoryTitle>
+                        <ModalAchievementsGrid>
+                          {categoryAchievements.map((achievement) => (
+                            <ModalAchievementCard
+                              key={achievement.id}
+                              $isDark={isDarkTheme}
+                              $unlocked={achievement.unlocked}
+                              onClick={() => {
+                                HapticFeedback.light();
+                                // Можно добавить логику для показа деталей достижения
+                              }}
+                            >
+                              <ModalAchievementHeader>
+                                <ModalAchievementIcon $unlocked={achievement.unlocked}>
+                                  {achievement.icon}
+                                </ModalAchievementIcon>
+                                <ModalAchievementContent>
+                                  <ModalAchievementName $unlocked={achievement.unlocked}>
+                                    {achievement.name}
+                                  </ModalAchievementName>
+                                  <ModalAchievementDescription>
+                                    {achievement.description}
+                                  </ModalAchievementDescription>
+                                </ModalAchievementContent>
+                              </ModalAchievementHeader>
+                              <ModalAchievementRequirement>
+                                {achievement.requirement}
+                              </ModalAchievementRequirement>
+                            </ModalAchievementCard>
+                          ))}
+                        </ModalAchievementsGrid>
+                      </CategorySection>
+                    ))}
+                  </>
+                );
+              })()}
+            </VideoBody>
+          </VideoModal>
+        </VideoModalOverlay>
+      )}
 
 
       <LevelsModal
         isOpen={showLevels}
-        onClose={() => setShowLevels(false)}
+        onClose={() => {
+          setShowLevels(false);
+          
+          // Восстанавливаем скролл страницы при закрытии модального окна
+          document.body.style.overflow = '';
+          document.body.style.position = '';
+          document.body.style.width = '';
+        }}
         currentLevel={profileData?.gamification.level || 'Bronze'}
         isDarkTheme={isDarkTheme}
         modalPosition={levelsModalPosition}
+        onModalStateChange={onModalStateChange}
       />
 
       {/* Модальное окно для ввода пароля */}

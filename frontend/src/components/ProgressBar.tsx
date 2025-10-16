@@ -9,20 +9,16 @@ interface ProgressBarProps {
 
 const ProgressContainer = styled.div<{ $isDark?: boolean; $hideTitle?: boolean }>`
   padding: ${props => props.$hideTitle ? '0' : '20px'};
-  background: ${props => props.$isDark 
-    ? 'linear-gradient(135deg, rgba(30, 30, 30, 0.95), rgba(40, 40, 40, 0.9))' 
-    : 'linear-gradient(135deg, rgba(255, 255, 255, 0.95), rgba(250, 250, 250, 0.9))'};
+  background: transparent;
   border-radius: ${props => props.$hideTitle ? '0' : '12px'};
-  border: ${props => props.$hideTitle ? 'none' : `1px solid ${props.$isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)'}`};
-  box-shadow: ${props => props.$hideTitle ? 'none' : (props.$isDark 
-    ? '0 2px 8px rgba(0, 0, 0, 0.3)' 
-    : '0 2px 8px rgba(0, 0, 0, 0.1)')};
-  backdrop-filter: ${props => props.$hideTitle ? 'none' : 'blur(10px)'};
+  border: none;
+  box-shadow: none;
+  backdrop-filter: none;
 `;
 
 const ProgressTitle = styled.h3<{ $isDark?: boolean }>`
   margin: 0 0 20px 0;
-  color: ${props => props.$isDark ? '#ffffff' : '#1a1a1a'};
+  color: ${props => props.$isDark ? '#D4C19C' : '#1a1a1a'};
   font-size: 1.1rem;
   font-weight: 600;
   text-align: center;
@@ -43,7 +39,7 @@ const Step = styled.div<{ $isActive: boolean; $isCompleted: boolean; $isDark?: b
   background: ${props => {
     if (props.$isCompleted) return props.$isDark ? 'rgba(39, 174, 96, 0.2)' : 'rgba(39, 174, 96, 0.1)';
     if (props.$isActive) return props.$isDark ? 'rgba(157, 78, 61, 0.2)' : 'rgba(157, 78, 61, 0.1)';
-    return props.$isDark ? 'rgba(255, 255, 255, 0.05)' : 'rgba(0, 0, 0, 0.03)';
+    return props.$isDark ? 'rgba(255, 255, 255, 0.05)' : 'rgba(139, 69, 19, 0.15)';
   }};
   border: 1px solid ${props => {
     if (props.$isCompleted) return 'rgba(39, 174, 96, 0.3)';
@@ -116,7 +112,7 @@ const StepTitle = styled.div<{ $isActive: boolean; $isCompleted: boolean; $isDar
   color: ${props => {
     if (props.$isCompleted) return '#27ae60';
     if (props.$isActive) return 'var(--terracotta)';
-    return props.$isDark ? '#ffffff' : '#1a1a1a';
+    return props.$isDark ? '#D4C19C' : '#1a1a1a';
   }};
   margin-bottom: 2px;
   transition: all 0.3s ease;
@@ -126,8 +122,8 @@ const StepDescription = styled.div<{ $isActive: boolean; $isCompleted: boolean; 
   font-size: 0.8rem;
   color: ${props => {
     if (props.$isCompleted) return 'rgba(39, 174, 96, 0.8)';
-    if (props.$isActive) return 'rgba(157, 78, 61, 0.8)';
-    return props.$isDark ? 'rgba(255, 255, 255, 0.6)' : 'rgba(0, 0, 0, 0.6)';
+    if (props.$isActive) return props.$isDark ? '#F4E4BC' : '#000000';
+    return props.$isDark ? 'rgba(212, 193, 156, 0.8)' : 'rgba(0, 0, 0, 0.6)';
   }};
   line-height: 1.3;
   transition: all 0.3s ease;

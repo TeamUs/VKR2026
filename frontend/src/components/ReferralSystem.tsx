@@ -77,14 +77,15 @@ const ReferralForm = styled.div`
   transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
 `;
 
-const InfoCard = styled.div`
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-color);
+const InfoCard = styled.div<{ $isDark?: boolean }>`
+  background: transparent;
+  border: 2px solid var(--matte-red);
   border-radius: 12px;
   padding: 20px;
   margin-bottom: 25px;
   margin: 0 16px 25px 16px;
   backdrop-filter: blur(5px);
+  box-shadow: 0 0 15px rgba(162, 59, 59, 0.3), 0 2px 8px var(--shadow-soft);
 `;
 
 const InfoTitle = styled.h3`
@@ -111,8 +112,8 @@ const InfoText = styled.p`
   }
 `;
 
-const ReferralCodeCard = styled.div`
-  background: var(--bg-secondary);
+const ReferralCodeCard = styled.div<{ $isDark?: boolean }>`
+  background: ${props => props.$isDark ? 'var(--bg-secondary)' : 'var(--bg-card)'};
   border: 1px solid var(--border-color);
   border-radius: 12px;
   padding: 18px;
@@ -127,12 +128,12 @@ const ReferralCodeCard = styled.div`
   }
 `;
 
-const ReferralCode = styled.div`
+const ReferralCode = styled.div<{ $isDark?: boolean }>`
   font-family: 'Inter', Arial, sans-serif;
   font-size: 0.9rem;
   font-weight: 700;
   color: var(--matte-red);
-  background: var(--bg-card);
+  background: ${props => props.$isDark ? 'var(--bg-card)' : '#FFFFFF'};
   border: 2px solid var(--matte-red);
   border-radius: 8px;
   padding: 12px;
@@ -151,7 +152,7 @@ const ReferralCode = styled.div`
   }
 `;
 
-const Button = styled.button<{ $variant?: 'primary' | 'secondary' }>`
+const Button = styled.button<{ $variant?: 'primary' | 'secondary'; $isDark?: boolean }>`
   width: 100%;
   padding: 15px 25px;
   border: 1px solid var(--border-color);
@@ -184,7 +185,7 @@ const Button = styled.button<{ $variant?: 'primary' | 'secondary' }>`
       }
     `
     : css`
-      background: var(--bg-card);
+      background: ${props.$isDark ? 'var(--bg-card)' : '#FFFFFF'};
       color: var(--text-primary);
       box-shadow: 
         0 4px 12px var(--shadow-soft),
@@ -208,8 +209,8 @@ const Button = styled.button<{ $variant?: 'primary' | 'secondary' }>`
   }
 `;
 
-const StatsCard = styled.div`
-  background: var(--bg-secondary);
+const StatsCard = styled.div<{ $isDark?: boolean }>`
+  background: ${props => props.$isDark ? 'var(--bg-secondary)' : 'var(--bg-card)'};
   border: 1px solid var(--border-color);
   border-radius: 12px;
   padding: 20px;
@@ -231,10 +232,10 @@ const StatsGrid = styled.div`
   }
 `;
 
-const StatItem = styled.div`
+const StatItem = styled.div<{ $isDark?: boolean }>`
   text-align: center;
   padding: 16px 12px;
-  background: var(--bg-card);
+  background: ${props => props.$isDark ? 'var(--bg-card)' : '#FFFFFF'};
   border-radius: 8px;
   border: 1px solid var(--border-color);
   min-width: 0;
@@ -600,31 +601,33 @@ const ReferralSystem: React.FC<ReferralSystemProps> = ({ onNavigate, toggleTheme
         </ThemeToggle>
       </Header>
 
-      <ReferralCodeCard>
+      <ReferralCodeCard $isDark={isDarkTheme}>
         <InfoTitle>Ваша реферальная ссылка</InfoTitle>
-        <ReferralCode>{referralLink}</ReferralCode>
+        <ReferralCode $isDark={isDarkTheme}>{referralLink}</ReferralCode>
         <Button 
           onClick={copyReferralLink}
           $variant="primary"
+          $isDark={isDarkTheme}
         >
           📋 Скопировать ссылку
         </Button>
         <Button 
           onClick={shareReferralLink}
           $variant="secondary"
+          $isDark={isDarkTheme}
         >
           📤 Поделиться с друзьями
         </Button>
       </ReferralCodeCard>
 
-      <StatsCard>
+      <StatsCard $isDark={isDarkTheme}>
         <InfoTitle>Ваша статистика</InfoTitle>
         <StatsGrid>
-          <StatItem>
+          <StatItem $isDark={isDarkTheme}>
             <StatValue>{(stats.currentCommission * 100).toFixed(0)}%</StatValue>
             <StatLabel>Текущая комиссия</StatLabel>
           </StatItem>
-          <StatItem>
+          <StatItem $isDark={isDarkTheme}>
             <StatValue>
               {stats.currentCommission === 0.05 ? 'Ꝏ' : 
                stats.discountActive && stats.discountExpiresAt ? 
@@ -633,7 +636,7 @@ const ReferralSystem: React.FC<ReferralSystemProps> = ({ onNavigate, toggleTheme
             </StatValue>
             <StatLabel>Срок действия</StatLabel>
           </StatItem>
-          <StatItem>
+          <StatItem $isDark={isDarkTheme}>
             <StatValue>{stats.totalClicks}</StatValue>
             <StatLabel>Приглашенных пользователей</StatLabel>
           </StatItem>
@@ -643,7 +646,7 @@ const ReferralSystem: React.FC<ReferralSystemProps> = ({ onNavigate, toggleTheme
       {error && <ErrorMessage>{error}</ErrorMessage>}
       {success && <SuccessMessage>{success}</SuccessMessage>}
 
-      <InfoCard>
+      <InfoCard $isDark={isDarkTheme}>
         <InfoTitle>Условия программы</InfoTitle>
         <InfoText>
           • Новый пользователь получает скидку на 2 недели
