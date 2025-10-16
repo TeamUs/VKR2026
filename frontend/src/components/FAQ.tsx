@@ -119,22 +119,22 @@ const AnswerContent = styled.div`
   white-space: pre-line;
 `;
 
-const ContactSection = styled.div`
+const ContactSection = styled.div<{ $isDark?: boolean }>`
   background: transparent;
-  border: 1px solid var(--border-color);
+  border: 2px solid var(--matte-red);
   border-radius: 16px;
   padding: 10px;
   margin-top: 10px;
   margin-bottom: 10px;
   text-align: center;
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 0 15px rgba(162, 59, 59, 0.3), 0 2px 8px var(--shadow-soft);
   margin: 10px 16px;
   
   &:hover {
     transform: translateY(-2px);
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
-    border-color: var(--matte-terracotta);
+    box-shadow: 0 0 20px rgba(162, 59, 59, 0.4), 0 4px 16px var(--shadow-card);
+    border-color: var(--matte-red);
   }
 `;
 
@@ -142,26 +142,26 @@ const ContactSection = styled.div`
 const ContactTitle = styled.h3`
   font-family: 'Noto Sans SC', 'Inter', Arial, sans-serif;
   color: var(--text-primary);
-  margin-bottom: 5px;
-  font-size: 0.9rem;
+  margin-bottom: 8px;
+  font-size: 1.1rem;
   font-weight: 600;
 `;
 
 const ContactText = styled.p`
   color: var(--text-secondary);
-  line-height: 1.3;
-  margin-bottom: 8px;
+  line-height: 1.4;
+  margin-bottom: 12px;
   font-family: 'Inter', Arial, sans-serif;
-  font-size: 0.75rem;
+  font-size: 0.95rem;
 `;
 
 const ContactButton = styled.button`
   background: var(--matte-red);
   border: 1px solid var(--matte-red);
   border-radius: 12px;
-  padding: 8px 18px;
+  padding: 10px 20px;
   color: var(--bg-primary);
-  font-size: 0.8rem;
+  font-size: 0.9rem;
   font-weight: 600;
   cursor: pointer;
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
@@ -804,7 +804,7 @@ const FAQ: React.FC<FAQProps> = ({ onNavigate, toggleTheme, isDarkTheme }) => {
         </SearchContainer>
 
         {/* Помощь */}
-        <ContactSection>
+        <ContactSection $isDark={isDarkTheme}>
           <ContactTitle>Не нашли ответ на свой вопрос?</ContactTitle>
           <ContactText>
             Свяжитесь с нашим менеджером - мы всегда готовы помочь!

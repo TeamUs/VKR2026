@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useLayoutEffect } from 'react';
 import styled, { keyframes, css } from 'styled-components';
 import { HapticFeedback } from '../utils/hapticFeedback';
 
@@ -341,14 +341,17 @@ const LoadingSpinner = styled.div`
   color: var(--text-secondary);
 `;
 
-const InfoCard = styled.div`
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-color);
+const InfoCard = styled.div<{ $isDark?: boolean }>`
+  background: transparent;
+  border: 2px solid ${props => props.$isDark ? 'var(--matte-red)' : 'var(--terracotta)'};
   border-radius: 12px;
   padding: 20px;
   margin-top: 30px;
   margin-bottom: 25px;
   backdrop-filter: blur(5px);
+  box-shadow: ${props => props.$isDark 
+    ? '0 0 15px rgba(162, 59, 59, 0.3), 0 2px 8px var(--shadow-soft)' 
+    : '0 0 12px rgba(139, 69, 19, 0.2), 0 2px 8px var(--shadow-soft)'};
 `;
 
 const InfoText = styled.p`
@@ -365,11 +368,11 @@ const ManagerButtons = styled.div`
   flex-wrap: wrap;
 `;
 
-const ManagerButton = styled.button<{ $variant?: 'primary' | 'secondary' }>`
+const ManagerButton = styled.button<{ $variant?: 'primary' | 'secondary'; $isDark?: boolean }>`
   flex: 1;
   min-width: 200px;
   padding: 15px 20px;
-  border: 1px solid var(--border-color);
+  border: ${props => props.$variant === 'secondary' ? '2px solid var(--matte-red)' : '1px solid var(--border-color)'};
   border-radius: 16px;
   font-family: 'Inter', Arial, sans-serif;
   font-size: 0.95rem;
@@ -379,18 +382,26 @@ const ManagerButton = styled.button<{ $variant?: 'primary' | 'secondary' }>`
   position: relative;
   z-index: 10;
   pointer-events: auto;
-  background: var(--bg-card);
+  background: ${props => props.$variant === 'secondary' 
+    ? 'transparent'
+    : 'var(--bg-card)'};
   color: var(--text-primary);
-  box-shadow: 
-    0 4px 12px var(--shadow-soft),
-    0 2px 6px var(--shadow-card);
+  box-shadow: ${props => props.$variant === 'secondary' 
+    ? (props.$isDark 
+        ? '0 0 10px rgba(162, 59, 59, 0.2), 0 2px 6px var(--shadow-card)' 
+        : '0 0 8px rgba(139, 69, 19, 0.15), 0 2px 6px var(--shadow-card)')
+    : '0 4px 12px var(--shadow-soft), 0 2px 6px var(--shadow-card)'};
   
   &:hover {
     transform: translateY(-3px);
-    background: var(--sand);
-    box-shadow: 
-      0 8px 20px var(--shadow-card),
-      0 4px 12px var(--shadow-soft);
+    background: ${props => props.$variant === 'secondary' 
+      ? (props.$isDark ? 'rgba(162, 59, 59, 0.1)' : 'rgba(139, 69, 19, 0.08)')
+      : 'var(--sand)'};
+    box-shadow: ${props => props.$variant === 'secondary' 
+      ? (props.$isDark 
+          ? '0 0 15px rgba(162, 59, 59, 0.3), 0 4px 12px var(--shadow-card)' 
+          : '0 0 12px rgba(139, 69, 19, 0.2), 0 4px 12px var(--shadow-card)')
+      : '0 8px 20px var(--shadow-card), 0 4px 12px var(--shadow-soft)'};
     border-color: var(--matte-red);
   }
   
@@ -401,10 +412,10 @@ const ManagerButton = styled.button<{ $variant?: 'primary' | 'secondary' }>`
   }
 `;
 
-const HelpButton = styled.button`
+const HelpButton = styled.button<{ $isDark?: boolean }>`
   width: 100%;
-  background: var(--bg-card);
-  border: 1px solid var(--border-color);
+  background: transparent;
+  border: 2px solid var(--matte-red);
   border-radius: 12px;
   padding: 8px 16px;
   color: var(--text-secondary);
@@ -418,12 +429,18 @@ const HelpButton = styled.button`
   align-items: center;
   justify-content: center;
   gap: 6px;
+  box-shadow: ${props => props.$isDark 
+    ? '0 0 8px rgba(162, 59, 59, 0.2), 0 2px 6px var(--shadow-card)' 
+    : '0 0 6px rgba(139, 69, 19, 0.15), 0 2px 6px var(--shadow-card)'};
   
   &:hover {
-    background: var(--sand);
+    background: ${props => props.$isDark ? 'rgba(162, 59, 59, 0.1)' : 'rgba(139, 69, 19, 0.08)'};
     border-color: var(--matte-red);
     color: var(--text-primary);
     transform: translateY(-1px);
+    box-shadow: ${props => props.$isDark 
+      ? '0 0 12px rgba(162, 59, 59, 0.3), 0 4px 12px var(--shadow-card)' 
+      : '0 0 10px rgba(139, 69, 19, 0.2), 0 4px 12px var(--shadow-card)'};
   }
 `;
 
@@ -736,17 +753,22 @@ const ToggleIconDark = styled.span<{ $isDark: boolean }>`
 // Стили для модального окна помощи (точно как в OrderForm)
 const VideoModalOverlay = styled.div<{ $modalPosition: { top: string; transform: string } }>`
   position: fixed;
-  top: -100px;
+  top: 0;
   left: 0;
   right: 0;
-  bottom: -100px;
-  background: rgba(0, 0, 0, 0.8);
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(2px);
   display: flex;
   align-items: flex-start;
   justify-content: center;
   z-index: 1000;
-  overflow-y: auto;
   animation: ${fadeIn} 0.3s ease-out;
+  padding: 20px;
+  padding-top: 0;
+  box-sizing: border-box;
+  overflow-y: auto;
+  overflow-x: hidden;
 `;
 
 const LinkHelpModal = styled.div<{ $modalPosition: { top: string; transform: string } }>`
@@ -754,7 +776,7 @@ const LinkHelpModal = styled.div<{ $modalPosition: { top: string; transform: str
   border-radius: 20px;
   padding: 0;
   max-width: 95vw;
-  max-height: 85vh;
+  max-height: 90vh;
   width: 95vw;
   text-align: center;
   border: 1px solid var(--border-color);
@@ -763,15 +785,29 @@ const LinkHelpModal = styled.div<{ $modalPosition: { top: string; transform: str
     0 10px 20px var(--shadow-card);
   overflow: hidden;
   position: absolute;
-  top: ${props => props.$modalPosition.top};
+  top: 20px;
   left: 50%;
-  transform: ${props => props.$modalPosition.transform} translateX(-50%);
+  transform: translateY(var(--scroll-position, 0px)) translateX(-50%);
   display: flex;
   flex-direction: column;
+  
+  /* Плавная анимация появления */
+  animation: linkHelpModalSlideIn 0.4s ease-out;
+  
+  @keyframes linkHelpModalSlideIn {
+    from {
+      opacity: 0;
+      transform: translateY(var(--scroll-position, 0px)) translateX(-50%) scale(0.95);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(var(--scroll-position, 0px)) translateX(-50%) scale(1);
+    }
+  }
 `;
 
-const VideoCloseIcon = styled.button`
-  background: var(--bg-secondary);
+const VideoCloseIcon = styled.button<{ $isDark?: boolean }>`
+  background: ${props => props.$isDark ? 'var(--bg-secondary)' : 'transparent'};
   border: 1px solid var(--matte-red);
   border-radius: 50%;
   width: 36px;
@@ -1103,18 +1139,14 @@ const PriceCalculator: React.FC<PriceCalculatorProps> = ({ onNavigate, toggleThe
         <HelpButton onClick={() => {
           HapticFeedback.selection();
           
-          const scrollTop = window.pageYOffset || document.documentElement.scrollTop;
-          const windowHeight = window.innerHeight;
-          const modalTop = scrollTop + (windowHeight / 2) + 50;
-          
           setHelpModalPosition({
-            top: `${modalTop}px`,
+            top: '50%',
             transform: 'translateY(-50%)'
           });
           
           setShowHelpModal(true);
           onModalStateChange?.(true);
-        }}>
+        }} $isDark={isDarkTheme}>
           Где найти цену в юанях ❓
         </HelpButton>
 
@@ -1183,6 +1215,7 @@ const PriceCalculator: React.FC<PriceCalculatorProps> = ({ onNavigate, toggleThe
           <ManagerButton 
             onClick={() => handleContactManager('brand')}
             $variant="secondary"
+            $isDark={isDarkTheme}
           >
             🏷️ У меня товар со знаком ≈
           </ManagerButton>
@@ -1190,6 +1223,7 @@ const PriceCalculator: React.FC<PriceCalculatorProps> = ({ onNavigate, toggleThe
           <ManagerButton 
             onClick={() => handleContactManager('category')}
             $variant="secondary"
+            $isDark={isDarkTheme}
           >
             ❓ Нет моей категории
           </ManagerButton>
@@ -1197,7 +1231,7 @@ const PriceCalculator: React.FC<PriceCalculatorProps> = ({ onNavigate, toggleThe
 
       </CalculatorForm>
 
-      <InfoCard>
+      <InfoCard $isDark={isDarkTheme}>
         <InfoText>
           💡 <strong>Как рассчитывается стоимость:</strong><br/>
           • Цена товара переводится в рубли по текущему курсу<br/>
@@ -1207,15 +1241,28 @@ const PriceCalculator: React.FC<PriceCalculatorProps> = ({ onNavigate, toggleThe
       </InfoCard>
 
       {showHelpModal && (
-        <VideoModalOverlay $modalPosition={helpModalPosition}>
-          <LinkHelpModal $modalPosition={helpModalPosition}>
+        <VideoModalOverlay 
+          $modalPosition={helpModalPosition}
+          onClick={() => {
+            HapticFeedback.selection();
+            setShowHelpModal(false);
+            onModalStateChange?.(false);
+          }}
+        >
+          <LinkHelpModal 
+            $modalPosition={helpModalPosition}
+            style={{
+              '--scroll-position': `${window.pageYOffset || document.documentElement.scrollTop}px`
+            } as React.CSSProperties}
+            onClick={(e) => e.stopPropagation()}
+          >
             <LinkHelpHeader>
               <LinkHelpTitle>Где найти цену в юанях?</LinkHelpTitle>
               <VideoCloseIcon onClick={() => {
                 HapticFeedback.selection();
                 setShowHelpModal(false);
                 onModalStateChange?.(false);
-              }}>
+              }} $isDark={isDarkTheme}>
                 ×
               </VideoCloseIcon>
             </LinkHelpHeader>

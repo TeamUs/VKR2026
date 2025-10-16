@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useLayoutEffect } from 'react';
 import styled, { keyframes } from 'styled-components';
 import { HapticFeedback } from '../utils/hapticFeedback';
 
@@ -414,45 +414,64 @@ const StepCardActions = styled.div`
   background: transparent;
 `;
 
-const ActionItem = styled.div`
+const ActionItem = styled.div<{ $isDark?: boolean }>`
   display: flex;
   align-items: center;
-  padding: 8px 12px;
-  margin-bottom: 8px;
-  background: transparent;
-  border-radius: 8px;
-  border-left: 3px solid var(--matte-red);
-  transition: all 0.2s ease;
+  padding: 12px 16px;
+  margin-bottom: 12px;
+  background: ${props => props.$isDark ? 'rgba(255, 255, 255, 0.12)' : 'rgba(255, 255, 255, 0.9)'};
+  border-radius: 0 12px 12px 0;
+  border: 1px solid ${props => props.$isDark ? 'rgba(255, 255, 255, 0.2)' : 'rgba(0, 0, 0, 0.1)'};
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  position: relative;
   
   &:hover {
-    background: transparent;
-    transform: translateX(4px);
+    background: ${props => props.$isDark ? 'rgba(255, 255, 255, 0.18)' : 'rgba(255, 255, 255, 0.95)'};
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    border-color: var(--matte-red);
   }
   
   &:last-child {
     margin-bottom: 0;
   }
+  
+  &::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 4px;
+    background: var(--matte-red);
+    border-radius: 0 2px 2px 0;
+  }
 `;
 
-const ActionIcon = styled.div`
-  width: 20px;
-  height: 20px;
+const ActionIcon = styled.div<{ $isDark?: boolean }>`
+  width: 24px;
+  height: 24px;
   border-radius: 50%;
   background: var(--matte-red);
   display: flex;
   align-items: center;
   justify-content: center;
-  color: var(--bg-primary);
-  font-size: 0.7rem;
+  color: ${props => props.$isDark ? '#000000' : '#FFFFFF'};
+  font-size: 0.8rem;
   font-weight: bold;
-  margin-right: 12px;
+  margin-right: 14px;
   flex-shrink: 0;
+  box-shadow: 0 2px 6px rgba(162, 59, 59, 0.3);
+  border: 2px solid ${props => props.$isDark ? 'rgba(0, 0, 0, 0.1)' : 'rgba(255, 255, 255, 0.2)'};
 `;
 
-const ActionText = styled.span`
-  font-size: 0.9rem;
+const ActionText = styled.span<{ $isDark?: boolean }>`
+  font-size: 0.95rem;
   color: var(--text-primary);
-  line-height: 1.4;
+  line-height: 1.5;
+  font-weight: 500;
+  flex: 1;
 `;
 
 const QuickActionButton = styled.button`
@@ -621,47 +640,111 @@ const VideoButton = styled.button`
 
 const VideoModalOverlay = styled.div<{ $modalPosition: { top: string; transform: string } }>`
   position: fixed;
-    top: 0;
+  top: 0;
   left: 0;
   right: 0;
   bottom: 0;
-  background: rgba(0, 0, 0, 0.8);
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(2px);
   display: flex;
   align-items: flex-start;
   justify-content: center;
   z-index: 1000;
   animation: ${fadeIn} 0.3s ease-out;
   padding: 20px;
+  padding-top: 0;
   box-sizing: border-box;
   overflow-y: auto;
+  overflow-x: hidden;
 `;
 
 const VideoModal = styled.div<{ $modalPosition: { top: string; transform: string } }>`
   background: var(--bg-card);
   border-radius: 20px;
-  padding: 20px;
-  max-width: 80vw;
-  max-height: 80vh;
-  width: 80%;
+  padding: 0;
+  max-width: 95vw;
+  max-height: 90vh;
+  width: 95vw;
   text-align: center;
   border: 1px solid var(--border-color);
   box-shadow: 
     0 20px 40px rgba(0, 0, 0, 0.3),
     0 10px 20px var(--shadow-card);
-  animation: ${slideIn} 0.5s cubic-bezier(0.25, 0.46, 0.45, 0.94);
-  overflow-y: auto;
+  overflow: hidden;
   position: absolute;
-  top: ${props => props.$modalPosition.top};
+  top: 20px;
   left: 50%;
-  transform: ${props => props.$modalPosition.transform} translateX(-50%);
+  transform: translateY(var(--scroll-position, 0px)) translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  
+  /* Плавная анимация появления */
+  animation: modalSlideIn 0.4s ease-out;
+  
+  @keyframes modalSlideIn {
+    from {
+      opacity: 0;
+      transform: translateY(var(--scroll-position, 0px)) translateX(-50%) scale(0.95);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(var(--scroll-position, 0px)) translateX(-50%) scale(1);
+    }
+  }
+`;
+
+const VideoHeader = styled.div`
+  background: var(--bg-card);
+  border-radius: 20px 20px 0 0;
+  padding: 20px 24px;
+  border-bottom: 1px solid var(--border-color);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-shrink: 0;
 `;
 
 const VideoTitle = styled.h3`
   font-family: 'Noto Sans SC', 'Inter', Arial, sans-serif;
-  font-size: 1.4rem;
+  font-size: 22px;
   font-weight: 600;
   color: var(--text-primary);
-  margin: 0 0 16px 0;
+  margin: 0;
+`;
+
+const VideoBody = styled.div`
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px 24px;
+`;
+
+const VideoCloseIcon = styled.button`
+  background: var(--bg-secondary);
+  border: 1px solid var(--matte-red);
+  border-radius: 50%;
+  width: 36px;
+  height: 36px;
+  min-width: 36px;
+  min-height: 36px;
+  color: var(--matte-red);
+  font-size: 18px;
+  font-weight: bold;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+  flex-shrink: 0;
+
+  &:hover {
+    background: var(--matte-red);
+    color: white;
+    transform: scale(1.05);
+  }
+
+  &:active {
+    transform: scale(0.95);
+  }
 `;
 
 const VideoText = styled.p`
@@ -702,48 +785,52 @@ const CloseButton = styled.button`
   }
 `;
 
-const ContactSection = styled.div`
+const ContactSection = styled.div<{ $isDark?: boolean }>`
   background: transparent;
-  border: 1px solid var(--border-color);
+  border: 2px solid var(--matte-red);
   border-radius: 16px;
   padding: 10px;
-  margin-top: 20px;
+  margin: 20px 20px 0 20px;
   text-align: center;
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 0 15px rgba(162, 59, 59, 0.3), 0 2px 8px var(--shadow-soft);
   position: relative;
   z-index: 2;
 
   &:hover {
     transform: translateY(-2px);
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
-    border-color: var(--matte-terracotta);
+    box-shadow: 0 0 20px rgba(162, 59, 59, 0.4), 0 4px 16px var(--shadow-card);
+    border-color: var(--matte-red);
+  }
+
+  @media (max-width: 480px) {
+    margin: 20px 15px 0 15px;
   }
 `;
 
 const ContactTitle = styled.h3`
   font-family: 'Noto Sans SC', 'Inter', Arial, sans-serif;
   color: var(--text-primary);
-  margin-bottom: 5px;
-  font-size: 0.9rem;
+  margin-bottom: 8px;
+  font-size: 1.1rem;
   font-weight: 600;
 `;
 
 const ContactText = styled.p`
   color: var(--text-secondary);
-  line-height: 1.3;
-  margin-bottom: 8px;
+  line-height: 1.4;
+  margin-bottom: 12px;
   font-family: 'Inter', Arial, sans-serif;
-  font-size: 0.75rem;
+  font-size: 0.95rem;
 `;
 
 const ContactButton = styled.button`
   background: var(--matte-red);
   border: 1px solid var(--matte-red);
   border-radius: 12px;
-  padding: 8px 18px;
+  padding: 10px 20px;
   color: var(--bg-primary);
-  font-size: 0.8rem;
+  font-size: 0.9rem;
   font-weight: 600;
   cursor: pointer;
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
@@ -770,9 +857,10 @@ interface InstructionsProps {
   onNavigate: (view: string) => void;
   toggleTheme: () => void;
   isDarkTheme: boolean;
+  onModalStateChange?: (isOpen: boolean) => void;
 }
 
-const Instructions: React.FC<InstructionsProps> = ({ onNavigate, toggleTheme, isDarkTheme }) => {
+const Instructions: React.FC<InstructionsProps> = ({ onNavigate, toggleTheme, isDarkTheme, onModalStateChange }) => {
   const handleDownload = (platform: 'android' | 'ios') => {
     HapticFeedback.selection();
     if (platform === 'android') {
@@ -791,17 +879,13 @@ const Instructions: React.FC<InstructionsProps> = ({ onNavigate, toggleTheme, is
     HapticFeedback.selection();
     setVideoError(false);
     
-    // Вычисляем позицию модального окна точно по центру видимой области
-    const scrollTop = window.pageYOffset || document.documentElement.scrollTop;
-    const windowHeight = window.innerHeight;
-    const modalTop = scrollTop + (windowHeight / 2); // Точный центр экрана
-    
     setModalPosition({
-      top: `${modalTop}px`,
+      top: '50%',
       transform: 'translateY(-50%)'
     });
     
     setShowVideoModal(true);
+    onModalStateChange?.(true);
   };
 
   const handleOrderClick = () => {
@@ -854,13 +938,13 @@ const Instructions: React.FC<InstructionsProps> = ({ onNavigate, toggleTheme, is
           </StepCardHeader>
           <StepCardBody $isExpanded={expandedSteps[1]}>
             <StepCardActions>
-              <ActionItem>
-                <ActionIcon>📱</ActionIcon>
-                <ActionText>Скачайте приложение для Android или iOS</ActionText>
+              <ActionItem $isDark={isDarkTheme}>
+                <ActionIcon $isDark={isDarkTheme}>📱</ActionIcon>
+                <ActionText $isDark={isDarkTheme}>Скачайте приложение для Android или iOS</ActionText>
               </ActionItem>
-              <ActionItem>
-                <ActionIcon>🔍</ActionIcon>
-                <ActionText>Используйте для поиска товаров</ActionText>
+              <ActionItem $isDark={isDarkTheme}>
+                <ActionIcon $isDark={isDarkTheme}>🔍</ActionIcon>
+                <ActionText $isDark={isDarkTheme}>Используйте для поиска товаров</ActionText>
               </ActionItem>
               <QuickActionButton onClick={() => handleDownload('android')}>
                 Скачать для Android
@@ -885,29 +969,29 @@ const Instructions: React.FC<InstructionsProps> = ({ onNavigate, toggleTheme, is
           </StepCardHeader>
           <StepCardBody $isExpanded={expandedSteps[2]}>
             <StepCardActions>
-              <ActionItem>
-                <ActionIcon>1</ActionIcon>
-                <ActionText>Откройте приложение Poizon</ActionText>
+              <ActionItem $isDark={isDarkTheme}>
+                <ActionIcon $isDark={isDarkTheme}>1</ActionIcon>
+                <ActionText $isDark={isDarkTheme}>Откройте приложение Poizon</ActionText>
               </ActionItem>
-              <ActionItem>
-                <ActionIcon>2</ActionIcon>
-                <ActionText>Найдите поисковую строку</ActionText>
+              <ActionItem $isDark={isDarkTheme}>
+                <ActionIcon $isDark={isDarkTheme}>2</ActionIcon>
+                <ActionText $isDark={isDarkTheme}>Найдите поисковую строку</ActionText>
               </ActionItem>
-              <ActionItem>
-                <ActionIcon>3</ActionIcon>
-                <ActionText>Введите название бренда или модели</ActionText>
+              <ActionItem $isDark={isDarkTheme}>
+                <ActionIcon $isDark={isDarkTheme}>3</ActionIcon>
+                <ActionText $isDark={isDarkTheme}>Введите название бренда или модели</ActionText>
               </ActionItem>
-              <ActionItem>
-                <ActionIcon>4</ActionIcon>
-                <ActionText>Выберите нужный товар</ActionText>
+              <ActionItem $isDark={isDarkTheme}>
+                <ActionIcon $isDark={isDarkTheme}>4</ActionIcon>
+                <ActionText $isDark={isDarkTheme}>Выберите нужный товар</ActionText>
               </ActionItem>
-              <ActionItem>
-                <ActionIcon>5</ActionIcon>
-                <ActionText>Проверьте размер и цвет</ActionText>
+              <ActionItem $isDark={isDarkTheme}>
+                <ActionIcon $isDark={isDarkTheme}>5</ActionIcon>
+                <ActionText $isDark={isDarkTheme}>Проверьте размер и цвет</ActionText>
               </ActionItem>
-              <ActionItem>
-                <ActionIcon>6</ActionIcon>
-                <ActionText>Скопируйте ссылку на товар</ActionText>
+              <ActionItem $isDark={isDarkTheme}>
+                <ActionIcon $isDark={isDarkTheme}>6</ActionIcon>
+                <ActionText $isDark={isDarkTheme}>Скопируйте ссылку на товар</ActionText>
               </ActionItem>
             </StepCardActions>
           </StepCardBody>
@@ -926,21 +1010,21 @@ const Instructions: React.FC<InstructionsProps> = ({ onNavigate, toggleTheme, is
           </StepCardHeader>
           <StepCardBody $isExpanded={expandedSteps[3]}>
             <StepCardActions>
-              <ActionItem>
-                <ActionIcon>1</ActionIcon>
-                <ActionText>Откройте раздел "Расчет стоимости"</ActionText>
+              <ActionItem $isDark={isDarkTheme}>
+                <ActionIcon $isDark={isDarkTheme}>1</ActionIcon>
+                <ActionText $isDark={isDarkTheme}>Откройте раздел "Расчет стоимости"</ActionText>
               </ActionItem>
-              <ActionItem>
-                <ActionIcon>2</ActionIcon>
-                <ActionText>Выберите категорию товара</ActionText>
+              <ActionItem $isDark={isDarkTheme}>
+                <ActionIcon $isDark={isDarkTheme}>2</ActionIcon>
+                <ActionText $isDark={isDarkTheme}>Выберите категорию товара</ActionText>
               </ActionItem>
-              <ActionItem>
-                <ActionIcon>3</ActionIcon>
-                <ActionText>Введите цену в юанях</ActionText>
+              <ActionItem $isDark={isDarkTheme}>
+                <ActionIcon $isDark={isDarkTheme}>3</ActionIcon>
+                <ActionText $isDark={isDarkTheme}>Введите цену в юанях</ActionText>
               </ActionItem>
-              <ActionItem>
-                <ActionIcon>4</ActionIcon>
-                <ActionText>Получите итоговую стоимость</ActionText>
+              <ActionItem $isDark={isDarkTheme}>
+                <ActionIcon $isDark={isDarkTheme}>4</ActionIcon>
+                <ActionText $isDark={isDarkTheme}>Получите итоговую стоимость</ActionText>
               </ActionItem>
               <QuickActionButton onClick={() => onNavigate('calculator')}>
                 Открыть калькулятор
@@ -962,25 +1046,25 @@ const Instructions: React.FC<InstructionsProps> = ({ onNavigate, toggleTheme, is
           </StepCardHeader>
           <StepCardBody $isExpanded={expandedSteps[4]}>
             <StepCardActions>
-              <ActionItem>
-                <ActionIcon>1</ActionIcon>
-                <ActionText>Откройте раздел "Сделать заказ"</ActionText>
+              <ActionItem $isDark={isDarkTheme}>
+                <ActionIcon $isDark={isDarkTheme}>1</ActionIcon>
+                <ActionText $isDark={isDarkTheme}>Откройте раздел "Сделать заказ"</ActionText>
               </ActionItem>
-              <ActionItem>
-                <ActionIcon>2</ActionIcon>
-                <ActionText>Вставьте ссылку на товар</ActionText>
+              <ActionItem $isDark={isDarkTheme}>
+                <ActionIcon $isDark={isDarkTheme}>2</ActionIcon>
+                <ActionText $isDark={isDarkTheme}>Вставьте ссылку на товар</ActionText>
               </ActionItem>
-              <ActionItem>
-                <ActionIcon>3</ActionIcon>
-                <ActionText>Выберите категорию и размер</ActionText>
+              <ActionItem $isDark={isDarkTheme}>
+                <ActionIcon $isDark={isDarkTheme}>3</ActionIcon>
+                <ActionText $isDark={isDarkTheme}>Выберите категорию и размер</ActionText>
               </ActionItem>
-              <ActionItem>
-                <ActionIcon>4</ActionIcon>
-                <ActionText>Укажите данные получателя</ActionText>
+              <ActionItem $isDark={isDarkTheme}>
+                <ActionIcon $isDark={isDarkTheme}>4</ActionIcon>
+                <ActionText $isDark={isDarkTheme}>Укажите данные получателя</ActionText>
               </ActionItem>
-              <ActionItem>
-                <ActionIcon>5</ActionIcon>
-                <ActionText>Выберите пункт выдачи</ActionText>
+              <ActionItem $isDark={isDarkTheme}>
+                <ActionIcon $isDark={isDarkTheme}>5</ActionIcon>
+                <ActionText $isDark={isDarkTheme}>Выберите пункт выдачи</ActionText>
               </ActionItem>
               <QuickActionButton onClick={handleOrderClick}>
                 Сделать заказ
@@ -1002,25 +1086,25 @@ const Instructions: React.FC<InstructionsProps> = ({ onNavigate, toggleTheme, is
           </StepCardHeader>
           <StepCardBody $isExpanded={expandedSteps[5]}>
             <StepCardActions>
-              <ActionItem>
-                <ActionIcon>📞</ActionIcon>
-                <ActionText>Дождитесь звонка от менеджера</ActionText>
+              <ActionItem $isDark={isDarkTheme}>
+                <ActionIcon $isDark={isDarkTheme}>📞</ActionIcon>
+                <ActionText $isDark={isDarkTheme}>Дождитесь звонка от менеджера</ActionText>
               </ActionItem>
-              <ActionItem>
-                <ActionIcon>💳</ActionIcon>
-                <ActionText>Получите реквизиты для оплаты</ActionText>
+              <ActionItem $isDark={isDarkTheme}>
+                <ActionIcon $isDark={isDarkTheme}>💳</ActionIcon>
+                <ActionText $isDark={isDarkTheme}>Получите реквизиты для оплаты</ActionText>
               </ActionItem>
-              <ActionItem>
-                <ActionIcon>🛍️</ActionIcon>
-                <ActionText>Товар заказывается у поставщика</ActionText>
+              <ActionItem $isDark={isDarkTheme}>
+                <ActionIcon $isDark={isDarkTheme}>🛍️</ActionIcon>
+                <ActionText $isDark={isDarkTheme}>Товар заказывается у поставщика</ActionText>
               </ActionItem>
-              <ActionItem>
-                <ActionIcon>📦</ActionIcon>
-                <ActionText>Получите уведомление о готовности</ActionText>
+              <ActionItem $isDark={isDarkTheme}>
+                <ActionIcon $isDark={isDarkTheme}>📦</ActionIcon>
+                <ActionText $isDark={isDarkTheme}>Получите уведомление о готовности</ActionText>
               </ActionItem>
-              <ActionItem>
-                <ActionIcon>🚚</ActionIcon>
-                <ActionText>Заберите товар в пункте выдачи</ActionText>
+              <ActionItem $isDark={isDarkTheme}>
+                <ActionIcon $isDark={isDarkTheme}>🚚</ActionIcon>
+                <ActionText $isDark={isDarkTheme}>Заберите товар в пункте выдачи</ActionText>
               </ActionItem>
             </StepCardActions>
           </StepCardBody>
@@ -1039,13 +1123,13 @@ const Instructions: React.FC<InstructionsProps> = ({ onNavigate, toggleTheme, is
           </StepCardHeader>
           <StepCardBody $isExpanded={expandedSteps[6]}>
             <StepCardActions>
-              <ActionItem>
-                <ActionIcon>🎥</ActionIcon>
-                <ActionText>Посмотрите пошаговую видео-инструкцию</ActionText>
+              <ActionItem $isDark={isDarkTheme}>
+                <ActionIcon $isDark={isDarkTheme}>🎥</ActionIcon>
+                <ActionText $isDark={isDarkTheme}>Посмотрите пошаговую видео-инструкцию</ActionText>
               </ActionItem>
-              <ActionItem>
-                <ActionIcon>📖</ActionIcon>
-                <ActionText>Или прочитайте текстовую инструкцию</ActionText>
+              <ActionItem $isDark={isDarkTheme}>
+                <ActionIcon $isDark={isDarkTheme}>📖</ActionIcon>
+                <ActionText $isDark={isDarkTheme}>Или прочитайте текстовую инструкцию</ActionText>
               </ActionItem>
               <QuickActionButton onClick={handleVideoClick}>
                 Смотреть видео-инструкцию
@@ -1055,7 +1139,7 @@ const Instructions: React.FC<InstructionsProps> = ({ onNavigate, toggleTheme, is
         </StepCard>
 
         {/* Кнопка связи с менеджером */}
-        <ContactSection>
+        <ContactSection $isDark={isDarkTheme}>
           <ContactTitle>Не нашли ответ на свой вопрос?</ContactTitle>
           <ContactText>
             Свяжитесь с нашим менеджером - мы всегда готовы помочь!
@@ -1067,12 +1151,35 @@ const Instructions: React.FC<InstructionsProps> = ({ onNavigate, toggleTheme, is
 
       {/* Модальное окно с видео-инструкцией */}
       {showVideoModal && (
-        <VideoModalOverlay $modalPosition={modalPosition}>
-          <VideoModal $modalPosition={modalPosition}>
-            <VideoTitle>Видео-инструкция</VideoTitle>
-            <VideoText>
-              Смотрите пошаговую инструкцию по оформлению заказа
-            </VideoText>
+        <VideoModalOverlay 
+          $modalPosition={modalPosition}
+          onClick={() => {
+            HapticFeedback.light();
+            setShowVideoModal(false);
+            onModalStateChange?.(false);
+          }}
+        >
+          <VideoModal 
+            $modalPosition={modalPosition}
+            style={{
+              '--scroll-position': `${window.pageYOffset || document.documentElement.scrollTop}px`
+            } as React.CSSProperties}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <VideoHeader>
+              <VideoTitle>Видео-инструкция</VideoTitle>
+              <VideoCloseIcon onClick={() => {
+                HapticFeedback.light();
+                setShowVideoModal(false);
+                onModalStateChange?.(false);
+              }}>
+                ×
+              </VideoCloseIcon>
+            </VideoHeader>
+            <VideoBody>
+              <VideoText>
+                Смотрите пошаговую инструкцию по оформлению заказа
+              </VideoText>
             {!videoError && (
               <VideoText style={{ fontSize: '1rem', margin: '0 0 20px 0' }}>
                 Если видео не загружается, нажмите "Показать текстовую инструкцию"
@@ -1141,12 +1248,7 @@ const Instructions: React.FC<InstructionsProps> = ({ onNavigate, toggleTheme, is
                 Показать текстовую инструкцию
               </CloseButton>
             )}
-            <CloseButton onClick={() => {
-              HapticFeedback.light();
-              setShowVideoModal(false);
-            }}>
-              Закрыть
-            </CloseButton>
+            </VideoBody>
           </VideoModal>
         </VideoModalOverlay>
       )}

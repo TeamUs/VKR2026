@@ -75,6 +75,7 @@ interface YuanPurchaseProps {
   telegramId: string;
   isDarkTheme: boolean;
   toggleTheme: () => void;
+  onModalStateChange?: (isOpen: boolean) => void;
 }
 
 const ModalBody = styled.div`
@@ -248,7 +249,7 @@ const RateGrid = styled.div`
 `;
 
 const RateItem = styled.div<{ $isDark: boolean }>`
-  background: ${props => props.$isDark ? 'rgba(42, 42, 42, 0.95)' : 'rgba(230, 211, 179, 0.95)'};
+  background: ${props => props.$isDark ? 'rgba(42, 42, 42, 0.95)' : '#FFFFFF'};
   border-radius: 12px;
   padding: 16px;
   border: 1px solid var(--border-color);
@@ -270,18 +271,40 @@ const RateValue = styled.div`
 `;
 
 const SavingsBadge = styled.div<{ $isDark: boolean }>`
-  background: ${props => props.$isDark ? 'rgba(162, 59, 59, 0.15)' : 'rgba(162, 59, 59, 0.1)'};
+  background: ${props => props.$isDark 
+    ? 'linear-gradient(135deg, rgba(162, 59, 59, 0.2), rgba(162, 59, 59, 0.1))' 
+    : 'linear-gradient(135deg, rgba(162, 59, 59, 0.15), rgba(162, 59, 59, 0.08))'
+  };
   color: var(--matte-red);
-  padding: 8px 12px;
-  border: none;
-  border-radius: 12px;
+  padding: 12px 20px;
+  border: 2px solid var(--matte-red);
+  border-radius: 16px;
   font-family: 'Noto Sans SC', 'Inter', Arial, sans-serif;
-  font-size: 14px;
-  font-weight: 600;
+  font-size: 15px;
+  font-weight: 700;
   display: inline-block;
   text-align: center;
   backdrop-filter: blur(10px);
-  border: 1px solid ${props => props.$isDark ? 'rgba(162, 59, 59, 0.3)' : 'rgba(162, 59, 59, 0.2)'};
+  box-shadow: ${props => props.$isDark 
+    ? '0 0 15px rgba(162, 59, 59, 0.3), 0 4px 12px rgba(0, 0, 0, 0.1)' 
+    : '0 0 12px rgba(162, 59, 59, 0.2), 0 4px 8px rgba(0, 0, 0, 0.05)'
+  };
+  position: relative;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  
+  &:hover {
+    transform: translateY(-2px);
+    box-shadow: ${props => props.$isDark 
+      ? '0 0 20px rgba(162, 59, 59, 0.4), 0 6px 16px rgba(0, 0, 0, 0.15)' 
+      : '0 0 16px rgba(162, 59, 59, 0.3), 0 6px 12px rgba(0, 0, 0, 0.08)'
+    };
+  }
+  
+  &::before {
+    content: '💰';
+    margin-right: 8px;
+    font-size: 16px;
+  }
 `;
 
 const PurchaseForm = styled.div<{ $isDark: boolean }>`
@@ -311,8 +334,8 @@ const InputGroup = styled.div`
 
 const Label = styled.label`
   font-family: 'Noto Sans SC', 'Inter', Arial, sans-serif;
-  font-size: 14px;
-  font-weight: 500;
+  font-size: 15px;
+  font-weight: 600;
   color: var(--text-primary);
   display: block;
   margin-bottom: 8px;
@@ -323,7 +346,7 @@ const Input = styled.input<{ $isDark: boolean }>`
   padding: 12px 16px;
   border: 2px solid var(--border-color);
   border-radius: 12px;
-  background: var(--bg-card);
+  background: ${props => props.$isDark ? 'var(--bg-card)' : '#FFFFFF'};
   color: var(--text-primary);
   font-family: 'JetBrains Mono', monospace;
   font-size: 16px;
@@ -483,60 +506,104 @@ const InstructionsList = styled.ol`
   list-style: none;
   counter-reset: step-counter;
   padding: 0;
-  margin: 0;
+  margin: 0 0 24px 0;
 `;
 
 const InstructionItem = styled.li`
   counter-increment: step-counter;
-  margin-bottom: 16px;
-  padding-left: 40px;
+  margin-bottom: 20px;
+  padding: 16px 20px 16px 60px;
   position: relative;
   font-family: 'Noto Sans SC', 'Inter', Arial, sans-serif;
-  font-size: 14px;
-  line-height: 1.5;
+  font-size: 15px;
+  line-height: 1.6;
   color: var(--text-primary);
+  background: var(--bg-secondary);
+  border-radius: 12px;
+  border: 1px solid var(--border-color);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  transition: all 0.3s ease;
+  
+  &:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  }
+  
+  &:last-child {
+    margin-bottom: 0;
+  }
   
   &::before {
     content: counter(step-counter);
     position: absolute;
-    left: 0;
-    top: 0;
-    background: var(--matte-red);
+    left: 16px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 28px;
+    height: 28px;
+    background: linear-gradient(135deg, var(--matte-red), #d32f2f);
     color: white;
-    width: 24px;
-    height: 24px;
     border-radius: 50%;
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 12px;
-    font-weight: 600;
+    font-size: 13px;
+    font-weight: 700;
+    box-shadow: 0 2px 6px rgba(211, 47, 47, 0.3);
   }
 `;
 
 const PaymentMethods = styled.div<{ $isDark: boolean }>`
-  margin-top: 16px;
-  padding: 12px;
-  background: ${props => props.$isDark ? 'rgba(0, 0, 0, 0.3)' : 'rgba(255, 255, 255, 0.3)'};
-  border-radius: 8px;
-  border: 1px solid var(--border-color);
+  margin-top: 24px;
+  padding: 20px;
+  background: linear-gradient(135deg, 
+    ${props => props.$isDark ? 'rgba(0, 0, 0, 0.4)' : 'rgba(255, 255, 255, 0.4)'}, 
+    ${props => props.$isDark ? 'rgba(0, 0, 0, 0.2)' : 'rgba(255, 255, 255, 0.2)'}
+  );
+  border-radius: 16px;
+  border: 2px solid var(--border-color);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
+  position: relative;
+  
+  &::before {
+    content: '';
+    position: absolute;
+    top: -2px;
+    left: 20px;
+    right: 20px;
+    height: 2px;
+    background: linear-gradient(90deg, var(--matte-red), #ff6b6b, var(--matte-red));
+    border-radius: 1px;
+  }
 `;
 
 const PaymentMethodsTitle = styled.h4`
   font-family: 'Noto Sans SC', 'Inter', Arial, sans-serif;
-  font-size: 14px;
-  font-weight: 600;
+  font-size: 16px;
+  font-weight: 700;
   color: var(--text-primary);
-  margin-bottom: 8px;
+  margin-bottom: 16px;
   text-align: center;
+  letter-spacing: 0.5px;
 `;
 
 const PaymentMethod = styled.div`
   display: flex;
   align-items: center;
-  margin-bottom: 8px;
-  font-size: 13px;
-  color: var(--text-secondary);
+  margin-bottom: 12px;
+  padding: 12px 16px;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-primary);
+  background: var(--bg-secondary);
+  border-radius: 10px;
+  border: 1px solid var(--border-color);
+  transition: all 0.3s ease;
+  
+  &:hover {
+    transform: translateX(4px);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  }
   
   &:last-child {
     margin-bottom: 0;
@@ -580,37 +647,58 @@ const InstructionsButton = styled.button<{ $isDark: boolean }>`
   }
 `;
 
-const ModalOverlay = styled.div<{ $isOpen: boolean; $modalPosition: { top: string; transform: string } }>`
+const ModalOverlay = styled.div<{ $modalPosition: { top: string; transform: string } }>`
   position: fixed;
-  top: -100px;
+  top: -20px;
   left: 0;
   right: 0;
-  bottom: -100px;
-  background: rgba(0, 0, 0, 0.8);
-  display: ${props => props.$isOpen ? 'flex' : 'none'};
+  bottom: -20px;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(2px);
+  display: flex;
   align-items: flex-start;
   justify-content: center;
   z-index: 1000;
-  padding: 10px;
+  animation: ${fadeIn} 0.3s ease-out;
+  padding: 80px 0 0 0;
   box-sizing: border-box;
-  overflow: hidden;
+  overflow-y: auto;
+  overflow-x: hidden;
 `;
 
 const ModalContent = styled.div<{ $isDark: boolean; $modalPosition: { top: string; transform: string } }>`
-  background: ${props => props.$isDark ? 'rgba(42, 42, 42, 0.95)' : 'rgba(230, 211, 179, 0.95)'};
+  background: var(--bg-card);
   border-radius: 20px;
   padding: 0;
+  max-width: 95vw;
+  max-height: 90vh;
   width: 95vw;
-  max-height: 85vh;
-  overflow: hidden;
-  box-shadow: 0 10px 30px var(--shadow-soft);
+  text-align: center;
   border: 1px solid var(--border-color);
+  box-shadow: 
+    0 20px 40px rgba(0, 0, 0, 0.3),
+    0 10px 20px var(--shadow-card);
+  overflow: hidden;
   position: absolute;
-  top: ${props => props.$modalPosition.top};
+  top: 50px;
   left: 50%;
-  transform: ${props => props.$modalPosition.transform} translateX(-50%);
+  transform: translateY(var(--scroll-position, 0px)) translateX(-50%);
   display: flex;
   flex-direction: column;
+  
+  /* Плавная анимация появления */
+  animation: modalSlideIn 0.4s ease-out;
+  
+  @keyframes modalSlideIn {
+    from {
+      opacity: 0;
+      transform: translateY(var(--scroll-position, 0px)) translateX(-50%) scale(0.95);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(var(--scroll-position, 0px)) translateX(-50%) scale(1);
+    }
+  }
 `;
 
 const ModalHeader = styled.div`
@@ -677,7 +765,7 @@ const TariffGrid = styled.div`
 const TariffCard = styled.div<{ $isDark: boolean; $active: boolean; $color: string }>`
   background: ${props => props.$active 
     ? `linear-gradient(135deg, ${props.$color}, ${props.$color}dd)` 
-    : props.$isDark ? 'rgba(42, 42, 42, 0.95)' : 'rgba(230, 211, 179, 0.95)'
+    : props.$isDark ? 'rgba(42, 42, 42, 0.95)' : '#FFFFFF'
   };
   border: 2px solid ${props => props.$active ? props.$color : 'var(--border-color)'};
   border-radius: 12px;
@@ -699,7 +787,7 @@ const TariffCard = styled.div<{ $isDark: boolean; $active: boolean; $color: stri
 
 const TariffName = styled.div<{ $active: boolean }>`
   font-family: 'Noto Sans SC', 'Inter', Arial, sans-serif;
-  font-size: 14px;
+  font-size: 16px;
   font-weight: 600;
   color: ${props => props.$active ? 'white' : 'var(--text-primary)'};
   margin-bottom: 4px;
@@ -707,13 +795,13 @@ const TariffName = styled.div<{ $active: boolean }>`
 
 const TariffDescription = styled.div<{ $active: boolean }>`
   font-family: 'Noto Sans SC', 'Inter', Arial, sans-serif;
-  font-size: 12px;
-  color: ${props => props.$active ? 'rgba(255,255,255,0.8)' : 'var(--text-secondary)'};
+  font-size: 14px;
+  color: ${props => props.$active ? 'rgba(255,255,255,0.95)' : 'var(--text-secondary)'};
 `;
 
 const TariffDiscount = styled.div<{ $active: boolean }>`
   font-family: 'JetBrains Mono', monospace;
-  font-size: 11px;
+  font-size: 13px;
   color: ${props => props.$active ? 'rgba(255,255,255,0.9)' : 'var(--matte-red)'};
   margin-top: 4px;
   font-weight: 500;
@@ -722,19 +810,21 @@ const TariffDiscount = styled.div<{ $active: boolean }>`
 // Модальное окно успеха
 const SuccessModalOverlay = styled.div<{ $modalPosition: { top: string; transform: string } }>`
   position: fixed;
-  top: -100px;
+  top: -20px;
   left: 0;
   right: 0;
-  bottom: -100px;
-  background: rgba(0, 0, 0, 0.8);
+  bottom: -20px;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(2px);
   display: flex;
   align-items: flex-start;
   justify-content: center;
   z-index: 1000;
   animation: ${fadeIn} 0.3s ease-out;
-  padding: 20px;
+  padding: 80px 0 0 0;
   box-sizing: border-box;
-  overflow: hidden;
+  overflow-y: auto;
+  overflow-x: hidden;
 `;
 
 const SuccessModal = styled.div<{ $modalPosition: { top: string; transform: string } }>`
@@ -742,7 +832,7 @@ const SuccessModal = styled.div<{ $modalPosition: { top: string; transform: stri
   border-radius: 20px;
   padding: 0;
   max-width: 95vw;
-  max-height: 85vh;
+  max-height: 90vh;
   width: 90%;
   text-align: center;
   border: 1px solid var(--border-color);
@@ -754,7 +844,22 @@ const SuccessModal = styled.div<{ $modalPosition: { top: string; transform: stri
   flex-direction: column;
   position: absolute;
   top: ${props => props.$modalPosition.top};
-  transform: ${props => props.$modalPosition.transform};
+  left: 50%;
+  transform: ${props => props.$modalPosition.transform} translateX(-50%);
+  
+  /* Плавная анимация появления */
+  animation: successModalSlideIn 0.4s ease-out;
+  
+  @keyframes successModalSlideIn {
+    from {
+      opacity: 0;
+      transform: ${props => props.$modalPosition.transform} translateX(-50%) scale(0.95);
+    }
+    to {
+      opacity: 1;
+      transform: ${props => props.$modalPosition.transform} translateX(-50%) scale(1);
+    }
+  }
 `;
 
 const SuccessHeader = styled.div`
@@ -765,43 +870,19 @@ const SuccessHeader = styled.div`
   flex-shrink: 0;
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: center;
 `;
 
 const SuccessTitle = styled.h2`
   font-family: 'Noto Sans SC', 'Inter', Arial, sans-serif;
-  font-size: 1.4rem;
+  font-size: 1.8rem;
   font-weight: 700;
   color: var(--text-primary);
-  margin: 0;
+  margin-bottom: 15px;
   background: linear-gradient(135deg, var(--matte-red), var(--terracotta));
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
-`;
-
-const SuccessCloseIcon = styled.div`
-  width: 36px;
-  height: 36px;
-  border-radius: 50%;
-  background: var(--bg-secondary);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  transition: all 0.3s ease;
-  font-size: 1.2rem;
-  color: var(--text-secondary);
-  min-width: 36px;
-  min-height: 36px;
-  flex-shrink: 0;
-  box-sizing: border-box;
-  
-  &:hover {
-    background: var(--matte-red);
-    color: white;
-    transform: scale(1.1);
-  }
 `;
 
 const SuccessBody = styled.div`
@@ -820,28 +901,30 @@ const SuccessModalMessage = styled.p`
   font-family: 'Inter', Arial, sans-serif;
   font-size: 1rem;
   color: var(--text-secondary);
-  line-height: 1.6;
+  line-height: 1.5;
   margin-bottom: 25px;
 `;
 
 const SuccessButton = styled.button`
   background: var(--matte-red);
-  color: white;
+  color: var(--bg-primary);
   border: none;
   border-radius: 12px;
-  padding: 12px 24px;
+  padding: 12px 30px;
   font-size: 1rem;
   font-weight: 600;
   cursor: pointer;
   transition: all 0.3s ease;
+  box-shadow: 0 4px 12px var(--shadow-soft);
   
   &:hover {
     background: var(--terracotta);
     transform: translateY(-2px);
+    box-shadow: 0 6px 20px var(--shadow-card);
   }
 `;
 
-const YuanPurchase: React.FC<YuanPurchaseProps> = ({ telegramId, isDarkTheme, toggleTheme }) => {
+const YuanPurchase: React.FC<YuanPurchaseProps> = ({ telegramId, isDarkTheme, toggleTheme, onModalStateChange }) => {
   const [exchangeRate, setExchangeRate] = useState<ExchangeRate | null>(null);
   const [purchaseHistory, setPurchaseHistory] = useState<Purchase[]>([]);
   const [amountCny, setAmountCny] = useState<string>('');
@@ -1061,15 +1144,21 @@ const YuanPurchase: React.FC<YuanPurchaseProps> = ({ telegramId, isDarkTheme, to
         // Рассчитываем позицию модального окна по центру экрана
         const scrollTop = window.pageYOffset || document.documentElement.scrollTop;
         const windowHeight = window.innerHeight;
-        const modalTop = scrollTop + (windowHeight / 2);
+        const centerPosition = scrollTop + (windowHeight / 2);
         
         setSuccessModalPosition({
-          top: `${modalTop}px`,
+          top: `${centerPosition}px`,
           transform: 'translateY(-50%)'
         });
         
         setShowSuccessModal(true);
+        onModalStateChange?.(true);
         setAmountCny('');
+        
+        // Блокируем скролл страницы при открытии модального окна
+        document.body.style.overflow = 'hidden';
+        document.body.style.position = 'fixed';
+        document.body.style.width = '100%';
       } else {
         throw new Error('Ошибка при отправке заказа');
       }
@@ -1292,15 +1381,15 @@ const YuanPurchase: React.FC<YuanPurchaseProps> = ({ telegramId, isDarkTheme, to
       </TariffSection>
 
         <InstructionsButton $isDark={isDarkTheme} onClick={() => {
-          const scrollTop = window.pageYOffset || document.documentElement.scrollTop;
-          const windowHeight = window.innerHeight;
-          const modalTop = scrollTop + (windowHeight / 2) + 50; // Чуть ниже центра экрана
-          
-          setInstructionsModalPosition({
-            top: `${modalTop}px`,
-            transform: 'translateY(-50%)'
-          });
+          HapticFeedback.selection();
+          setInstructionsModalPosition({ top: '50%', transform: 'translateY(-50%)' });
           setShowInstructions(true);
+          onModalStateChange?.(true);
+          
+          // Блокируем скролл страницы при открытии модального окна
+          document.body.style.overflow = 'hidden';
+          document.body.style.position = 'fixed';
+          document.body.style.width = '100%';
         }}>
           Инструкция по покупке юаней
         </InstructionsButton>
@@ -1325,11 +1414,37 @@ const YuanPurchase: React.FC<YuanPurchaseProps> = ({ telegramId, isDarkTheme, to
       )}
 
 
-      <ModalOverlay $isOpen={showInstructions} $modalPosition={instructionsModalPosition} onClick={() => setShowInstructions(false)}>
-        <ModalContent $isDark={isDarkTheme} $modalPosition={instructionsModalPosition} onClick={(e) => e.stopPropagation()}>
+      {showInstructions && (
+        <ModalOverlay $modalPosition={instructionsModalPosition} onClick={() => {
+        HapticFeedback.light();
+        setShowInstructions(false);
+        onModalStateChange?.(false);
+        
+        // Восстанавливаем скролл страницы при закрытии модального окна
+        document.body.style.overflow = '';
+        document.body.style.position = '';
+        document.body.style.width = '';
+      }}>
+        <ModalContent 
+          $isDark={isDarkTheme} 
+          $modalPosition={instructionsModalPosition} 
+          onClick={(e) => e.stopPropagation()}
+          style={{
+            '--scroll-position': `${window.pageYOffset || document.documentElement.scrollTop}px`
+          } as React.CSSProperties}
+        >
           <ModalHeader>
             <ModalTitle>Инструкция по покупке юаней</ModalTitle>
-            <CloseButton $isDark={isDarkTheme} onClick={() => setShowInstructions(false)}>
+            <CloseButton $isDark={isDarkTheme} onClick={() => {
+              HapticFeedback.light();
+              setShowInstructions(false);
+              onModalStateChange?.(false);
+              
+              // Восстанавливаем скролл страницы при закрытии модального окна
+              document.body.style.overflow = '';
+              document.body.style.position = '';
+              document.body.style.width = '';
+            }}>
               ×
             </CloseButton>
           </ModalHeader>
@@ -1360,7 +1475,7 @@ const YuanPurchase: React.FC<YuanPurchaseProps> = ({ telegramId, isDarkTheme, to
           <PaymentMethods $isDark={isDarkTheme}>
             <PaymentMethodsTitle>💳 Способы оплаты</PaymentMethodsTitle>
             <PaymentMethod>
-              <PaymentIcon>💚</PaymentIcon>
+              <PaymentIcon>💙</PaymentIcon>
               Alipay (Алипей)
             </PaymentMethod>
             <PaymentMethod>
@@ -1371,21 +1486,41 @@ const YuanPurchase: React.FC<YuanPurchaseProps> = ({ telegramId, isDarkTheme, to
           </ModalBody>
         </ModalContent>
       </ModalOverlay>
+      )}
 
       {/* Модальное окно успеха */}
       {showSuccessModal && (
-        <SuccessModalOverlay $modalPosition={successModalPosition} onClick={() => setShowSuccessModal(false)}>
-          <SuccessModal $modalPosition={successModalPosition} onClick={(e) => e.stopPropagation()}>
+        <SuccessModalOverlay $modalPosition={successModalPosition} onClick={() => {
+          setShowSuccessModal(false);
+          onModalStateChange?.(false);
+          
+          // Восстанавливаем скролл страницы при закрытии модального окна
+          document.body.style.overflow = '';
+          document.body.style.position = '';
+          document.body.style.width = '';
+        }}>
+          <SuccessModal 
+            $modalPosition={successModalPosition} 
+            onClick={(e) => e.stopPropagation()}
+          >
             <SuccessHeader>
               <SuccessTitle>Заказ отправлен!</SuccessTitle>
             </SuccessHeader>
             <SuccessBody>
-              <SuccessIcon>✅</SuccessIcon>
+              <SuccessIcon>🎉</SuccessIcon>
               <SuccessModalMessage>
                 Ваш заказ на покупку юаней успешно отправлен менеджеру.<br/>
                 Ожидайте ответа в течение 24 часов.
               </SuccessModalMessage>
-              <SuccessButton onClick={() => setShowSuccessModal(false)}>
+              <SuccessButton onClick={() => {
+                setShowSuccessModal(false);
+                onModalStateChange?.(false);
+                
+                // Восстанавливаем скролл страницы при закрытии модального окна
+                document.body.style.overflow = '';
+                document.body.style.position = '';
+                document.body.style.width = '';
+              }}>
                 Супер!
               </SuccessButton>
             </SuccessBody>

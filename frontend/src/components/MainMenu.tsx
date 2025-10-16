@@ -181,7 +181,7 @@ const MenuGrid = styled.div`
   }
 `;
 
-const MenuButton = styled.button<{ $variant?: 'primary' | 'secondary' }>`
+const MenuButton = styled.button<{ $variant?: 'primary' | 'secondary'; $isDark: boolean }>`
   position: relative;
   z-index: 2;
   padding: 20px;
@@ -189,7 +189,7 @@ const MenuButton = styled.button<{ $variant?: 'primary' | 'secondary' }>`
   border-radius: 20px;
   background: ${props => props.$variant === 'primary' 
     ? 'var(--matte-red)' 
-    : 'var(--bg-card)'};
+    : props.$isDark ? 'rgba(42, 42, 42, 0.8)' : 'rgba(230, 211, 179, 0.8)'};
   color: ${props => props.$variant === 'primary' ? 'var(--bg-primary)' : 'var(--text-primary)'};
   font-family: 'Noto Sans SC', 'Inter', Arial, sans-serif;
   font-size: 1rem;
@@ -412,6 +412,7 @@ const MainMenu: React.FC<MainMenuProps> = ({ onNavigate, toggleTheme, isDarkThem
         <MenuGrid>
           <MenuButton 
             $variant="primary" 
+            $isDark={isDarkTheme}
             onClick={() => handleButtonClick('order')}
           >
             <ButtonIcon>🏮</ButtonIcon>
@@ -419,43 +420,43 @@ const MainMenu: React.FC<MainMenuProps> = ({ onNavigate, toggleTheme, isDarkThem
             <ChineseAccent>福</ChineseAccent>
           </MenuButton>
           
-          <MenuButton onClick={() => handleButtonClick('calculator')}>
+          <MenuButton $isDark={isDarkTheme} onClick={() => handleButtonClick('calculator')}>
             <ButtonIcon>💰</ButtonIcon>
             <ButtonText>Расчет стоимости</ButtonText>
             <ChineseAccent>財</ChineseAccent>
           </MenuButton>
           
-          <MenuButton onClick={() => handleButtonClick('tracking')}>
+          <MenuButton $isDark={isDarkTheme} onClick={() => handleButtonClick('tracking')}>
             <ButtonIcon>📦</ButtonIcon>
             <ButtonText>Отследить заказ</ButtonText>
             <ChineseAccent>追</ChineseAccent>
           </MenuButton>
           
-          <MenuButton onClick={() => handleButtonClick('referral')}>
+          <MenuButton $isDark={isDarkTheme} onClick={() => handleButtonClick('referral')}>
             <ButtonIcon>🔗</ButtonIcon>
             <ButtonText>Реферальная система</ButtonText>
             <ChineseAccent>運</ChineseAccent>
           </MenuButton>
           
-          <MenuButton onClick={() => handleButtonClick('faq')}>
+          <MenuButton $isDark={isDarkTheme} onClick={() => handleButtonClick('faq')}>
             <ButtonIcon>❓</ButtonIcon>
             <ButtonText>FAQ</ButtonText>
             <ChineseAccent>智</ChineseAccent>
           </MenuButton>
           
-          <MenuButton onClick={() => handleButtonClick('instructions')}>
+          <MenuButton $isDark={isDarkTheme} onClick={() => handleButtonClick('instructions')}>
             <ButtonIcon>📖</ButtonIcon>
             <ButtonText>Инструкции</ButtonText>
             <ChineseAccent>學</ChineseAccent>
           </MenuButton>
           
-          <MenuButton onClick={() => handleButtonClick('exchange-rate')}>
+          <MenuButton $isDark={isDarkTheme} onClick={() => handleButtonClick('exchange-rate')}>
             <ButtonIcon>📊</ButtonIcon>
             <ButtonText>Курс юаня</ButtonText>
             <ChineseAccent>匯</ChineseAccent>
           </MenuButton>
           
-          <MenuButton onClick={() => handleButtonClick('reviews')}>
+          <MenuButton $isDark={isDarkTheme} onClick={() => handleButtonClick('reviews')}>
             <ButtonIcon>⭐</ButtonIcon>
             <ButtonText>Отзывы</ButtonText>
             <ChineseAccent>譽</ChineseAccent>

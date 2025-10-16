@@ -144,10 +144,9 @@ const ToggleIconDark = styled.span<{ $isDark: boolean }>`
 
 const Container = styled.div<{ $isDark?: boolean }>`
   padding: 20px;
-  background: ${props => props.$isDark ? 'var(--bg-card-dark)' : 'var(--bg-card)'};
-  border-radius: 16px;
-  border: 1px solid ${props => props.$isDark ? 'var(--border-color-dark)' : 'var(--border-color)'};
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  background: transparent;
+  border: none;
+  box-shadow: none;
   margin-bottom: 20px;
 `;
 
@@ -160,8 +159,8 @@ const Label = styled.label<{ $isDark?: boolean }>`
   display: block;
   margin-bottom: 8px;
   color: ${props => props.$isDark ? 'var(--text-secondary-dark)' : 'var(--text-secondary)'};
-  font-size: 0.9rem;
-  font-weight: 500;
+  font-size: 1rem;
+  font-weight: 700;
 `;
 
 const Input = styled.input<{ $isDark?: boolean }>`
@@ -198,8 +197,8 @@ const Button = styled.button<{ $isDark?: boolean }>`
   padding: 14px 20px;
   border-radius: 12px;
   border: none;
-  background: linear-gradient(135deg, var(--matte-red), var(--terracotta));
-  color: white;
+  background: var(--matte-red);
+  color: ${props => props.$isDark ? '#000000' : '#FFFFFF'};
   font-size: 1rem;
   font-weight: bold;
   cursor: pointer;
@@ -247,24 +246,31 @@ const LoadingMessage = styled.div<{ $isDark?: boolean }>`
 const TrackingInfo = styled.div<{ $isDark?: boolean }>`
   margin-top: 20px;
   padding: 16px;
-  background: ${props => props.$isDark ? 'var(--bg-secondary-dark)' : 'var(--bg-secondary)'};
+  background: ${props => props.$isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(139, 69, 19, 0.15)'};
   border-radius: 12px;
   border: 1px solid ${props => props.$isDark ? 'var(--border-color-dark)' : 'var(--border-color)'};
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  backdrop-filter: blur(10px);
 `;
 
 const InfoRow = styled.div<{ $isDark?: boolean }>`
   display: flex;
   justify-content: space-between;
+  align-items: flex-start;
   padding: 8px 0;
   color: ${props => props.$isDark ? 'var(--text-primary-dark)' : 'var(--text-primary)'};
   font-size: 0.9rem;
 
   span:first-child {
     color: ${props => props.$isDark ? 'var(--text-secondary-dark)' : 'var(--text-secondary)'};
+    flex-shrink: 0;
   }
 
   span:last-child {
     font-weight: bold;
+    text-align: right;
+    flex: 1;
+    margin-left: 16px;
   }
 `;
 
@@ -418,7 +424,7 @@ const TrackingForm: React.FC<TrackingFormProps> = ({ isDark = false, onNavigate,
           disabled={loading}
           $isDark={isDark}
         >
-          {loading ? '⏳ Поиск...' : '🔍 Отследить'}
+          {loading ? '⏳ Поиск...' : 'Отследить'}
         </Button>
 
         {error && (
@@ -433,32 +439,13 @@ const TrackingForm: React.FC<TrackingFormProps> = ({ isDark = false, onNavigate,
           </LoadingMessage>
         )}
 
-        {trackingData && !loading && (
-          <>
-            {/* Информация о заказе */}
-            <TrackingInfo $isDark={isDark}>
-              <InfoRow $isDark={isDark}>
-                <span>📦 Номер заказа:</span>
-                <span>#{trackingData.orderId}</span>
-              </InfoRow>
-              <InfoRow $isDark={isDark}>
-                <span>🔍 Трек-номер:</span>
-                <span>{trackingData.trackingNumber}</span>
-              </InfoRow>
-              <InfoRow $isDark={isDark}>
-                <span>⏰ Последнее обновление:</span>
-                <span>{new Date(trackingData.lastUpdated).toLocaleString('ru-RU')}</span>
-              </InfoRow>
-            </TrackingInfo>
-          </>
-        )}
       </Container>
 
       {/* Список заказов пользователя (второй) */}
       {userOrders.length > 0 && (
         <Container $isDark={isDark}>
           <div style={{
-            fontSize: '1.1rem',
+            fontSize: '1.3rem',
             fontWeight: 'bold',
             color: 'var(--text-primary)',
             marginBottom: '16px',
@@ -473,11 +460,12 @@ const TrackingForm: React.FC<TrackingFormProps> = ({ isDark = false, onNavigate,
                 key={order.order_id}
                 style={{
                   padding: '12px',
-                  backgroundColor: 'var(--bg-secondary)',
+                  backgroundColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(139, 69, 19, 0.15)',
                   borderRadius: '8px',
                   border: '1px solid var(--border-color)',
                   cursor: 'pointer',
-                  transition: 'all 0.3s ease'
+                  transition: 'all 0.3s ease',
+                  backdropFilter: 'blur(10px)'
                 }}
                 onClick={() => setExpandedOrder(expandedOrder === order.order_id ? null : order.order_id)}
               >
@@ -557,15 +545,16 @@ const TrackingForm: React.FC<TrackingFormProps> = ({ isDark = false, onNavigate,
                         padding: '8px 12px',
                         borderRadius: '6px',
                         border: 'none',
-                        background: 'linear-gradient(135deg, var(--matte-red), var(--terracotta))',
-                        color: 'white',
+                        background: 'var(--matte-red)',
+                        color: isDark ? '#000000' : '#FFFFFF',
                         fontSize: '0.9rem',
                         fontWeight: 'bold',
                         cursor: 'pointer',
-                        transition: 'all 0.3s ease'
+                        transition: 'all 0.3s ease',
+                        boxShadow: '0 4px 12px rgba(162, 59, 59, 0.3)'
                       }}
                     >
-                      🔍 Отследить этот заказ
+                      Отследить этот заказ
                     </button>
                   </div>
                 )}
@@ -582,15 +571,10 @@ const TrackingForm: React.FC<TrackingFormProps> = ({ isDark = false, onNavigate,
           style={{
             margin: '20px 16px',
             padding: '20px',
-            background: isDark 
-              ? 'linear-gradient(135deg, rgba(30, 30, 30, 0.95), rgba(40, 40, 40, 0.9))'
-              : 'linear-gradient(135deg, rgba(255, 255, 255, 0.95), rgba(250, 250, 250, 0.9))',
-            borderRadius: '16px',
-            border: `1px solid ${isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)'}`,
-            boxShadow: isDark 
-              ? '0 4px 20px rgba(0, 0, 0, 0.3), 0 1px 3px rgba(0, 0, 0, 0.2)'
-              : '0 4px 20px rgba(0, 0, 0, 0.1), 0 1px 3px rgba(0, 0, 0, 0.1)',
-            backdropFilter: 'blur(20px)',
+            background: 'transparent',
+            borderRadius: '0',
+            border: 'none',
+            boxShadow: 'none',
             position: 'relative'
           }}
         >
@@ -600,16 +584,16 @@ const TrackingForm: React.FC<TrackingFormProps> = ({ isDark = false, onNavigate,
             marginBottom: '20px'
           }}>
             <div style={{
-              fontSize: '1.1rem',
+              fontSize: '1.3rem',
               fontWeight: '600',
-              color: isDark ? '#ffffff' : '#1a1a1a',
+              color: isDark ? '#D4C19C' : '#1a1a1a',
               marginBottom: '6px'
             }}>
               Статус доставки
             </div>
             <div style={{
-              fontSize: '0.85rem',
-              color: isDark ? 'rgba(255, 255, 255, 0.7)' : 'rgba(0, 0, 0, 0.6)',
+              fontSize: '1rem',
+              color: isDark ? '#D4C19C' : 'rgba(0, 0, 0, 0.6)',
               fontWeight: '400'
             }}>
               Текущий этап: <span style={{ 
@@ -619,11 +603,28 @@ const TrackingForm: React.FC<TrackingFormProps> = ({ isDark = false, onNavigate,
             </div>
           </div>
 
+          {/* Информация о заказе */}
+          <TrackingInfo $isDark={isDark}>
+            <InfoRow $isDark={isDark}>
+              <span>📦 Номер заказа:</span>
+              <span>#{trackingData.orderId}</span>
+            </InfoRow>
+            <InfoRow $isDark={isDark}>
+              <span>🔍 Трек-номер:</span>
+              <span>{trackingData.trackingNumber}</span>
+            </InfoRow>
+            <InfoRow $isDark={isDark}>
+              <span>⏰ Последнее обновление:</span>
+              <span>{new Date(trackingData.lastUpdated).toLocaleString('ru-RU')}</span>
+            </InfoRow>
+          </TrackingInfo>
+
           {/* Горизонтальный прогресс-бар */}
           <div style={{
             position: 'relative',
             height: '50px',
-            margin: '20px 0'
+            margin: '20px 0',
+            padding: '0 10px'
           }}>
             {/* Линия прогресса */}
             <div style={{
@@ -655,7 +656,7 @@ const TrackingForm: React.FC<TrackingFormProps> = ({ isDark = false, onNavigate,
               const isCompleted = index < getCurrentStepIndex(trackingData.status);
               const isCurrent = index === getCurrentStepIndex(trackingData.status);
               const progress = getProgressPercentage(trackingData.status);
-              const pointPosition = 10 + (index / (getDeliverySteps().length - 1)) * 80;
+              const pointPosition = 2 + (index / (getDeliverySteps().length - 1)) * 96;
               
               // Специальная обработка для флага России
               const isRussiaStep = step.id === 'Доставка в РФ';
@@ -701,15 +702,15 @@ const TrackingForm: React.FC<TrackingFormProps> = ({ isDark = false, onNavigate,
           {/* Подписи этапов */}
           <div style={{
             position: 'relative',
-            height: '25px',
-            marginTop: '8px',
+            height: '15px',
+            marginTop: '-5px',
             marginBottom: '20px',
             fontSize: '0.85rem'
           }}>
             {getDeliverySteps().map((step, index) => {
               const isCurrent = index === getCurrentStepIndex(trackingData.status);
               const isCompleted = index < getCurrentStepIndex(trackingData.status);
-              const pointPosition = 10 + (index / (getDeliverySteps().length - 1)) * 80;
+              const pointPosition = 2 + (index / (getDeliverySteps().length - 1)) * 96;
               return (
                 <div
                   key={step.id}
@@ -717,9 +718,9 @@ const TrackingForm: React.FC<TrackingFormProps> = ({ isDark = false, onNavigate,
                     position: 'absolute',
                     left: `${pointPosition}%`,
                     transform: 'translateX(-50%)',
-                    top: '5px',
+                    top: '-2px',
                     textAlign: 'center',
-                    width: '60px',
+                    width: '70px',
                     color: isCurrent 
                       ? 'var(--terracotta)' 
                       : isCompleted 

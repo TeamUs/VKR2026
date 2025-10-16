@@ -284,55 +284,96 @@ const ErrorMessage = styled.div`
 `;
 
 
-const InfoSection = styled.div`
-  background: var(--bg-card);
-  border: 1px solid var(--border-color);
-  border-radius: 16px;
-  padding: 25px;
-  backdrop-filter: blur(10px);
+const InfoSection = styled.div<{ $isDark?: boolean }>`
+  background: transparent;
+  border: 2px solid var(--matte-red);
+  border-radius: 20px;
+  padding: 30px;
+  backdrop-filter: none;
   position: relative;
   z-index: 2;
   max-width: 500px;
   margin: 0 16px;
+  box-shadow: 0 0 20px rgba(162, 59, 59, 0.3), 0 8px 32px rgba(0, 0, 0, 0.1);
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  
+  &:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 0 25px rgba(162, 59, 59, 0.4), 0 12px 40px rgba(0, 0, 0, 0.15);
+  }
   
   @media (max-width: 480px) {
-    padding: 20px;
+    padding: 25px;
   }
 `;
 
 const InfoTitle = styled.h3`
   font-family: 'Noto Sans SC', 'Inter', Arial, sans-serif;
-  font-size: 1.1rem;
+  font-size: 1.3rem;
   font-weight: 700;
   color: var(--text-primary);
-  margin-bottom: 15px;
+  margin-bottom: 20px;
   text-align: center;
+  position: relative;
+  
+  &::after {
+    content: '';
+    position: absolute;
+    bottom: -8px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 60px;
+    height: 3px;
+    background: var(--matte-red);
+    border-radius: 2px;
+  }
 `;
 
 const InfoText = styled.div`
   color: var(--text-secondary);
-  line-height: 1.6;
-  margin-bottom: 15px;
-  font-size: 0.9rem;
+  line-height: 1.7;
+  margin-bottom: 20px;
+  font-size: 1rem;
+  font-weight: 500;
+  text-align: left;
 `;
 
-const UpdateInfo = styled.div`
+const UpdateInfo = styled.div<{ $isDark?: boolean }>`
   background: transparent;
   border: none;
   border-radius: 0;
   padding: 0;
-  margin-top: 5px;
+  margin-top: 20px;
   text-align: center;
+  position: relative;
+  
+  &::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 80px;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, var(--matte-red), transparent);
+  }
 `;
 
 const UpdateText = styled.div`
   color: var(--text-secondary);
-  font-size: 0.85rem;
+  font-size: 0.9rem;
   font-weight: 500;
-  opacity: 0.9;
-  border-left: 3px solid var(--matte-red);
-  padding-left: 12px;
-  margin-top: 15px;
+  line-height: 1.6;
+  margin: 0;
+  padding: 15px 0;
+  font-style: italic;
+  opacity: 0.8;
+  
+  &::before {
+    content: '⏰ ';
+    margin-right: 8px;
+    opacity: 0.7;
+  }
 `;
 
 interface ExchangeRateProps {
@@ -426,7 +467,7 @@ const ExchangeRate: React.FC<ExchangeRateProps> = ({ onNavigate, isDarkTheme, to
         )}
       </RateCard>
 
-        <InfoSection>
+        <InfoSection $isDark={isDarkTheme}>
           <InfoTitle>О курсе</InfoTitle>
           <InfoText>
             Курс юаня к рублю рассчитывается специально для покупки валюты и может отличаться от курса на сайте ЦБРФ.
@@ -435,7 +476,7 @@ const ExchangeRate: React.FC<ExchangeRateProps> = ({ onNavigate, isDarkTheme, to
             Курс берется напрямую с ЦБРФ и обновляется в режиме реального времени.
           </InfoText>
           
-          <UpdateInfo>
+          <UpdateInfo $isDark={isDarkTheme}>
             <UpdateText>
               Курс автоматически обновляется каждые 30 минут с ЦБРФ
             </UpdateText>
