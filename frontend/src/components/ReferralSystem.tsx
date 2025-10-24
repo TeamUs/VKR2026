@@ -489,7 +489,7 @@ const ReferralSystem: React.FC<ReferralSystemProps> = ({ onNavigate, toggleTheme
   const [referralCode, setReferralCode] = useState('');
   const [referralLink, setReferralLink] = useState('');
   const [stats, setStats] = useState({
-    currentCommission: 0.05,
+    currentCommission: 1000,
     discountActive: false,
     discountExpiresAt: null,
     totalReferrals: 0,
@@ -624,12 +624,12 @@ const ReferralSystem: React.FC<ReferralSystemProps> = ({ onNavigate, toggleTheme
         <InfoTitle>Ваша статистика</InfoTitle>
         <StatsGrid>
           <StatItem $isDark={isDarkTheme}>
-            <StatValue>{(stats.currentCommission * 100).toFixed(0)}%</StatValue>
+            <StatValue>{stats.currentCommission} ₽</StatValue>
             <StatLabel>Текущая комиссия</StatLabel>
           </StatItem>
           <StatItem $isDark={isDarkTheme}>
             <StatValue>
-              {stats.currentCommission === 0.05 ? 'Ꝏ' : 
+              {stats.currentCommission === 1000 ? 'Ꝏ' : 
                stats.discountActive && stats.discountExpiresAt ? 
                new Date(stats.discountExpiresAt).toLocaleDateString('ru-RU') : 
                'Истекла'}
@@ -655,7 +655,7 @@ const ReferralSystem: React.FC<ReferralSystemProps> = ({ onNavigate, toggleTheme
           • Пригласивший получает скидку на 1 неделю
         </InfoText>
         <InfoText>
-          • Комиссия снижается с 5% до 2% для обеих сторон
+          • Комиссия снижается с 1000₽ до 400₽ для обеих сторон
         </InfoText>
         <InfoText>
           • Скидки можно накапливать при приглашении новых пользователей

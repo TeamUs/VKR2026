@@ -9,6 +9,12 @@ const https = require('https');
 // Используем встроенный fetch в Node.js 18+
 require('dotenv').config();
 
+// Gamification System
+const { GamificationService, LEVELS, LEVEL_REWARDS, XP_RULES } = require('./gamification');
+
+// Scheduler for daily notifications
+const { startScheduler, testNotification, checkExpiredDiscounts } = require('./scheduler');
+
 const app = express();
 const PORT = process.env.PORT || 3000;
 
@@ -48,6 +54,9 @@ const upload = multer({
 
 // Database connection
 let dbConnection;
+
+// Gamification service instance
+let gamificationService = null;
 
 // Функция отправки сообщения менеджеру
 async function sendManagerMessage(message) {
@@ -270,6 +279,25 @@ async function connectDB() {
     });
     
     console.log('✅ База данных подключена успешно (UTF8MB4 активирован)');
+    
+    // Initialize Gamification Service
+    if (!gamificationService) {
+      const dbConfig = {
+        host: process.env.DB_HOST || 'localhost',
+        user: process.env.DB_USER || 'root',
+        password: process.env.DB_PASSWORD || '',
+        database: process.env.DB_NAME || 'poizonic',
+        port: process.env.DB_PORT || 3306,
+        charset: 'utf8mb4',
+        collation: 'utf8mb4_unicode_ci',
+        waitForConnections: true,
+        connectionLimit: 10,
+        queueLimit: 0
+      };
+      gamificationService = new GamificationService(dbConfig);
+      await gamificationService.init();
+      console.log('✅ Gamification Service инициализирован');
+    }
   } catch (error) {
     console.error('❌ Ошибка подключения к базе данных:', error);
     dbConnection = null;
@@ -344,6 +372,7 @@ async function createSystemLog(logLevel, logMessage, logData = {}, telegramId = 
 
 // Константы
 const DELIVERY_COST_PER_KG = 800;
+// РЕЗЕРВНЫЙ курс (используется ТОЛЬКО если ЦБ РФ недоступен)
 const DEFAULT_EXCHANGE_RATE = 12.5;
 const MANAGER_TELEGRAM_ID = process.env.MANAGER_TELEGRAM_ID || '7696515351';
 const BOT_TOKEN = process.env.BOT_TOKEN || '8113129973:AAHePXZqOW2MnajUEnporDpoYULAEyX1N_8';
@@ -455,17 +484,21 @@ function determineCategory(productName, productDescription = '') {
   // Словарь категорий с ключевыми словами
   const categories = {
     'shoes_clothing': ['鞋', 'sneaker', 'boot', 'sandal', 'heel', 'slipper', 'sport', 'running', 'basketball', 'hiking', '徒步', '低帮', '高帮', '运动鞋', '篮球鞋', '跑鞋', '板鞋', '帆布鞋', '皮鞋', '靴子', '凉鞋', '拖鞋'],
-    'clothing': ['衣', 'shirt', 'dress', 'jacket', 'coat', 'hoodie', 'sweater', 'pants', 'jeans', '外套', '夹克', '卫衣', '毛衣', '裤子', '牛仔裤', '裙子', '连衣裙', '衬衫', 't恤', '短袖', '长袖'],
-    'accessories': ['包', 'bag', 'watch', 'belt', 'hat', 'cap', 'glasses', 'jewelry', 'wallet', '背包', '手提包', '钱包', '手表', '眼镜', '帽子', '腰带', '首饰', '项链', '手链', '戒指', '耳环'],
-    'electronics': ['手机', 'phone', 'tablet', 'laptop', 'headphone', 'camera', 'charger', '耳机', '充电器', '数据线', '移动电源', '音响', '音箱', '键盘', '鼠标', '平板', '电脑']
+    'backpacks_bags': ['包', 'bag', '背包', '手提包', '钱包'],
+    'hoodies_pants': ['hoodie', 'sweater', 'pants', 'jeans', '卫衣', '毛衣', '裤子', '牛仔裤'],
+    'tshirts_shorts': ['shirt', 'dress', 't恤', '短袖', '长袖', '衬衫', '裙子', '连衣裙'],
+    'underwear_socks': ['underwear', 'socks', '内衣', '袜子', '内裤'],
+    'accessories_perfume': ['watch', 'belt', 'hat', 'cap', 'glasses', 'jewelry', 'perfume', '手表', '眼镜', '帽子', '腰带', '首饰', '项链', '手链', '戒指', '耳环', '香水']
   };
   
   // Счетчики для каждой категории
   const scores = {
     'shoes_clothing': 0,
-    'clothing': 0,
-    'accessories': 0,
-    'electronics': 0
+    'backpacks_bags': 0,
+    'hoodies_pants': 0,
+    'tshirts_shorts': 0,
+    'underwear_socks': 0,
+    'accessories_perfume': 0
   };
   
   // Подсчет совпадений
@@ -477,10 +510,10 @@ function determineCategory(productName, productDescription = '') {
     });
   });
   
-  // Возвращаем категорию с наибольшим счетом, или 'clothing' по умолчанию
+  // Возвращаем категорию с наибольшим счетом
   const maxScore = Math.max(...Object.values(scores));
   if (maxScore === 0) {
-    return 'clothing'; // Категория по умолчанию
+    return 'tshirts_shorts'; // Если ничего не найдено, возвращаем футболки/шорты
   }
   
   return Object.keys(scores).find(category => scores[category] === maxScore);
@@ -1445,8 +1478,9 @@ async function getYuanToRubExchangeRate() {
     
     if (!cbrResponse.ok) {
       console.error(`❌ ЦБРФ недоступен: HTTP ${cbrResponse.status}`);
-        return DEFAULT_EXCHANGE_RATE;
-      }
+      console.log(`⚠️ Используется резервный курс: ${DEFAULT_EXCHANGE_RATE}`);
+      return DEFAULT_EXCHANGE_RATE;
+    }
 
     const cbrData = await cbrResponse.json();
     const cnyRate = cbrData.Valute?.CNY?.Value;
@@ -1457,10 +1491,12 @@ async function getYuanToRubExchangeRate() {
       return adjustedRate;
     } else {
       console.log('⚠️ Курс юаня не найден в данных ЦБРФ');
+      console.log(`⚠️ Используется резервный курс: ${DEFAULT_EXCHANGE_RATE}`);
       return DEFAULT_EXCHANGE_RATE;
     }
   } catch (error) {
     console.error('❌ Ошибка получения курса юаня:', error.message);
+    console.log(`⚠️ Используется резервный курс: ${DEFAULT_EXCHANGE_RATE}`);
     return DEFAULT_EXCHANGE_RATE;
   }
 }
@@ -1533,21 +1569,18 @@ app.post('/api/calculate-from-link', async (req, res) => {
 
     // 4. Получаем вес по категории
     const categoryWeights = {
-      'shoes_clothing': 2.0,
-      'backpacks_bags': 1.0,
-      'hoodies_pants': 1.5,
-      'tshirts_shorts': 1.0,
-      'underwear_socks': 0.5,
-      'accessories_perfume': 0.5,
-      'clothing': 1.0, // По умолчанию
-      'accessories': 0.5,
-      'electronics': 1.0
+      'shoes_clothing': 2.5,        // 2000₽ / 800₽ = 2.5 кг
+      'backpacks_bags': 1.875,      // 1500₽ / 800₽ = 1.875 кг
+      'hoodies_pants': 1.875,       // 1500₽ / 800₽ = 1.875 кг
+      'tshirts_shorts': 1.25,       // 1000₽ / 800₽ = 1.25 кг
+      'underwear_socks': 1.0,       // 800₽ / 800₽ = 1.0 кг
+      'accessories_perfume': 1.0    // 800₽ / 800₽ = 1.0 кг
     };
 
     const weight = categoryWeights[category] || 1.0;
 
     // 5. Получаем комиссию пользователя
-    let commission = 0.05; // По умолчанию
+    let commission = 1000; // По умолчанию 1000₽
     if (telegramId && dbConnection) {
       try {
         await ensureDBConnection();
@@ -1559,7 +1592,9 @@ app.post('/api/calculate-from-link', async (req, res) => {
         if (rows.length > 0) {
           const user = rows[0];
           if (user.access_expires_at && new Date() < new Date(user.access_expires_at)) {
-            commission = user.commission;
+            commission = user.commission; // 400₽ для рефералов
+          } else {
+            commission = user.commission; // 1000₽ по умолчанию
           }
         }
       } catch (dbError) {
@@ -1574,7 +1609,7 @@ app.post('/api/calculate-from-link', async (req, res) => {
     
     const itemCostRub = productData.price * currentRate;
     const deliveryCost = weight * DELIVERY_COST_PER_KG;
-    const commissionAmount = itemCostRub * commission;
+    const commissionAmount = commission; // Фиксированная сумма в рублях
     const totalCost = itemCostRub + commissionAmount + deliveryCost;
 
     const result = {
@@ -1582,7 +1617,7 @@ app.post('/api/calculate-from-link', async (req, res) => {
       priceInRubles: parseFloat(itemCostRub.toFixed(2)),
       deliveryCost: parseFloat(deliveryCost.toFixed(2)),
       commission: parseFloat(commissionAmount.toFixed(2)),
-      commissionRate: parseFloat((commission * 100).toFixed(1)),
+      commissionRate: commission, // Теперь это просто сумма в рублях
       totalCost: parseFloat(totalCost.toFixed(2)),
       exchangeRate: parseFloat(currentRate.toFixed(2)),
       weight: parseFloat(weight.toFixed(1)),
@@ -1773,21 +1808,18 @@ app.post('/api/get-price-with-size', async (req, res) => {
     // Определяем категорию и рассчитываем стоимость
     const category = determineCategory(productData.productName, productData.productDescription);
     const categoryWeights = {
-      'shoes_clothing': 2.0,
-      'backpacks_bags': 1.0,
-      'hoodies_pants': 1.5,
-      'tshirts_shorts': 1.0,
-      'underwear_socks': 0.5,
-      'accessories_perfume': 0.5,
-      'clothing': 1.0,
-      'accessories': 0.5,
-      'electronics': 1.0
+      'shoes_clothing': 2.5,        // 2000₽ / 800₽ = 2.5 кг
+      'backpacks_bags': 1.875,      // 1500₽ / 800₽ = 1.875 кг
+      'hoodies_pants': 1.875,       // 1500₽ / 800₽ = 1.875 кг
+      'tshirts_shorts': 1.25,       // 1000₽ / 800₽ = 1.25 кг
+      'underwear_socks': 1.0,       // 800₽ / 800₽ = 1.0 кг
+      'accessories_perfume': 1.0    // 800₽ / 800₽ = 1.0 кг
     };
 
     const weight = categoryWeights[category] || 1.0;
 
     // Получаем комиссию пользователя
-    let commission = 0.05;
+    let commission = 1000; // По умолчанию 1000₽
     if (telegramId && dbConnection) {
       try {
         await ensureDBConnection();
@@ -1799,7 +1831,9 @@ app.post('/api/get-price-with-size', async (req, res) => {
         if (rows.length > 0) {
           const user = rows[0];
           if (user.access_expires_at && new Date() < new Date(user.access_expires_at)) {
-            commission = user.commission;
+            commission = user.commission; // 400₽ для рефералов
+          } else {
+            commission = user.commission; // 1000₽ по умолчанию
           }
         }
       } catch (dbError) {
@@ -1811,7 +1845,7 @@ app.post('/api/get-price-with-size', async (req, res) => {
     const currentRate = await getYuanToRubExchangeRate();
     const itemCostRub = estimatedPrice * currentRate;
     const deliveryCost = weight * DELIVERY_COST_PER_KG;
-    const commissionAmount = itemCostRub * commission;
+    const commissionAmount = commission; // Фиксированная сумма в рублях
     const totalCost = itemCostRub + commissionAmount + deliveryCost;
 
     const result = {
@@ -1819,7 +1853,7 @@ app.post('/api/get-price-with-size', async (req, res) => {
       priceInRubles: parseFloat(itemCostRub.toFixed(2)),
       deliveryCost: parseFloat(deliveryCost.toFixed(2)),
       commission: parseFloat(commissionAmount.toFixed(2)),
-      commissionRate: parseFloat((commission * 100).toFixed(1)),
+      commissionRate: commission, // Теперь это просто сумма в рублях
       totalCost: parseFloat(totalCost.toFixed(2)),
       exchangeRate: parseFloat(currentRate.toFixed(2)),
       weight: parseFloat(weight.toFixed(1)),
@@ -1902,7 +1936,7 @@ app.post('/api/referral-stats', async (req, res) => {
           [telegramId]
         );
 
-        const user = userRows[0] || { commission: 0.05, access_expires_at: null };
+        const user = userRows[0] || { commission: 1000, access_expires_at: null };
         const totalReferrals = referralRows[0]?.total_referrals || 0;
         const clicks = clicksRows[0]?.clicks || 0;
 
@@ -1998,7 +2032,7 @@ app.post('/api/calculate-price', async (req, res) => {
     await ensureDBConnection();
 
     // Получаем комиссию пользователя
-    let commission = 0.05; // По умолчанию
+    let commission = 1000; // По умолчанию 1000₽
     if (telegramId && dbConnection) {
       try {
         const [rows] = await dbConnection.execute(
@@ -2009,7 +2043,9 @@ app.post('/api/calculate-price', async (req, res) => {
         if (rows.length > 0) {
           const user = rows[0];
           if (user.access_expires_at && new Date() < new Date(user.access_expires_at)) {
-            commission = user.commission;
+            commission = user.commission; // 400₽ для рефералов
+          } else {
+            commission = user.commission; // 1000₽ по умолчанию
           }
         }
       } catch (dbError) {
@@ -2023,7 +2059,100 @@ app.post('/api/calculate-price', async (req, res) => {
     
     const itemCostRub = price * currentRate;
     const deliveryCost = weight * DELIVERY_COST_PER_KG;
-    const commissionAmount = itemCostRub * commission;
+    
+    // ========== ПРИМЕНЕНИЕ НАГРАД ОТ ДОСТИЖЕНИЙ ==========
+    let finalCommission = commission;
+    let appliedRewards = [];
+    
+    if (telegramId && gamificationService) {
+      try {
+        // Получаем достижения пользователя
+        const achievements = await gamificationService.getUserAchievements(telegramId);
+        const unlockedAchievements = achievements.filter(ach => ach.unlocked);
+        
+        // Применяем награды от достижений
+        for (const achievement of unlockedAchievements) {
+          switch (achievement.key) {
+            case 'dragon_newbie':
+              // Первый заказ без комиссии за оформление
+              if (achievement.key === 'dragon_newbie') {
+                // Проверяем, это первый заказ пользователя
+                const [orderCount] = await dbConnection.execute(
+                  'SELECT COUNT(*) as count FROM orders WHERE telegram_id = ? AND status = "completed"',
+                  [telegramId]
+                );
+                if (orderCount[0].count === 0) {
+                  finalCommission = 0;
+                  appliedRewards.push('Первый заказ без комиссии (Дракон-новичок)');
+                }
+              }
+              break;
+              
+            case 'emperor_purchases':
+              // Постоянная скидка 0.5% на все заказы
+              finalCommission = Math.max(0, finalCommission - (finalCommission * 0.005));
+              appliedRewards.push('Скидка 0.5% (Император покупок)');
+              break;
+              
+            case 'balance_master':
+              // Скидка 1% на комиссию
+              finalCommission = Math.max(0, finalCommission - (finalCommission * 0.01));
+              appliedRewards.push('Скидка 1% на комиссию (Мастер баланса)');
+              break;
+              
+            case 'economy_dragon':
+              // Постоянная скидка 1% на все операции
+              finalCommission = Math.max(0, finalCommission - (finalCommission * 0.01));
+              appliedRewards.push('Скидка 1% на все операции (Эконом-дракон)');
+              break;
+              
+            case 'dragon_summoner':
+              // Скидка 2% на все заказы
+              finalCommission = Math.max(0, finalCommission - (finalCommission * 0.02));
+              appliedRewards.push('Скидка 2% на все заказы (Дракон-призыватель)');
+              break;
+          }
+        }
+        
+        // Применяем награды от уровня
+        const [userData] = await dbConnection.execute(
+          'SELECT current_level FROM users WHERE telegram_id = ?',
+          [telegramId]
+        );
+        
+        if (userData.length > 0) {
+          const userLevel = userData[0].current_level;
+          switch (userLevel) {
+            case 'Silver':
+              // Комиссия 900₽ навсегда
+              finalCommission = 900;
+              appliedRewards.push('Комиссия 900₽ (Уровень Silver)');
+              break;
+            case 'Gold':
+              // Комиссия 700₽ навсегда
+              finalCommission = 700;
+              appliedRewards.push('Комиссия 700₽ (Уровень Gold)');
+              break;
+            case 'Platinum':
+              // Комиссия 400₽ навсегда
+              finalCommission = 400;
+              appliedRewards.push('Комиссия 400₽ (Уровень Platinum)');
+              break;
+            case 'Diamond':
+              // Комиссия 0₽ навсегда (полное освобождение)
+              finalCommission = 0;
+              appliedRewards.push('Комиссия 0₽ (Уровень Diamond)');
+              break;
+          }
+        }
+        
+      } catch (rewardError) {
+        console.error('Ошибка применения наград:', rewardError);
+      }
+    }
+    // ========== End Rewards ==========
+    
+    const commissionAmount = Math.round(finalCommission); // Округляем до целых рублей
     const totalCost = itemCostRub + commissionAmount + deliveryCost;
 
     const result = {
@@ -2031,7 +2160,10 @@ app.post('/api/calculate-price', async (req, res) => {
       priceInRubles: parseFloat(itemCostRub.toFixed(2)),
       deliveryCost: parseFloat(deliveryCost.toFixed(2)),
       commission: parseFloat(commissionAmount.toFixed(2)),
-      commissionRate: parseFloat((commission * 100).toFixed(1)),
+      commissionRate: commission, // Теперь это просто сумма в рублях
+      appliedRewards: appliedRewards, // Список примененных наград
+      originalCommission: commission, // Исходная комиссия
+      discountAmount: commission - commissionAmount, // Размер скидки
       totalCost: parseFloat(totalCost.toFixed(2)),
       exchangeRate: parseFloat(currentRate.toFixed(2)),
       weight: parseFloat(weight)
@@ -2083,7 +2215,7 @@ app.post('/api/orders', async (req, res) => {
       // Создаем или обновляем пользователя
       await dbConnection.execute(
         `INSERT INTO users (telegram_id, commission, referred_by) 
-         VALUES (?, 0.05, ?) 
+         VALUES (?, 1000, ?) 
          ON DUPLICATE KEY UPDATE telegram_id = telegram_id`,
         [telegramId, telegramId]
       );
@@ -2155,6 +2287,9 @@ app.post('/api/orders', async (req, res) => {
         pickupPoint,
         items: items
       }, telegramId);
+
+      // NOTE: XP начисляется только после подтверждения заказа админом, а не при создании
+      // См. admin panel endpoint для подтверждения заказа
 
       // Отправляем уведомление менеджеру
       let orderMessage = `🛍️ <b>Новый заказ #${orderId}</b>\n\n` +
@@ -2228,7 +2363,7 @@ app.post('/api/user/init', async (req, res) => {
           // Создаем нового пользователя с базовой комиссией и временем активности
           await dbConnection.execute(
             `INSERT INTO users (telegram_id, username, full_name, commission, last_activity) 
-             VALUES (?, ?, ?, 0.05, NOW())`,
+             VALUES (?, ?, ?, 1000, NOW())`,
             [telegramId, username || null, fullName || null]
           );
           
@@ -2330,7 +2465,7 @@ app.post('/api/referral', async (req, res) => {
         // Создаем пользователя с реферальной скидкой на 2 недели
         await dbConnection.execute(
           `INSERT INTO users (telegram_id, commission, referred_by, access_expires_at) 
-           VALUES (?, 0.02, ?, DATE_ADD(NOW(), INTERVAL 14 DAY))`,
+           VALUES (?, 400, ?, DATE_ADD(NOW(), INTERVAL 14 DAY))`,
           [telegramId, referralId]
         );
 
@@ -2348,20 +2483,20 @@ app.post('/api/referral', async (req, res) => {
             // У реферера есть активная скидка - продлеваем на 7 дней
             const newExpiry = new Date(currentExpiry.getTime() + 7 * 24 * 60 * 60 * 1000);
             await dbConnection.execute(
-              'UPDATE users SET commission = 0.02, access_expires_at = ? WHERE telegram_id = ?',
+              'UPDATE users SET commission = 400, access_expires_at = ? WHERE telegram_id = ?',
               [newExpiry, referralId]
             );
           } else {
             // У реферера была скидка, но она истекла - даем новую на 7 дней
             await dbConnection.execute(
-              'UPDATE users SET commission = 0.02, access_expires_at = DATE_ADD(NOW(), INTERVAL 7 DAY) WHERE telegram_id = ?',
+              'UPDATE users SET commission = 400, access_expires_at = DATE_ADD(NOW(), INTERVAL 7 DAY) WHERE telegram_id = ?',
               [referralId]
             );
           }
         } else {
           // У реферера никогда не было скидки - даем первую на 7 дней
           await dbConnection.execute(
-            'UPDATE users SET commission = 0.02, access_expires_at = DATE_ADD(NOW(), INTERVAL 7 DAY) WHERE telegram_id = ?',
+            'UPDATE users SET commission = 400, access_expires_at = DATE_ADD(NOW(), INTERVAL 7 DAY) WHERE telegram_id = ?',
             [referralId]
           );
         }
@@ -2369,7 +2504,7 @@ app.post('/api/referral', async (req, res) => {
         // Отправляем уведомление новому пользователю
         const newUserMessage = `🎉 <b>Добро пожаловать в Poizonic!</b>\n\n` +
                                `Вы активировали реферальную программу!\n\n` +
-                               `💰 <b>Ваша комиссия:</b> 2% (вместо 5%)\n` +
+                               `💰 <b>Ваша комиссия:</b> 400₽ (вместо 1000₽)\n` +
                                `⏰ <b>Действует до:</b> ${new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toLocaleString('ru-RU')}\n\n` +
                                `💡 Теперь вы можете делать заказы по сниженной комиссии!`;
 
@@ -2395,7 +2530,7 @@ app.post('/api/referral', async (req, res) => {
         // Логируем активность пользователя
         await logUserActivity(telegramId, 'referral_activated', {
           referredBy: referralId,
-          commission: 0.02
+          commission: 400
         });
 
         // Логируем активность реферера
@@ -2408,6 +2543,50 @@ app.post('/api/referral', async (req, res) => {
           telegramId,
           referralId
         });
+
+        // ========== GAMIFICATION: Award XP for referral ==========
+        try {
+          if (gamificationService) {
+            // Награда за приглашение реферала (50 XP)
+            const xpResult = await gamificationService.awardXP(
+              referralId,
+              XP_RULES.REFERRAL_REGISTRATION,
+              'referral',
+              telegramId,
+              `Приглашен реферал: ${telegramId}`
+            );
+            
+            // Проверяем достижения по рефералам
+            const achievements = await gamificationService.checkReferralAchievements(referralId, telegramId);
+            
+            // Отправляем уведомление о повышении уровня
+            if (xpResult.leveledUp) {
+              const levelUpMsg = `🎊 <b>Поздравляем!</b>\n\n` +
+                `Вы достигли уровня <b>${xpResult.currentLevel}</b>! 🏆\n\n` +
+                `🎁 <b>Награды:</b>\n${xpResult.rewards.description}\n\n` +
+                `✨ Всего XP: ${xpResult.totalXP}\n` +
+                `🆔 Telegram ID: ${referralId}`;
+              
+              await sendTelegramMessage(referralId, levelUpMsg);
+            }
+            
+            // Отправляем уведомления о разблокированных достижениях
+            for (const achievement of achievements) {
+              if (!achievement.alreadyUnlocked && achievement.achievement) {
+                const achievementMsg = `🏆 <b>Достижение разблокировано!</b>\n\n` +
+                  `${achievement.achievement.icon} <b>${achievement.achievement.name}</b>\n` +
+                  `📝 ${achievement.achievement.description}\n\n` +
+                  `🎁 Награда: +${achievement.achievement.xpReward} XP`;
+                
+                await sendTelegramMessage(referralId, achievementMsg);
+              }
+            }
+          }
+        } catch (gamificationError) {
+          console.error('❌ Ошибка начисления XP за реферала:', gamificationError);
+          // Не прерываем процесс создания реферала
+        }
+        // ========== End Gamification ==========
 
         res.json({ 
           success: true, 
@@ -2466,7 +2645,7 @@ app.get('/api/user/:telegramId', async (req, res) => {
     } else {
       res.json({
         telegramId: telegramId,
-        commission: 0.05,
+        commission: 1000,
         hasDiscount: false,
         discountExpiresAt: null,
         referralUrl: null,
@@ -2591,7 +2770,7 @@ app.post('/api/reviews', upload.single('photo'), async (req, res) => {
       console.log('Создаем нового пользователя:', telegram_id);
       await dbConnection.execute(`
         INSERT INTO users (telegram_id, commission, created_at) 
-        VALUES (?, 0.05, NOW())
+        VALUES (?, 1000, NOW())
       `, [telegram_id]);
     }
     
@@ -2817,8 +2996,34 @@ app.get('/api/profile', async (req, res) => {
     
     const { telegram_id } = req.query;
     
-    if (!telegram_id) {
-      return res.status(400).json({ error: 'Telegram ID обязателен' });
+          // ВРЕМЕННОЕ ИСКЛЮЧЕНИЕ ДЛЯ ТЕСТИРОВАНИЯ - убрать перед релизом
+          if (!telegram_id) {
+      const demoProfileData = {
+        user: {
+          telegram_id: 'demo',
+          full_name: 'Демо Пользователь',
+          phone_number: '+7 (999) 123-45-67',
+          preferred_currency: 'RUB',
+          commission: 1000,
+          created_at: new Date().toISOString()
+        },
+        statistics: {
+          orders: { total_orders: 0, completed_orders: 0 },
+          referrals: { total_referrals: 0, total_clicks: 0 },
+          yuan_purchases: { total_purchases: 0, total_spent_rub: 0, total_bought_cny: 0, total_savings: 0 },
+          total_savings: { total: 0 }
+        },
+        gamification: {
+          level: 'Bronze',
+          levelProgress: 0,
+          nextLevel: 'Silver',
+          ordersToNext: 1000,
+          xp: 0,
+          xpToNext: 1000,
+          achievements: []
+        }
+      };
+      return res.json(demoProfileData);
     }
     
     // Получаем данные пользователя
@@ -2838,7 +3043,7 @@ app.get('/api/profile', async (req, res) => {
     const [orderStats] = await dbConnection.execute(`
       SELECT 
         COUNT(*) as total_orders,
-        COALESCE(SUM(CASE WHEN product_link IS NOT NULL THEN 1 ELSE 0 END), 0) as completed_orders
+        COALESCE(SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END), 0) as completed_orders
       FROM orders 
       WHERE telegram_id = ?
     `, [telegram_id]);
@@ -2872,83 +3077,56 @@ app.get('/api/profile', async (req, res) => {
       WHERE telegram_id = ?
     `, [telegram_id]);
 
-    // Получаем уровень пользователя
-    const [levelRows] = await dbConnection.execute(`
-      SELECT current_level, level_progress, total_orders
-      FROM user_levels 
-      WHERE telegram_id = ?
-    `, [telegram_id]);
+    // Получаем данные геймификации из новой системы
+    let gamificationData = {
+      level: 'Bronze',
+      levelProgress: 0,
+      nextLevel: 'Silver',
+      ordersToNext: 1000,
+      xp: 0,
+      xpToNext: 1000,
+      achievements: []
+    };
 
-    // Получаем достижения пользователя
-    const [achievementRows] = await dbConnection.execute(`
-      SELECT achievement_id, achievement_name, achievement_description, progress, max_progress, completed
-      FROM user_achievements 
-      WHERE telegram_id = ? AND completed = 1
-    `, [telegram_id]);
-    
-    // Используем данные уровня из таблицы user_levels
-    let userLevel = 'Bronze';
-    let levelProgress = 0;
-    let nextLevel = 'Silver';
-    let ordersToNext = 6;
+    if (gamificationService) {
+      try {
+        // Получаем данные пользователя из users таблицы
+        const [userGamification] = await dbConnection.execute(`
+          SELECT xp, current_level, total_orders, total_yuan_bought, total_referrals, total_savings
+          FROM users 
+          WHERE telegram_id = ?
+        `, [telegram_id]);
 
-    if (levelRows.length > 0) {
-      const levelData = levelRows[0];
-      userLevel = levelData.current_level;
-      levelProgress = levelData.level_progress;
-      
-      // Определяем следующий уровень
-      if (userLevel === 'Bronze') {
-        nextLevel = 'Silver';
-        ordersToNext = Math.max(6 - levelData.total_orders, 0);
-      } else if (userLevel === 'Silver') {
-        nextLevel = 'Gold';
-        ordersToNext = Math.max(21 - levelData.total_orders, 0);
-      } else {
-        nextLevel = 'Gold';
-        ordersToNext = 0;
-      }
-    } else {
-      // Если данных нет, создаем начальный уровень
-      const orderCount = orderStats[0].total_orders;
-      if (orderCount >= 21) {
-        userLevel = 'Gold';
-        levelProgress = 100;
-        nextLevel = 'Gold';
-        ordersToNext = 0;
-      } else if (orderCount >= 6) {
-        userLevel = 'Silver';
-        levelProgress = Math.min(100, ((orderCount - 6) / 15) * 100);
-        nextLevel = 'Gold';
-        ordersToNext = Math.max(0, 21 - orderCount);
-      } else {
-        levelProgress = Math.min(100, (orderCount / 6) * 100);
-        ordersToNext = Math.max(0, 6 - orderCount);
+        if (userGamification.length > 0) {
+          const userData = userGamification[0];
+          const xp = userData.xp || 0;
+          const currentLevel = userData.current_level || 'Bronze';
+          
+          // Получаем достижения пользователя
+          const achievements = await gamificationService.getUserAchievements(telegram_id);
+          
+          // Вычисляем прогресс уровня
+          const levelProgress = gamificationService.getLevelProgress(xp);
+          
+          // Определяем следующий уровень
+          const nextLevel = gamificationService.getNextLevel(currentLevel);
+          const xpToNext = gamificationService.getXPToNextLevel(currentLevel, xp);
+          
+          gamificationData = {
+            level: currentLevel,
+            levelProgress,
+            nextLevel,
+            ordersToNext: xpToNext,
+            xp,
+            xpToNext,
+            achievements: achievements.filter(ach => ach.unlocked)
+          };
+        }
+      } catch (gamificationError) {
+        console.error('❌ Ошибка получения данных геймификации:', gamificationError);
+        // Используем дефолтные данные при ошибке
       }
     }
-    
-    // Функция для получения иконки достижения
-    const getAchievementIcon = (achievementId) => {
-      const iconMap = {
-        'first_order': '🎯',
-        'loyal_customer': '⭐',
-        'vip_customer': '👑',
-        'referrer': '🤝',
-        'super_referrer': '🚀',
-        'yuan_buyer': '💰',
-        'bronze_level': '🥉',
-        'silver_level': '🥈',
-        'gold_level': '🥇'
-      };
-      return iconMap[achievementId] || '🏆';
-    };
-    
-    // Используем достижения из таблицы user_achievements
-    const achievements = achievementRows.map(row => ({
-      id: row.achievement_id,
-      name: row.achievement_name,
-      icon: getAchievementIcon(row.achievement_id)
-    }));
     
     res.json({
       user: {
@@ -2971,13 +3149,7 @@ app.get('/api/profile', async (req, res) => {
           total: (yuanStats[0].total_savings || 0) + (orderSavingsStats[0].total_order_savings || 0)
         }
       },
-      gamification: {
-        level: userLevel,
-        levelProgress,
-        nextLevel,
-        ordersToNext,
-        achievements
-      }
+      gamification: gamificationData
     });
   } catch (error) {
     console.error('Ошибка получения профиля:', error);
@@ -3006,7 +3178,7 @@ app.patch('/api/users', async (req, res) => {
       // Создаем нового пользователя
       await dbConnection.execute(`
         INSERT INTO users (telegram_id, commission, full_name, phone_number, preferred_currency, avatar_url, created_at) 
-        VALUES (?, 0.05, ?, ?, ?, ?, NOW())
+        VALUES (?, 1000, ?, ?, ?, ?, NOW())
       `, [telegram_id, full_name, phone_number, preferred_currency, avatar_url]);
     } else {
       // Обновляем существующего пользователя
@@ -3086,7 +3258,7 @@ app.post('/api/yuan-purchase', async (req, res) => {
       // Создаем нового пользователя
       await dbConnection.execute(`
         INSERT INTO users (telegram_id, username, full_name, commission, created_at) 
-        VALUES (?, ?, ?, 0.05, NOW())
+        VALUES (?, ?, ?, 1000, NOW())
       `, [telegramId, username || 'unknown', (firstName && lastName) ? `${firstName} ${lastName}` : (firstName || 'Пользователь')]);
     }
     
@@ -3132,6 +3304,9 @@ app.post('/api/yuan-purchase', async (req, res) => {
 🆔 <b>Telegram ID:</b> <code>${telegramId}</code>`;
 
     await sendManagerMessage(managerMessage);
+    
+    // NOTE: XP начисляется только после подтверждения покупки юаней админом
+    // См. admin panel endpoint для подтверждения покупки юаней
     
     res.json({
       success: true,
@@ -3268,266 +3443,9 @@ app.post('/api/user-activity', async (req, res) => {
 
 // ==================== USER REWARDS API ====================
 
-// Получение наград пользователя
-app.get('/api/user-rewards', async (req, res) => {
-  try {
-    await ensureDBConnection();
-    
-    const { telegram_id, unclaimed_only = false } = req.query;
-    
-    if (!telegram_id) {
-      return res.status(400).json({ error: 'Telegram ID обязателен' });
-    }
-    
-    let query = `
-      SELECT id, reward_type, reward_value, reward_description, is_claimed, claimed_at, created_at
-      FROM user_rewards 
-      WHERE telegram_id = ?
-    `;
-    
-    if (unclaimed_only === 'true') {
-      query += ' AND is_claimed = 0';
-    }
-    
-    query += ' ORDER BY created_at DESC';
-    
-    const [rows] = await dbConnection.execute(query, [telegram_id]);
-    
-    res.json({ rewards: rows });
-  } catch (error) {
-    console.error('Ошибка получения наград:', error);
-    res.status(500).json({ error: 'Ошибка получения наград' });
-  }
-});
-
-// Создание награды
-app.post('/api/user-rewards', async (req, res) => {
-  try {
-    await ensureDBConnection();
-    
-    const { telegram_id, reward_type, reward_value, reward_description } = req.body;
-    
-    if (!telegram_id || !reward_type) {
-      return res.status(400).json({ error: 'Telegram ID и тип награды обязательны' });
-    }
-    
-    const [result] = await dbConnection.execute(`
-      INSERT INTO user_rewards (telegram_id, reward_type, reward_value, reward_description)
-      VALUES (?, ?, ?, ?)
-    `, [telegram_id, reward_type, reward_value || 0, reward_description || '']);
-    
-    res.json({ 
-      success: true, 
-      reward_id: result.insertId,
-      message: 'Награда создана успешно' 
-    });
-  } catch (error) {
-    console.error('Ошибка создания награды:', error);
-    res.status(500).json({ error: 'Ошибка создания награды' });
-  }
-});
-
-// Получение награды
-app.patch('/api/user-rewards/:id/claim', async (req, res) => {
-  try {
-    await ensureDBConnection();
-    
-    const { id } = req.params;
-    
-    await dbConnection.execute(`
-      UPDATE user_rewards 
-      SET is_claimed = 1, claimed_at = NOW() 
-      WHERE id = ? AND is_claimed = 0
-    `, [id]);
-    
-    res.json({ success: true, message: 'Награда получена успешно' });
-  } catch (error) {
-    console.error('Ошибка получения награды:', error);
-    res.status(500).json({ error: 'Ошибка получения награды' });
-  }
-});
-
-// ==================== USER ACHIEVEMENTS API ====================
-
-// Получение достижений пользователя
-app.get('/api/user-achievements', async (req, res) => {
-  try {
-    await ensureDBConnection();
-    
-    const { telegram_id, completed_only = false } = req.query;
-    
-    if (!telegram_id) {
-      return res.status(400).json({ error: 'Telegram ID обязателен' });
-    }
-    
-    let query = `
-      SELECT id, achievement_id, achievement_name, achievement_description, progress, max_progress, completed, completed_at, created_at
-      FROM user_achievements 
-      WHERE telegram_id = ?
-    `;
-    
-    if (completed_only === 'true') {
-      query += ' AND completed = 1';
-    }
-    
-    query += ' ORDER BY created_at DESC';
-    
-    const [rows] = await dbConnection.execute(query, [telegram_id]);
-    
-    res.json({ achievements: rows });
-  } catch (error) {
-    console.error('Ошибка получения достижений:', error);
-    res.status(500).json({ error: 'Ошибка получения достижений' });
-  }
-});
-
-// Создание/обновление достижения
-app.post('/api/user-achievements', async (req, res) => {
-  try {
-    await ensureDBConnection();
-    
-    const { telegram_id, achievement_id, achievement_name, achievement_description, progress, max_progress } = req.body;
-    
-    if (!telegram_id || !achievement_id) {
-      return res.status(400).json({ error: 'Telegram ID и ID достижения обязательны' });
-    }
-    
-    const completed = progress >= max_progress ? 1 : 0;
-    const completed_at = completed ? new Date() : null;
-    
-    await dbConnection.execute(`
-      INSERT INTO user_achievements (telegram_id, achievement_id, achievement_name, achievement_description, progress, max_progress, completed, completed_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-      ON DUPLICATE KEY UPDATE
-        progress = VALUES(progress),
-        completed = VALUES(completed),
-        completed_at = VALUES(completed_at)
-    `, [telegram_id, achievement_id, achievement_name, achievement_description, progress, max_progress, completed, completed_at]);
-    
-    res.json({ 
-      success: true, 
-      message: 'Достижение обновлено успешно',
-      completed: completed === 1
-    });
-  } catch (error) {
-    console.error('Ошибка обновления достижения:', error);
-    res.status(500).json({ error: 'Ошибка обновления достижения' });
-  }
-});
-
-// ==================== USER LEVELS API ====================
-
-// Получение уровня пользователя
-app.get('/api/user-levels', async (req, res) => {
-  try {
-    await ensureDBConnection();
-    
-    const { telegram_id } = req.query;
-    
-    if (!telegram_id) {
-      return res.status(400).json({ error: 'Telegram ID обязателен' });
-    }
-    
-    const [rows] = await dbConnection.execute(`
-      SELECT id, current_level, level_progress, total_orders, updated_at
-      FROM user_levels 
-      WHERE telegram_id = ?
-    `, [telegram_id]);
-    
-    if (rows.length === 0) {
-      // Создаем начальный уровень
-      await dbConnection.execute(`
-        INSERT INTO user_levels (telegram_id, current_level, level_progress, total_orders)
-        VALUES (?, 'Bronze', 0, 0)
-      `, [telegram_id]);
-      
-      res.json({ 
-        level: { 
-          current_level: 'Bronze', 
-          level_progress: 0, 
-          total_orders: 0 
-        } 
-      });
-    } else {
-      res.json({ level: rows[0] });
-    }
-  } catch (error) {
-    console.error('Ошибка получения уровня:', error);
-    res.status(500).json({ error: 'Ошибка получения уровня' });
-  }
-});
-
-// Обновление уровня пользователя
-app.post('/api/user-levels', async (req, res) => {
-  try {
-    await ensureDBConnection();
-    
-    const { telegram_id, current_level, level_progress, total_orders } = req.body;
-    
-    if (!telegram_id) {
-      return res.status(400).json({ error: 'Telegram ID обязателен' });
-    }
-    
-    await dbConnection.execute(`
-      INSERT INTO user_levels (telegram_id, current_level, level_progress, total_orders)
-      VALUES (?, ?, ?, ?)
-      ON DUPLICATE KEY UPDATE
-        current_level = VALUES(current_level),
-        level_progress = VALUES(level_progress),
-        total_orders = VALUES(total_orders),
-        updated_at = NOW()
-    `, [telegram_id, current_level, level_progress, total_orders]);
-    
-    res.json({ success: true, message: 'Уровень обновлен успешно' });
-  } catch (error) {
-    console.error('Ошибка обновления уровня:', error);
-    res.status(500).json({ error: 'Ошибка обновления уровня' });
-  }
-});
-
-// ==================== USER STATS API ====================
-
-// Получение статистики пользователя
-app.get('/api/user-stats', async (req, res) => {
-  try {
-    await ensureDBConnection();
-    
-    const { telegram_id } = req.query;
-    
-    if (!telegram_id) {
-      return res.status(400).json({ error: 'Telegram ID обязателен' });
-    }
-    
-    const [rows] = await dbConnection.execute(`
-      SELECT id, total_orders, referrals_count, yuan_purchases_count, yuan_savings, last_activity, updated_at
-      FROM user_stats 
-      WHERE telegram_id = ?
-    `, [telegram_id]);
-    
-    if (rows.length === 0) {
-      // Создаем начальную статистику
-      await dbConnection.execute(`
-        INSERT INTO user_stats (telegram_id, total_orders, referrals_count, yuan_purchases_count, yuan_savings, last_activity)
-        VALUES (?, 0, 0, 0, 0.00, NOW())
-      `, [telegram_id]);
-      
-      res.json({ 
-        stats: { 
-          total_orders: 0, 
-          referrals_count: 0, 
-          yuan_purchases_count: 0, 
-          yuan_savings: 0.00,
-          last_activity: new Date().toISOString()
-        } 
-      });
-    } else {
-      res.json({ stats: rows[0] });
-    }
-  } catch (error) {
-    console.error('Ошибка получения статистики:', error);
-    res.status(500).json({ error: 'Ошибка получения статистики' });
-  }
-});
+// ==================== GAMIFICATION SYSTEM ====================
+// Используется новая система геймификации (gamification.js)
+// Старые дублирующие API endpoints удалены
 
 // ==================== EXCHANGE RATES API ====================
 
@@ -3941,7 +3859,7 @@ app.get('/api/admin/user-details/:telegramId', async (req, res) => {
     
     // Достижения
     const [achievements] = await dbConnection.execute(
-      'SELECT * FROM user_achievements WHERE telegram_id = ? ORDER BY created_at DESC',
+      'SELECT * FROM user_achievements WHERE telegram_id = ? ORDER BY unlocked_at DESC',
       [telegramId]
     );
     
@@ -4257,7 +4175,7 @@ app.get('/api/admin/user-details/:telegramId', async (req, res) => {
     
     // Достижения пользователя
     const [achievements] = await dbConnection.execute(
-      'SELECT * FROM user_achievements WHERE telegram_id = ?',
+      'SELECT * FROM user_achievements WHERE telegram_id = ? ORDER BY unlocked_at DESC',
       [telegramId]
     );
     
@@ -4380,6 +4298,102 @@ app.post('/api/admin/confirm-order', async (req, res) => {
       
       // Обновляем статистику пользователя только после подтверждения
       await updateUserStatsAfterConfirmation(telegramId, orderId, type);
+      
+      // ========== GAMIFICATION: Начисление XP после подтверждения ==========
+      try {
+        if (gamificationService) {
+          if (type === 'order') {
+            // Заказ подтверждён - даем 100 XP
+            const orderHour = new Date().getHours();
+            const xpResult = await gamificationService.awardXP(
+              telegramId,
+              XP_RULES.ORDER_COMPLETE,
+              'order',
+              orderId,
+              `Заказ #${orderId} подтвержден`
+            );
+            
+            // Проверяем достижения
+            const achievements = await gamificationService.checkOrderAchievements(
+              telegramId,
+              orderId,
+              orderHour
+            );
+            
+            // Уведомления о level up и достижениях
+            if (xpResult.leveledUp) {
+              const levelUpMsg = `🎊 <b>Поздравляем!</b>\n\n` +
+                `Вы достигли уровня <b>${xpResult.currentLevel}</b>! 🏆\n\n` +
+                `🎁 <b>Награды:</b>\n${xpResult.rewards.description}\n\n` +
+                `✨ Всего XP: ${xpResult.totalXP}`;
+              // Включаем уведомления для продакшена
+              await sendTelegramMessage(telegramId, levelUpMsg);
+              console.log('🎊 Level up notification sent:', levelUpMsg);
+            }
+            
+            for (const achievement of achievements) {
+              if (!achievement.alreadyUnlocked && achievement.achievement) {
+                const achievementMsg = `🏆 <b>Достижение разблокировано!</b>\n\n` +
+                  `${achievement.achievement.icon} <b>${achievement.achievement.name}</b>\n` +
+                  `📝 ${achievement.achievement.description}\n\n` +
+                  `🎁 Награда: +${achievement.achievement.xpReward} XP`;
+                // Включаем уведомления для продакшена
+                await sendTelegramMessage(telegramId, achievementMsg);
+                console.log('🏆 Achievement notification sent:', achievementMsg);
+              }
+            }
+          } else if (type === 'yuan') {
+            // Покупка юаней подтверждена - даем XP (1 за 100₽)
+            const [yuanData] = await dbConnection.execute(
+              'SELECT amount_rub FROM yuan_purchases WHERE id = ?',
+              [orderId]
+            );
+            
+            if (yuanData.length > 0) {
+              const amountRub = yuanData[0].amount_rub;
+              const xpAmount = Math.floor(amountRub / 100);
+              
+              if (xpAmount > 0) {
+                const xpResult = await gamificationService.awardXP(
+                  telegramId,
+                  xpAmount,
+                  'yuan_purchase',
+                  orderId,
+                  `Покупка юаней подтверждена`
+                );
+                
+                // Проверяем достижения
+                const achievements = await gamificationService.checkYuanAchievements(telegramId, amountRub);
+                
+                if (xpResult.leveledUp) {
+                  const levelUpMsg = `🎊 <b>Поздравляем!</b>\n\n` +
+                    `Вы достигли уровня <b>${xpResult.currentLevel}</b>! 🏆\n\n` +
+                    `🎁 <b>Награды:</b>\n${xpResult.rewards.description}\n\n` +
+                    `✨ Всего XP: ${xpResult.totalXP}`;
+                  // Включаем уведомления для продакшена
+              await sendTelegramMessage(telegramId, levelUpMsg);
+              console.log('🎊 Level up notification sent:', levelUpMsg);
+                }
+                
+                for (const achievement of achievements) {
+                  if (!achievement.alreadyUnlocked && achievement.achievement) {
+                    const achievementMsg = `🏆 <b>Достижение разблокировано!</b>\n\n` +
+                      `${achievement.achievement.icon} <b>${achievement.achievement.name}</b>\n` +
+                      `📝 ${achievement.achievement.description}\n\n` +
+                      `🎁 Награда: +${achievement.achievement.xpReward} XP`;
+                    // Включаем уведомления для продакшена
+                await sendTelegramMessage(telegramId, achievementMsg);
+                console.log('🏆 Achievement notification sent:', achievementMsg);
+                  }
+                }
+              }
+            }
+          }
+        }
+      } catch (gamificationError) {
+        console.error('❌ Ошибка начисления XP при подтверждении:', gamificationError);
+      }
+      // ========== End Gamification ==========
     }
     
     res.json({ success: true, message: 'Заказ подтвержден' });
@@ -4590,14 +4604,10 @@ async function updateUserAchievementsAndLevels(telegramId, type) {
       
       // Обновляем уровень в базе
       await dbConnection.execute(`
-        INSERT INTO user_levels (telegram_id, current_level, level_progress, total_orders)
-        VALUES (?, ?, ?, ?)
-        ON DUPLICATE KEY UPDATE
-          current_level = VALUES(current_level),
-          level_progress = VALUES(level_progress),
-          total_orders = VALUES(total_orders),
-          updated_at = NOW()
-      `, [telegramId, currentLevel, levelProgress, totalOrders]);
+        UPDATE users 
+        SET current_level = ?, total_orders = ?, updated_at = NOW()
+        WHERE telegram_id = ?
+      `, [currentLevel, totalOrders, telegramId]);
       
       // Проверяем и обновляем достижения
       const achievements = [
@@ -4878,7 +4888,7 @@ app.post('/api/admin/update-user-commission', async (req, res) => {
         }
 
         // Получаем старую комиссию для уведомления
-        const oldCommission = users[0].commission || 0.05;
+        const oldCommission = users[0].commission || 1000;
 
         // Обновляем комиссию
         await dbConnection.execute(
@@ -4889,15 +4899,15 @@ app.post('/api/admin/update-user-commission', async (req, res) => {
         // Отправляем уведомление пользователю
         const notificationMessage = `💰 <b>Изменение комиссии</b>\n\n` +
                                    `Ваша комиссия была изменена:\n` +
-                                   `📉 <b>Было:</b> ${(oldCommission * 100).toFixed(1)}%\n` +
-                                   `📈 <b>Стало:</b> ${(commission * 100).toFixed(1)}%\n\n` +
+                                   `📉 <b>Было:</b> ${oldCommission} ₽\n` +
+                                   `📈 <b>Стало:</b> ${commission} ₽\n\n` +
                                    `⏰ <b>Время изменения:</b> ${new Date().toLocaleString('ru-RU')}\n\n` +
                                    `💡 Теперь при расчете стоимости заказов будет использоваться новая комиссия.`;
 
         await sendTelegramMessage(telegramId, notificationMessage);
 
         // Логируем изменение
-        await createSystemLog('info', `Комиссия пользователя ${telegramId} изменена на ${(commission * 100).toFixed(1)}%`, {
+        await createSystemLog('info', `Комиссия пользователя ${telegramId} изменена на ${commission} ₽`, {
           telegramId,
           oldCommission: oldCommission,
           newCommission: commission,
@@ -4907,7 +4917,7 @@ app.post('/api/admin/update-user-commission', async (req, res) => {
 
         res.json({ 
           success: true, 
-          message: `Комиссия пользователя изменена на ${(commission * 100).toFixed(1)}% и уведомление отправлено`
+          message: `Комиссия пользователя изменена на ${commission} ₽ и уведомление отправлено`
         });
       } catch (dbError) {
         console.error('Ошибка работы с базой данных:', dbError);
@@ -5890,15 +5900,15 @@ app.post('/api/admin/extend-discount', async (req, res) => {
 
     // Обновляем срок действия скидки
     await dbConnection.execute(
-      'UPDATE users SET access_expires_at = ?, commission = 0.02 WHERE telegram_id = ?',
+      'UPDATE users SET access_expires_at = ?, commission = 400 WHERE telegram_id = ?',
       [newExpiryDate, telegramId]
     );
 
     // Отправляем уведомление пользователю
     const extensionMessage = `🎉 <b>Скидочная комиссия продлена!</b>\n\n` +
-                            `Ваша скидочная комиссия 2% продлена на ${days} дн.\n\n` +
+                            `Ваша скидочная комиссия 400₽ продлена на ${days} дн.\n\n` +
                             `⏰ <b>Новый срок действия:</b> ${newExpiryDate.toLocaleString('ru-RU')}\n\n` +
-                            `💰 <b>Ваша комиссия:</b> 2% (вместо 5%)\n\n` +
+                            `💰 <b>Ваша комиссия:</b> 400₽ (вместо 1000₽)\n\n` +
                             `💡 Продолжайте делать заказы по сниженной цене!`;
 
     await sendTelegramMessage(telegramId, extensionMessage);
@@ -6042,6 +6052,338 @@ app.get('/api/reviews', async (req, res) => {
   }
 });
 
+// ========== GAMIFICATION API ENDPOINTS ==========
+
+// Получить данные геймификации пользователя (ОБНОВЛЕНО ДЛЯ НОВОЙ СИСТЕМЫ)
+app.get('/api/gamification/:telegramId', async (req, res) => {
+  try {
+    const { telegramId } = req.params;
+    await ensureDBConnection();
+    
+    // Получаем данные пользователя
+    const [users] = await dbConnection.query(
+      'SELECT xp, current_level, login_streak, total_savings, total_orders, total_yuan_bought, total_referrals FROM users WHERE telegram_id = ?',
+      [telegramId]
+    );
+    
+    if (users.length === 0) {
+      // ВРЕМЕННОЕ ИСКЛЮЧЕНИЕ ДЛЯ ТЕСТИРОВАНИЯ - убрать перед релизом
+      const demoGamificationData = {
+        success: true,
+        xp: 0,
+        currentLevel: 'Bronze',
+        loginStreak: 0,
+        levelProgress: { progress: 0 },
+        nextLevel: 'Silver',
+        xpToNext: 1000,
+        achievements: [],
+        levelRewards: LEVEL_REWARDS['Bronze'],
+        levels: LEVELS,
+        user: {
+          total_savings: 0,
+          total_orders: 0,
+          total_yuan_bought: 0,
+          total_referrals: 0
+        }
+      };
+      return res.json(demoGamificationData);
+    }
+    
+    const user = users[0];
+    const xp = user.xp || 0;
+    const currentLevel = user.current_level || 'Bronze';
+    const loginStreak = user.login_streak || 0;
+    
+    // Получаем достижения из новой системы
+    const [achievements] = await dbConnection.query(`
+      SELECT 
+        a.*,
+        ua.unlocked_at,
+        ua.xp_awarded,
+        CASE WHEN ua.telegram_id IS NOT NULL THEN 1 ELSE 0 END as unlocked
+      FROM achievements a
+      LEFT JOIN user_achievements ua ON a.achievement_key = ua.achievement_key AND ua.telegram_id = ?
+      ORDER BY a.category, a.xp_reward
+    `, [telegramId]);
+    
+    
+    // Вычисляем прогресс уровня
+    const levelProgress = gamificationService.getLevelProgress(xp);
+    
+    // Определяем следующий уровень
+    const levels = ['Bronze', 'Silver', 'Gold', 'Platinum', 'Diamond'];
+    const currentIndex = levels.indexOf(currentLevel);
+    const nextLevel = currentIndex < levels.length - 1 ? levels[currentIndex + 1] : null;
+    
+    // Вычисляем XP до следующего уровня
+    const levelThresholds = {
+      'Bronze': 0,
+      'Silver': 1000,
+      'Gold': 5000,
+      'Platinum': 25000,
+      'Diamond': 100000
+    };
+    
+    const xpToNext = nextLevel ? levelThresholds[nextLevel] - xp : 0;
+    
+    
+    res.json({
+      success: true,
+      xp,
+      currentLevel,
+      loginStreak,
+      levelProgress,
+      nextLevel,
+      xpToNext,
+      achievements,
+      levelRewards: LEVEL_REWARDS[currentLevel],
+      levels: LEVELS,
+      user: {
+        total_savings: user.total_savings || 0,
+        total_orders: user.total_orders || 0,
+        total_yuan_bought: user.total_yuan_bought || 0,
+        total_referrals: user.total_referrals || 0
+      }
+    });
+  } catch (error) {
+    console.error('Error fetching gamification data:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Обновить ежедневный логин
+app.post('/api/gamification/daily-login', async (req, res) => {
+  try {
+    const { telegramId } = req.body;
+    
+    if (!telegramId) {
+      return res.status(400).json({ error: 'Telegram ID required' });
+    }
+    
+    await ensureDBConnection();
+    
+    const result = await gamificationService.updateDailyLogin(telegramId);
+    
+    // Если это новый день логина, отправляем уведомление
+    if (!result.alreadyLoggedToday && result.streak >= 5) {
+      const streakMsg = `🔥 <b>Серия входов: ${result.streak} дней!</b>\n\n` +
+        `Продолжайте заходить каждый день для получения достижений!`;
+      
+      await sendTelegramMessage(telegramId, streakMsg);
+    }
+    
+    res.json(result);
+  } catch (error) {
+    console.error('Error updating daily login:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Получить топ пользователей по XP (leaderboard)
+app.get('/api/gamification/leaderboard', async (req, res) => {
+  try {
+    await ensureDBConnection();
+    
+    const limit = parseInt(req.query.limit) || 100;
+    
+    const [users] = await dbConnection.query(
+      `SELECT telegram_id, xp, current_level 
+       FROM users 
+       WHERE xp > 0
+       ORDER BY xp DESC 
+       LIMIT ?`,
+      [limit]
+    );
+    
+    res.json({ leaderboard: users });
+  } catch (error) {
+    console.error('Error fetching leaderboard:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Получить историю XP пользователя
+app.get('/api/gamification/:telegramId/xp-history', async (req, res) => {
+  try {
+    const { telegramId } = req.params;
+    await ensureDBConnection();
+    
+    const limit = parseInt(req.query.limit) || 50;
+    
+    const [history] = await dbConnection.query(
+      `SELECT * FROM xp_history 
+       WHERE telegram_id = ? 
+       ORDER BY created_at DESC 
+       LIMIT ?`,
+      [telegramId, limit]
+    );
+    
+    res.json({ history });
+  } catch (error) {
+    console.error('Error fetching XP history:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Получить историю уровней пользователя
+app.get('/api/gamification/:telegramId/level-history', async (req, res) => {
+  try {
+    const { telegramId } = req.params;
+    await ensureDBConnection();
+    
+    const [history] = await dbConnection.query(
+      `SELECT * FROM level_history 
+       WHERE telegram_id = ? 
+       ORDER BY created_at DESC`,
+      [telegramId]
+    );
+    
+    res.json({ history });
+  } catch (error) {
+    console.error('Error fetching level history:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Получить достижения по категориям (ОБНОВЛЕНО ДЛЯ НОВОЙ СИСТЕМЫ)
+app.get('/api/gamification/:telegramId/achievements-by-category', async (req, res) => {
+  try {
+    const { telegramId } = req.params;
+    await ensureDBConnection();
+    
+    // Получаем достижения из новой системы
+    const [achievements] = await dbConnection.query(`
+      SELECT 
+        a.*,
+        ua.unlocked_at,
+        ua.xp_awarded,
+        CASE WHEN ua.telegram_id IS NOT NULL THEN 1 ELSE 0 END as unlocked
+      FROM achievements a
+      LEFT JOIN user_achievements ua ON a.achievement_key = ua.achievement_key AND ua.telegram_id = ?
+      ORDER BY a.category, a.xp_reward
+    `, [telegramId]);
+    
+    // Группируем по категориям
+    const grouped = achievements.reduce((acc, achievement) => {
+      if (!acc[achievement.category]) {
+        acc[achievement.category] = [];
+      }
+      acc[achievement.category].push(achievement);
+      return acc;
+    }, {});
+    
+    res.json({ 
+      success: true,
+      achievementsByCategory: grouped 
+    });
+  } catch (error) {
+    console.error('Error fetching achievements by category:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// ========== END GAMIFICATION API ==========
+
+// ========== SCHEDULER API ==========
+
+// Тестирование уведомлений
+app.post('/api/test-notification', async (req, res) => {
+  try {
+    console.log('🧪 Тестирование уведомления...');
+    await testNotification();
+    res.json({ 
+      success: true, 
+      message: 'Тестовое уведомление отправлено менеджеру' 
+    });
+  } catch (error) {
+    console.error('❌ Ошибка тестирования уведомления:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: 'Ошибка отправки уведомления' 
+    });
+  }
+});
+
+// Ручная проверка истечения скидок
+app.post('/api/check-expired-discounts', async (req, res) => {
+  try {
+    console.log('🔍 Ручная проверка истечения скидок...');
+    await checkExpiredDiscounts();
+    res.json({ 
+      success: true, 
+      message: 'Проверка истечения скидок выполнена' 
+    });
+  } catch (error) {
+    console.error('❌ Ошибка проверки скидок:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: 'Ошибка проверки скидок' 
+    });
+  }
+});
+
+// ========== END SCHEDULER API ==========
+
+/**
+ * Получение достижений пользователя
+ */
+app.get('/api/user/achievements/:telegramId', async (req, res) => {
+  try {
+    const { telegramId } = req.params;
+    
+    if (!gamificationService) {
+      return res.status(500).json({ 
+        success: false, 
+        message: 'Сервис геймификации недоступен' 
+      });
+    }
+    
+    const achievements = await gamificationService.getUserAchievements(telegramId);
+    
+    res.json({
+      success: true,
+      achievements
+    });
+    
+  } catch (error) {
+    console.error('Ошибка получения достижений:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Ошибка получения достижений' 
+    });
+  }
+});
+
+/**
+ * Получение статистики пользователя
+ */
+app.get('/api/user/stats/:telegramId', async (req, res) => {
+  try {
+    const { telegramId } = req.params;
+    
+    if (!gamificationService) {
+      return res.status(500).json({ 
+        success: false, 
+        message: 'Сервис геймификации недоступен' 
+      });
+    }
+    
+    const stats = await gamificationService.getUserStats(telegramId);
+    
+    res.json({
+      success: true,
+      stats
+    });
+    
+  } catch (error) {
+    console.error('Ошибка получения статистики:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Ошибка получения статистики' 
+    });
+  }
+});
+
 app.use('*', (req, res) => {
   res.status(404).json({ error: 'Маршрут не найден' });
 });
@@ -6050,9 +6392,13 @@ app.use('*', (req, res) => {
 async function startServer() {
   await connectDB();
   
+  // Запускаем планировщик задач
+  startScheduler();
+  
   app.listen(PORT, () => {
     console.log(`🚀 Сервер запущен на порту ${PORT}`);
     console.log(`📊 Режим: ${process.env.NODE_ENV || 'development'}`);
+    console.log(`⏰ Планировщик задач активен`);
   });
 }
 
@@ -6085,7 +6431,7 @@ async function checkExpiredCommissions() {
       WHERE access_expires_at IS NOT NULL 
         AND access_expires_at > NOW() 
         AND access_expires_at <= ?
-        AND commission < 0.05
+        AND commission < 1000
     `, [threeDaysFromNow]);
 
     // Отправляем предупреждения
@@ -6094,9 +6440,9 @@ async function checkExpiredCommissions() {
       const daysLeft = Math.ceil((expiresAt - now) / (24 * 60 * 60 * 1000));
       
       const warningMessage = `⚠️ <b>Скидочная комиссия истекает!</b>\n\n` +
-                            `Ваша сниженная комиссия ${(user.commission * 100).toFixed(1)}% истекает через ${daysLeft} дн.\n\n` +
+                            `Ваша сниженная комиссия ${user.commission}₽ истекает через ${daysLeft} дн.\n\n` +
                             `⏰ <b>Истекает:</b> ${expiresAt.toLocaleString('ru-RU')}\n\n` +
-                            `💰 После истечения комиссия вернется к 5%\n\n` +
+                            `💰 После истечения комиссия вернется к 1000₽\n\n` +
                             `🛍️ <b>Успевайте оформить заказ по сниженной цене!</b>`;
 
       await sendTelegramMessage(user.telegram_id, warningMessage);
@@ -6115,32 +6461,32 @@ async function checkExpiredCommissions() {
       FROM users 
       WHERE access_expires_at IS NOT NULL 
         AND access_expires_at <= NOW() 
-        AND commission < 0.05
+        AND commission < 1000
     `);
 
-    // Возвращаем комиссию к 5% и отправляем уведомления
+    // Возвращаем комиссию к 1000₽ и отправляем уведомления
     for (const user of expiredUsers) {
       const oldCommission = user.commission;
       
       // Обновляем комиссию
       await dbConnection.execute(
-        'UPDATE users SET commission = 0.05, access_expires_at = NULL WHERE telegram_id = ?',
+        'UPDATE users SET commission = 1000, access_expires_at = NULL WHERE telegram_id = ?',
         [user.telegram_id]
       );
 
       // Отправляем уведомление
       const expiryMessage = `📅 <b>Скидочная комиссия истекла</b>\n\n` +
-                           `Ваша сниженная комиссия ${(oldCommission * 100).toFixed(1)}% истекла.\n\n` +
-                           `💰 <b>Текущая комиссия:</b> 5%\n\n` +
+                           `Ваша сниженная комиссия ${oldCommission}₽ истекла.\n\n` +
+                           `💰 <b>Текущая комиссия:</b> 1000₽\n\n` +
                            `💡 Вы можете снова получить скидку, пригласив друга по реферальной ссылке!`;
 
       await sendTelegramMessage(user.telegram_id, expiryMessage);
       
       // Логируем возврат комиссии
-      await createSystemLog('info', `Комиссия пользователя ${user.telegram_id} возвращена к 5% после истечения скидки`, {
+      await createSystemLog('info', `Комиссия пользователя ${user.telegram_id} возвращена к 1000₽ после истечения скидки`, {
         telegramId: user.telegram_id,
         oldCommission: oldCommission,
-        newCommission: 0.05
+        newCommission: 1000
       });
     }
 
@@ -6182,6 +6528,181 @@ app.post('/api/admin/check-expired-commissions', async (req, res) => {
   }
 });
 
+// =====================================================
+// НОВЫЕ API ENDPOINTS ДЛЯ СИСТЕМЫ ДОСТИЖЕНИЙ
+// =====================================================
+
+/**
+ * Ежедневный вход с проверкой стрика и достижений
+ */
+app.post('/api/daily-login', async (req, res) => {
+  try {
+    const { telegramId } = req.body;
+    
+    if (!gamificationService) {
+      return res.status(500).json({ 
+        success: false, 
+        message: 'Сервис геймификации недоступен' 
+      });
+    }
+    
+    // Получаем данные пользователя
+    const [userRows] = await dbConnection.execute(
+      'SELECT last_login_date, login_streak, total_logins FROM users WHERE telegram_id = ?',
+      [telegramId]
+    );
+    
+    if (userRows.length === 0) {
+      return res.status(404).json({ 
+        success: false, 
+        message: 'Пользователь не найден' 
+      });
+    }
+    
+    const user = userRows[0];
+    const today = new Date().toISOString().split('T')[0];
+    const yesterday = new Date();
+    yesterday.setDate(yesterday.getDate() - 1);
+    const yesterdayStr = yesterday.toISOString().split('T')[0];
+    
+    let newStreak = 1;
+    let xpAwarded = 0;
+    
+    // Проверяем стрик
+    if (user.last_login_date === yesterdayStr) {
+      // Продолжаем стрик
+      newStreak = (user.login_streak || 0) + 1;
+    } else if (user.last_login_date === today) {
+      // Уже заходил сегодня
+      newStreak = user.login_streak || 0;
+    } else {
+      // Стрик прерван
+      newStreak = 1;
+    }
+    
+    // Начисляем XP за ежедневный вход
+    xpAwarded = 10; // 10 XP за ежедневный вход
+    
+    // Обновляем данные пользователя
+    await dbConnection.execute(
+      'UPDATE users SET last_login_date = ?, login_streak = ?, total_logins = total_logins + 1 WHERE telegram_id = ?',
+      [today, newStreak, telegramId]
+    );
+    
+    // Начисляем XP
+    const result = await gamificationService.awardXP(
+      telegramId,
+      xpAwarded,
+      'Ежедневный вход',
+      'login',
+      null
+    );
+    
+    // Проверяем достижения по активности
+    const achievementsResult = await gamificationService.checkActivityAchievements(telegramId);
+    
+    res.json({ 
+      success: true, 
+      streak: newStreak,
+      xpAwarded,
+      levelUp: result.levelUp,
+      achievementsUnlocked: achievementsResult.length,
+      message: `Вход засчитан! Стрик: ${newStreak} дней, +${xpAwarded} XP`
+    });
+    
+  } catch (error) {
+    console.error('Ошибка ежедневного входа:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Ошибка обработки входа' 
+    });
+  }
+});
+
+/**
+ * Расчет цены с проверкой достижений
+ */
+app.post('/api/calculate-price', async (req, res) => {
+  try {
+    const { telegramId, itemCostRub, deliveryCost, commission } = req.body;
+    
+    // Обновляем счетчик расчетов
+    await dbConnection.execute(
+      'UPDATE users SET calculation_count = calculation_count + 1, last_calculation_date = NOW() WHERE telegram_id = ?',
+      [telegramId]
+    );
+    
+    // ========== GAMIFICATION: Проверяем достижения по расчетам ==========
+    if (gamificationService) {
+      try {
+        // Проверяем достижения по расчетам (без начисления XP)
+        const achievements = await gamificationService.checkSavingsAchievements(telegramId);
+        
+        // Отправляем уведомления о достижениях
+        for (const achievement of achievements) {
+          if (achievement.success && !achievement.alreadyUnlocked) {
+            const achievementMsg = `🏆 <b>Новое достижение!</b>\n\n` +
+              `${achievement.achievement.icon} <b>${achievement.achievement.name}</b>\n` +
+              `${achievement.achievement.description}\n\n` +
+              `✨ +${achievement.achievement.xpReward} XP`;
+            
+            await sendTelegramMessage(telegramId, achievementMsg);
+          }
+        }
+      } catch (gamificationError) {
+        console.error('❌ Ошибка геймификации при расчете:', gamificationError);
+        // Не блокируем расчет, если геймификация не работает
+      }
+    }
+    
+    // Проверяем временную скидку
+    const [userRows] = await dbConnection.execute(
+      'SELECT temp_discount_active, temp_discount_end_date FROM users WHERE telegram_id = ?',
+      [telegramId]
+    );
+    
+    let finalCommission = commission;
+    let appliedDiscount = false;
+    
+    if (userRows.length > 0) {
+      const user = userRows[0];
+      if (user.temp_discount_active && user.temp_discount_end_date > new Date()) {
+        finalCommission = 600; // Временная скидка
+        appliedDiscount = true;
+      }
+    }
+    
+    const totalCost = itemCostRub + finalCommission + deliveryCost;
+    
+    // Проверяем достижения по расчетам
+    if (gamificationService) {
+      try {
+        const result = await gamificationService.checkSavingsAchievements(telegramId);
+        
+        if (result.length > 0) {
+          console.log(`🎉 Разблокировано ${result.length} достижений для пользователя ${telegramId}`);
+        }
+      } catch (gamificationError) {
+        console.error('Ошибка проверки достижений:', gamificationError);
+      }
+    }
+    
+    res.json({
+      success: true,
+      totalCost,
+      commission: finalCommission,
+      appliedDiscount,
+      message: appliedDiscount ? 'Применена временная скидка!' : 'Расчет выполнен'
+    });
+    
+  } catch (error) {
+    console.error('Ошибка расчета цены:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Ошибка расчета' 
+    });
+  }
+});
 
 process.on('SIGINT', async () => {
   console.log('Получен сигнал SIGINT, завершение работы...');

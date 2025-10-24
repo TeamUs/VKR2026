@@ -148,30 +148,160 @@ const SectionTitle = styled.h2`
 
 const SectionDescription = styled.p`
   color: var(--text-secondary);
-  line-height: 1.6;
+  line-height: 1.7;
   margin-bottom: 20px;
-  font-size: 1rem;
+  font-size: 1.1rem;
+  text-align: justify;
+  text-justify: inter-word;
+  max-width: 100%;
   
   @media (max-width: 480px) {
-    font-size: 0.9rem;
+    font-size: 1rem;
     margin-bottom: 16px;
+    text-align: left;
   }
 `;
 
 const FeaturesList = styled.ul`
-  color: var(--text-secondary);
-  line-height: 1.6;
-  padding-left: 20px;
+  list-style: none;
+  padding: 0;
   margin: 0;
+  display: grid;
+  gap: 16px;
+`;
+
+const FeatureIcon = styled.span`
+  font-size: 1.8rem;
+  flex-shrink: 0;
+  margin-top: 4px;
+  filter: drop-shadow(0 4px 8px rgba(0, 0, 0, 0.2));
+  transition: all 0.3s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  background: linear-gradient(135deg, 
+    rgba(162, 59, 59, 0.1), 
+    rgba(157, 78, 61, 0.05)
+  );
+  border-radius: 50%;
+  border: 2px solid rgba(162, 59, 59, 0.2);
+  
+  @media (max-width: 480px) {
+    font-size: 1.5rem;
+    width: 40px;
+    height: 40px;
+  }
 `;
 
 const FeatureItem = styled.li`
-  margin-bottom: 12px;
-  font-size: 1rem;
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  padding: 20px 24px;
+  background: linear-gradient(135deg, 
+    rgba(255, 255, 255, 0.05), 
+    rgba(255, 255, 255, 0.02)
+  );
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(162, 59, 59, 0.2);
+  border-radius: 20px;
+  transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+  position: relative;
+  overflow: hidden;
+  box-shadow: 
+    0 4px 20px rgba(0, 0, 0, 0.1),
+    0 2px 8px rgba(0, 0, 0, 0.05),
+    inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  
+  &::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 4px;
+    background: linear-gradient(90deg, 
+      var(--matte-red), 
+      var(--terracotta), 
+      var(--matte-red)
+    );
+    opacity: 0;
+    transition: all 0.4s ease;
+    border-radius: 20px 20px 0 0;
+  }
+  
+  &::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: -50%;
+    width: 200%;
+    height: 200%;
+    background: radial-gradient(
+      circle,
+      rgba(162, 59, 59, 0.1) 0%,
+      transparent 70%
+    );
+    opacity: 0;
+    transition: opacity 0.4s ease;
+    transform: translateY(-50%);
+  }
+  
+  &:hover {
+    transform: translateY(-4px) scale(1.02);
+    border-color: var(--matte-red);
+    box-shadow: 
+      0 12px 40px rgba(162, 59, 59, 0.2),
+      0 6px 20px rgba(0, 0, 0, 0.15),
+      inset 0 1px 0 rgba(255, 255, 255, 0.2);
+    
+    &::before {
+      opacity: 1;
+      height: 4px;
+    }
+    
+    &::after {
+      opacity: 1;
+    }
+    
+    ${FeatureIcon} {
+      transform: scale(1.1) rotate(5deg);
+      background: linear-gradient(135deg, 
+        rgba(162, 59, 59, 0.2), 
+        rgba(157, 78, 61, 0.1)
+      );
+      border-color: var(--matte-red);
+    }
+  }
   
   @media (max-width: 480px) {
-    font-size: 0.9rem;
-    margin-bottom: 10px;
+    padding: 16px 20px;
+    gap: 12px;
+    border-radius: 16px;
+  }
+`;
+
+const FeatureText = styled.div`
+  flex: 1;
+  color: var(--text-primary);
+  font-size: 1.05rem;
+  line-height: 1.6;
+  font-weight: 500;
+  
+  strong {
+    color: var(--matte-red);
+    font-weight: 700;
+    font-size: 1.1rem;
+  }
+  
+  @media (max-width: 480px) {
+    font-size: 0.95rem;
+    
+    strong {
+      font-size: 1rem;
+    }
   }
 `;
 
@@ -180,12 +310,12 @@ const ContactSection = styled.div`
   margin-top: 20px;
 `;
 
-const ContactButton = styled.button`
+const ContactButton = styled.button<{ $isDark?: boolean }>`
   background: var(--matte-red);
   border: 1px solid var(--matte-red);
   border-radius: 12px;
   padding: 10px 18px;
-  color: white;
+  color: ${props => props.$isDark ? 'black' : 'white'};
   font-size: 0.9rem;
   font-weight: 600;
   cursor: pointer;
@@ -214,15 +344,6 @@ const ContactButton = styled.button`
   }
 `;
 
-const ContactInfo = styled.div`
-  color: var(--text-secondary);
-  margin-bottom: 15px;
-  font-size: 1rem;
-  
-  @media (max-width: 480px) {
-    font-size: 0.9rem;
-  }
-`;
 
 const ContactRow = styled.div`
   display: flex;
@@ -231,17 +352,24 @@ const ContactRow = styled.div`
   margin-bottom: 20px;
   padding: 16px 20px;
   background: var(--bg-secondary);
-  border: 1px solid var(--border-color);
+  border: 2px solid var(--matte-red);
   border-radius: 12px;
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 
+    0 0 10px rgba(162, 59, 59, 0.3),
+    0 0 20px rgba(162, 59, 59, 0.1),
+    inset 0 0 10px rgba(162, 59, 59, 0.1);
   
   &:hover {
     transform: translateY(-2px);
     background: var(--bg-card);
     border-color: var(--matte-red);
     box-shadow: 
+      0 0 15px rgba(162, 59, 59, 0.5),
+      0 0 30px rgba(162, 59, 59, 0.2),
       0 4px 16px var(--shadow-card),
-      0 2px 8px var(--shadow-soft);
+      0 2px 8px var(--shadow-soft),
+      inset 0 0 15px rgba(162, 59, 59, 0.2);
   }
   
   &:last-child {
@@ -254,10 +382,26 @@ const ContactRow = styled.div`
   }
 `;
 
+const ContactInfo = styled.div`
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  gap: 4px;
+`;
+
+const ContactLabel = styled.div`
+  color: var(--text-primary);
+  font-size: 1.1rem;
+  font-weight: 600;
+  
+  @media (max-width: 480px) {
+    font-size: 1rem;
+  }
+`;
+
 const ContactText = styled.div`
   color: var(--text-secondary);
   font-size: 1rem;
-  flex: 1;
   
   @media (max-width: 480px) {
     font-size: 0.9rem;
@@ -345,12 +489,36 @@ const AboutUs: React.FC<AboutUsProps> = ({ onNavigate, isDark = true, onToggleTh
   };
 
   const features = [
-    '🚀 Быстрая доставка: средний срок доставки — около 15 дней',
-    '💰 Низкие цены: мы предлагаем конкурентные цены на товары, ниже, чем многие другие посредники',
-    '🔒 Гарантия качества: все оригинальные товары проходят строгую проверку перед отправкой!',
-    '🔝 Прозрачность: вы всегда знаете, что и за сколько покупаете. Совершенство в каждой детали!',
-    '👥 Поддержка на каждом этапе: от оформления заказа и до получения товара — мы всегда на связи!',
-    '📦 Функциональность: Мы также выкупаем товары со значком \'≈\' и поможем рассчитать их стоимость'
+    {
+      icon: '🚀',
+      title: 'Быстрая доставка',
+      description: 'средний срок доставки — около 20 дней'
+    },
+    {
+      icon: '💰',
+      title: 'Низкие цены',
+      description: 'мы предлагаем конкурентные цены на товары, ниже, чем многие другие посредники'
+    },
+    {
+      icon: '🔒',
+      title: 'Гарантия качества',
+      description: 'все оригинальные товары проходят строгую проверку перед отправкой!'
+    },
+    {
+      icon: '🔝',
+      title: 'Прозрачность',
+      description: 'вы всегда знаете, что и за сколько покупаете. Совершенство в каждой детали!'
+    },
+    {
+      icon: '👥',
+      title: 'Поддержка на каждом этапе',
+      description: 'от оформления заказа и до получения товара — мы всегда на связи!'
+    },
+    {
+      icon: '📦',
+      title: 'Функциональность',
+      description: 'Мы также выкупаем товары со значком \'≈\' и поможем рассчитать их стоимость'
+    }
   ];
 
   return (
@@ -379,7 +547,12 @@ const AboutUs: React.FC<AboutUsProps> = ({ onNavigate, isDark = true, onToggleTh
           <SectionTitle>Наши преимущества</SectionTitle>
           <FeaturesList>
             {features.map((feature, index) => (
-              <FeatureItem key={index}>{feature}</FeatureItem>
+              <FeatureItem key={index}>
+                <FeatureIcon>{feature.icon}</FeatureIcon>
+                <FeatureText>
+                  <strong>{feature.title}:</strong> {feature.description}
+                </FeatureText>
+              </FeatureItem>
             ))}
           </FeaturesList>
         </Section>
@@ -387,14 +560,20 @@ const AboutUs: React.FC<AboutUsProps> = ({ onNavigate, isDark = true, onToggleTh
         <Section>
           <SectionTitle>Контакты</SectionTitle>
           <ContactRow>
-            <ContactText>Telegram: @poizonic_manager</ContactText>
-            <ContactButton onClick={handleContactManager}>
+            <ContactInfo>
+              <ContactLabel>Менеджер</ContactLabel>
+              <ContactText>Telegram: @poizonic_manager</ContactText>
+            </ContactInfo>
+            <ContactButton $isDark={isDark} onClick={handleContactManager}>
               Связаться
             </ContactButton>
           </ContactRow>
           <ContactRow>
-            <ContactText>Telegram: @Egor_Bardin</ContactText>
-            <ContactButton onClick={handleContactAdManager}>
+            <ContactInfo>
+              <ContactLabel>Менеджер по рекламе</ContactLabel>
+              <ContactText>Telegram: @Egor_Bardin</ContactText>
+            </ContactInfo>
+            <ContactButton $isDark={isDark} onClick={handleContactAdManager}>
               Связаться
             </ContactButton>
           </ContactRow>
