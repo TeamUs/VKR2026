@@ -23,15 +23,58 @@ const subtleGlow = keyframes`
   }
 `;
 
+// Изящная анимация дыхания дракона
+const dragonBreath = keyframes`
+  0%, 100% {
+    transform: scale(1);
+    filter: drop-shadow(0 0 8px rgba(255, 107, 53, 0.4));
+  }
+  50% {
+    transform: scale(1.02);
+    filter: drop-shadow(0 0 12px rgba(255, 107, 53, 0.6));
+  }
+`;
+
+// Мерцание глаз дракона
+const dragonEyeGlow = keyframes`
+  0%, 100% {
+    filter: drop-shadow(0 0 3px rgba(255, 107, 53, 0.8)) drop-shadow(0 0 6px rgba(255, 107, 53, 0.4));
+  }
+  25% {
+    filter: drop-shadow(0 0 8px rgba(255, 107, 53, 1)) drop-shadow(0 0 15px rgba(255, 107, 53, 0.7)) drop-shadow(0 0 25px rgba(255, 107, 53, 0.3));
+  }
+  50% {
+    filter: drop-shadow(0 0 5px rgba(255, 107, 53, 0.9)) drop-shadow(0 0 10px rgba(255, 107, 53, 0.5));
+  }
+  75% {
+    filter: drop-shadow(0 0 7px rgba(255, 107, 53, 1)) drop-shadow(0 0 12px rgba(255, 107, 53, 0.6)) drop-shadow(0 0 20px rgba(255, 107, 53, 0.2));
+  }
+`;
+
+// Плавное покачивание
+const dragonSway = keyframes`
+  0%, 100% {
+    transform: rotate(0deg);
+  }
+  25% {
+    transform: rotate(1deg);
+  }
+  75% {
+    transform: rotate(-1deg);
+  }
+`;
+
 // Потрясающие технологичные компоненты в китайском стиле
 const MainContainer = styled.div`
   min-height: 100vh;
+  max-height: 100vh;
   background: transparent;
   position: relative;
   z-index: 1;
   padding: 0px;
   animation: ${fadeIn} 0.8s ease-out forwards;
   transition: all 0.5s ease;
+  overflow: hidden;
   
   @media (max-width: 480px) {
     padding: 0px;
@@ -46,55 +89,82 @@ const ContentWrapper = styled.div`
   max-width: 450px;
   margin: 0 auto;
   padding-top: 0px;
+  margin-top: 0px;
   
   @media (max-width: 480px) {
     max-width: 400px;
     padding-top: 0px;
+    margin-top: 0px;
   }
 `;
 
 const DragonHeader = styled.div`
-  margin-bottom: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 5px;
+  margin-top: 10px;
   position: relative;
   
   @media (max-width: 480px) {
-    margin-bottom: 8px;
+    margin-bottom: 3px;
+    margin-top: 10px;
+  }
+`;
+
+// Стилизованный компонент для изображения дракона
+const DragonImage = styled.img`
+  width: 120px;
+  height: auto;
+  margin-left: 20px;
+  filter: drop-shadow(0 0 8px rgba(255, 107, 53, 0.4));
+  transition: all 0.3s ease;
+  
+  &:hover {
+    transform: scale(1.05);
+    filter: drop-shadow(0 0 12px rgba(255, 107, 53, 0.6));
+  }
+  
+  @media (max-width: 480px) {
+    width: 90px;
+    margin-left: 15px;
   }
 `;
 
 // Убираем дракона из главного меню - он не нужен здесь
 
-const titleGlow = keyframes`
-  0% { 
-    text-shadow: 0 0 20px var(--glow-terracotta);
-    filter: brightness(1);
-  }
-  100% { 
-    text-shadow: 0 0 35px var(--glow-terracotta), 0 0 50px var(--glow-red);
-    filter: brightness(1.1);
-  }
-`;
-
 const WelcomeTitle = styled.h1`
   position: relative;
   z-index: 2;
-  font-family: 'Noto Sans SC', 'Inter', Arial, sans-serif;
-  font-size: 2.8rem;
-  font-weight: 800;
+  font-family: 'Music Warrior', 'Noto Sans SC', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'WenQuanYi Micro Hei', sans-serif;
+  font-size: 4.2rem;
+  font-weight: 400;
   color: var(--text-primary);
-  margin-bottom: 15px;
+  margin-bottom: 8px;
   letter-spacing: -0.02em;
-  text-shadow: 0 0 20px var(--glow-terracotta);
-  background: linear-gradient(45deg, var(--matte-red), var(--terracotta), var(--dark-beige));
+  text-shadow: 0 0 20px rgba(162, 59, 59, 0.4);
+  background: linear-gradient(90deg, 
+    var(--matte-red) 0%, 
+    var(--terracotta) 50%, 
+    var(--dark-beige) 100%);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
-  animation: titleGlow 4s ease-in-out infinite alternate;
+  text-align: center;
+  margin: 0;
+  margin-top: 20px;
+  text-transform: uppercase;
   
   @media (max-width: 480px) {
-    font-size: 2.4rem;
-    margin-bottom: 12px;
+    font-size: 3.2rem;
+    margin-top: 20px;
   }
+`;
+
+const gradientShift = keyframes`
+  0% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
 `;
 
 const WelcomeSubtitle = styled.p`
@@ -121,46 +191,84 @@ const WelcomeSubtitle = styled.p`
   }
 `;
 
-const AboutUsButton = styled.button`
+const AboutUsButton = styled.button<{ $isDark: boolean }>`
   position: fixed;
-  top: 20px;
-  left: 24px;
-  padding: 10px 18px;
-  border: 1px solid rgba(139, 69, 19, 0.2);
-  border-radius: 12px;
-  background: linear-gradient(135deg, rgba(139, 69, 19, 0.08), rgba(139, 69, 19, 0.04));
+  top: 5px;
+  left: 20px;
+  padding: 6px 16px;
+  border: 2px solid ${props => props.$isDark ? 'var(--matte-red)' : 'var(--terracotta)'};
+  border-radius: 25px;
+  background: ${props => props.$isDark 
+    ? 'rgba(162, 59, 59, 0.1)' 
+    : 'rgba(139, 69, 19, 0.08)'
+  };
   color: var(--text-primary);
   font-family: 'Noto Sans SC', 'Inter', Arial, sans-serif;
-  font-size: 0.9rem;
-  font-weight: 600;
+  font-size: 0.95rem;
+  font-weight: 700;
   cursor: pointer;
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-  backdrop-filter: blur(12px);
-  letter-spacing: 0.02em;
+  transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+  backdrop-filter: blur(15px);
+  letter-spacing: 0.03em;
   z-index: 1000;
-  min-width: 70px;
-  box-shadow: 0 2px 8px rgba(139, 69, 19, 0.1);
+  min-width: 80px;
+  box-shadow: ${props => props.$isDark 
+    ? '0 0 20px rgba(162, 59, 59, 0.2), 0 4px 12px rgba(0, 0, 0, 0.1)' 
+    : '0 0 15px rgba(139, 69, 19, 0.15), 0 4px 12px rgba(0, 0, 0, 0.05)'
+  };
+  position: relative;
+  overflow: hidden;
   
   @media (max-width: 480px) {
-    padding: 8px 14px;
-    font-size: 0.85rem;
-    top: 16px;
-    left: 20px;
+    padding: 5px 12px;
+    font-size: 0.9rem;
+    top: 5px;
+    left: 16px;
     min-width: 60px;
   }
   
+  &::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -100%;
+    width: 100%;
+    height: 100%;
+    background: ${props => props.$isDark 
+      ? 'linear-gradient(90deg, transparent, rgba(162, 59, 59, 0.2), transparent)' 
+      : 'linear-gradient(90deg, transparent, rgba(139, 69, 19, 0.2), transparent)'
+    };
+    transition: left 0.6s ease;
+  }
+  
   &:hover {
-    background: linear-gradient(135deg, rgba(139, 69, 19, 0.12), rgba(139, 69, 19, 0.08));
-    border-color: rgba(139, 69, 19, 0.3);
-    color: var(--matte-red);
-    transform: translateY(-2px);
-    box-shadow: 0 4px 16px rgba(139, 69, 19, 0.15);
+    background: ${props => props.$isDark 
+      ? 'rgba(162, 59, 59, 0.15)' 
+      : 'rgba(139, 69, 19, 0.12)'
+    };
+    border-color: ${props => props.$isDark ? 'var(--matte-red)' : 'var(--terracotta)'};
+    color: ${props => props.$isDark ? 'var(--matte-red)' : 'var(--terracotta)'};
+    transform: translateY(-3px) scale(1.02);
+    box-shadow: ${props => props.$isDark 
+      ? '0 0 25px rgba(162, 59, 59, 0.3), 0 8px 20px rgba(0, 0, 0, 0.15)' 
+      : '0 0 20px rgba(139, 69, 19, 0.2), 0 8px 20px rgba(0, 0, 0, 0.08)'
+    };
+    
+    &::before {
+      left: 100%;
+    }
   }
   
   &:active {
-    transform: translateY(-1px);
-    background: linear-gradient(135deg, rgba(139, 69, 19, 0.1), rgba(139, 69, 19, 0.06));
-    box-shadow: 0 2px 8px rgba(139, 69, 19, 0.12);
+    transform: translateY(-1px) scale(1.01);
+    background: ${props => props.$isDark 
+      ? 'rgba(162, 59, 59, 0.2)' 
+      : 'rgba(139, 69, 19, 0.15)'
+    };
+    box-shadow: ${props => props.$isDark 
+      ? '0 0 15px rgba(162, 59, 59, 0.25), 0 4px 12px rgba(0, 0, 0, 0.1)' 
+      : '0 0 12px rgba(139, 69, 19, 0.18), 0 4px 12px rgba(0, 0, 0, 0.06)'
+    };
   }
 `;
 
@@ -171,13 +279,13 @@ const MenuGrid = styled.div`
   gap: 20px;
   max-width: 360px;
   margin: 0 auto;
-  padding: 0 20px;
+  padding: 40px 20px 0 20px;
   justify-items: center;
   
   @media (max-width: 480px) {
     gap: 16px;
     max-width: 320px;
-    padding: 0 15px;
+    padding: 40px 15px 0 15px;
   }
 `;
 
@@ -325,7 +433,7 @@ const ChineseAccent = styled.div`
 
 const ThemeToggle = styled.div`
   position: fixed;
-  top: 10px;
+  top: 5px;
   right: 20px;
   width: 60px;
   height: 30px;
@@ -388,6 +496,28 @@ interface MainMenuProps {
 }
 
 const MainMenu: React.FC<MainMenuProps> = ({ onNavigate, toggleTheme, isDarkTheme }) => {
+  // Блокируем прокручивание экрана и сбрасываем позицию скролла
+  React.useEffect(() => {
+    // Сбрасываем позицию скролла на верх страницы
+    window.scrollTo(0, 0);
+    document.documentElement.scrollTop = 0;
+    document.body.scrollTop = 0;
+    
+    // Блокируем скролл
+    document.body.style.overflow = 'hidden';
+    document.body.style.position = 'fixed';
+    document.body.style.width = '100%';
+    document.body.style.top = '0';
+    
+    return () => {
+      // Восстанавливаем скролл при размонтировании
+      document.body.style.overflow = 'auto';
+      document.body.style.position = '';
+      document.body.style.width = '';
+      document.body.style.top = '';
+    };
+  }, []);
+
   const handleButtonClick = (view: string) => {
     if (window.Telegram?.WebApp?.HapticFeedback) {
       window.Telegram.WebApp.HapticFeedback.impactOccurred('medium');
@@ -403,11 +533,21 @@ const MainMenu: React.FC<MainMenuProps> = ({ onNavigate, toggleTheme, isDarkThem
       <div className="mystic-seal" style={{top: '50%', left: '2%', transform: 'rotate(45deg) scale(0.7)'}}></div>
       <div className="mystic-seal" style={{top: '30%', right: '2%', transform: 'rotate(-45deg) scale(0.8)'}}></div>
       
+      {/* Шапка с кнопками */}
+      <AboutUsButton $isDark={isDarkTheme} onClick={() => handleButtonClick('about')}>
+        О нас
+      </AboutUsButton>
+      
+      <ThemeToggle onClick={toggleTheme}>
+        <ToggleIcon $isDark={isDarkTheme}>🌙</ToggleIcon>
+        <ToggleIconDark $isDark={isDarkTheme}>☀️</ToggleIconDark>
+        <ToggleSlider $isDark={isDarkTheme}></ToggleSlider>
+      </ThemeToggle>
+      
       <ContentWrapper>
         <DragonHeader>
           <WelcomeTitle>poizonic</WelcomeTitle>
         </DragonHeader>
-        <WelcomeSubtitle>Доставляем оригинальные товары из Китая с гарантией качества и прозрачными ценами</WelcomeSubtitle>
         
         <MenuGrid>
           <MenuButton 
@@ -463,16 +603,6 @@ const MainMenu: React.FC<MainMenuProps> = ({ onNavigate, toggleTheme, isDarkThem
           </MenuButton>
         </MenuGrid>
       </ContentWrapper>
-      
-      <AboutUsButton onClick={() => handleButtonClick('about')}>
-        О нас
-      </AboutUsButton>
-      
-      <ThemeToggle onClick={toggleTheme}>
-        <ToggleIcon $isDark={isDarkTheme}>🌙</ToggleIcon>
-        <ToggleIconDark $isDark={isDarkTheme}>☀️</ToggleIconDark>
-        <ToggleSlider $isDark={isDarkTheme}></ToggleSlider>
-      </ThemeToggle>
     </MainContainer>
   );
 };

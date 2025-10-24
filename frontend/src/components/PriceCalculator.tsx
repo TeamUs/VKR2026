@@ -897,12 +897,12 @@ const PriceCalculator: React.FC<PriceCalculatorProps> = ({ onNavigate, toggleThe
   
 
   const categories = [
-    { value: 'shoes_clothing', label: '👟 Обувь и верхняя одежда', weight: 2.0 },
-    { value: 'backpacks_bags', label: '🎒 Рюкзаки и сумки', weight: 1.0 },
-    { value: 'hoodies_pants', label: '👕 Толстовки и штаны', weight: 1.5 },
-    { value: 'tshirts_shorts', label: '🩳 Футболки и шорты', weight: 1.0 },
-    { value: 'underwear_socks', label: '🧦 Нижнее белье, носки и головные уборы', weight: 0.5 },
-    { value: 'accessories_perfume', label: '👜 Аксессуары и духи', weight: 0.5 }
+    { value: 'shoes_clothing', label: '👟 Обувь и верхняя одежда', weight: 2.5 },
+    { value: 'backpacks_bags', label: '🎒 Рюкзаки и сумки', weight: 1.875 },
+    { value: 'hoodies_pants', label: '👕 Толстовки и штаны', weight: 1.875 },
+    { value: 'tshirts_shorts', label: '🩳 Футболки и шорты', weight: 1.25 },
+    { value: 'underwear_socks', label: '🧦 Нижнее белье, носки и головные уборы', weight: 1.0 },
+    { value: 'accessories_perfume', label: '👜 Аксессуары и духи', weight: 1.0 }
   ];
 
   const handleCalculate = async () => {
@@ -1189,7 +1189,7 @@ const PriceCalculator: React.FC<PriceCalculatorProps> = ({ onNavigate, toggleThe
             </ResultRow>
             
             <ResultRow>
-              <ResultLabel>Комиссия ({result.commissionRate}%):</ResultLabel>
+              <ResultLabel>Комиссия:</ResultLabel>
               <ResultValue>{result.commission} ₽</ResultValue>
             </ResultRow>
             
@@ -1236,7 +1236,7 @@ const PriceCalculator: React.FC<PriceCalculatorProps> = ({ onNavigate, toggleThe
           💡 <strong>Как рассчитывается стоимость:</strong><br/>
           • Цена товара переводится в рубли по текущему курсу<br/>
           • Добавляется стоимость доставки (800₽ за кг)<br/>
-          • Включается комиссия сервиса (4-5%)
+          • Включается комиссия сервиса (1000₽ за товар)
         </InfoText>
       </InfoCard>
 

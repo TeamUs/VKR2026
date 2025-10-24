@@ -1,0 +1,769 @@
+/**
+ * =====================================================
+ * СЕРВИС ГЕЙМИФИКАЦИИ - НОВАЯ СИСТЕМА ДОСТИЖЕНИЙ
+ * =====================================================
+ * Обрабатывает начисление XP, проверку достижений,
+ * временные скидки и уведомления пользователей
+ */
+
+const mysql = require('mysql2/promise');
+
+// Level Configuration
+const LEVELS = {
+  'Bronze': { minXP: 0, maxXP: 999, next: 'Silver' },
+  'Silver': { minXP: 1000, maxXP: 4999, next: 'Gold' },
+  'Gold': { minXP: 5000, maxXP: 24999, next: 'Platinum' },
+  'Platinum': { minXP: 25000, maxXP: 99999, next: 'Diamond' },
+  'Diamond': { minXP: 100000, maxXP: Infinity, next: null }
+};
+
+// Level Rewards Configuration
+const LEVEL_REWARDS = {
+  'Bronze': {
+    description: 'Первый заказ без комиссии за оформление',
+    benefits: ['no_first_order_fee']
+  },
+  'Silver': {
+    description: 'Комиссия 900₽ навсегда (вместо 1000₽)',
+    benefits: ['commission_900']
+  },
+  'Gold': {
+    description: 'Комиссия 700₽ навсегда (вместо 1000₽)',
+    benefits: ['commission_700']
+  },
+  'Platinum': {
+    description: 'Комиссия 400₽ навсегда (вместо 1000₽)',
+    benefits: ['commission_400']
+  },
+  'Diamond': {
+    description: 'Комиссия 0₽ навсегда (полное освобождение) + специальные предложения на юань + повышенные бонусы для рефералов',
+    benefits: ['commission_0', 'special_yuan_offers', 'enhanced_referral_bonuses']
+  }
+};
+
+// XP Accrual Rules
+const XP_RULES = {
+  ORDER_COMPLETE: 100,           // 100 XP per completed order
+  YUAN_PER_100RUB: 1,           // 1 XP per 100₽ spent on yuan
+  REFERRAL_REGISTRATION: 50,     // 50 XP per referral registration
+  ACHIEVEMENT_UNLOCK: 'varies'  // Depends on achievement
+};
+
+class GamificationService {
+  constructor(dbConfig) {
+    this.dbConfig = dbConfig;
+    this.pool = null;
+  }
+
+  async init() {
+    if (!this.pool) {
+      this.pool = mysql.createPool(this.dbConfig);
+    }
+  }
+
+  /**
+   * Award XP to a user
+   * @param {number} telegramId - User's Telegram ID
+   * @param {number} xpAmount - Amount of XP to award
+   * @param {string} source - Source of XP (order, yuan_purchase, referral, achievement)
+   * @param {number|null} sourceId - ID of the source
+   * @param {string|null} description - Optional description
+   * @returns {Promise<Object>} Result with level up info if applicable
+   */
+  async awardXP(telegramId, xpAmount, source, sourceId = null, description = null) {
+    await this.init();
+    const connection = await this.pool.getConnection();
+    
+    try {
+      await connection.beginTransaction();
+
+      // Get current user data
+      const [users] = await connection.query(
+        'SELECT xp, current_level FROM users WHERE telegram_id = ?',
+        [telegramId]
+      );
+
+      if (users.length === 0) {
+        throw new Error('User not found');
+      }
+
+      const currentXP = users[0].xp || 0;
+      const currentLevel = users[0].current_level || 'Bronze';
+      const newXP = currentXP + xpAmount;
+
+      // Update user XP
+      await connection.query(
+        'UPDATE users SET xp = ? WHERE telegram_id = ?',
+        [newXP, telegramId]
+      );
+
+      // Log XP history
+      await connection.query(
+        'INSERT INTO xp_history (telegram_id, xp_amount, source, source_id, description) VALUES (?, ?, ?, ?, ?)',
+        [telegramId, xpAmount, source, sourceId, description]
+      );
+
+      // Check for level up
+      const newLevel = this.calculateLevel(newXP);
+      let leveledUp = false;
+      
+      if (newLevel !== currentLevel) {
+        await connection.query(
+          'UPDATE users SET current_level = ? WHERE telegram_id = ?',
+          [newLevel, telegramId]
+        );
+
+        await connection.query(
+          'INSERT INTO level_history (telegram_id, old_level, new_level, xp_at_levelup) VALUES (?, ?, ?, ?)',
+          [telegramId, currentLevel, newLevel, newXP]
+        );
+
+        leveledUp = true;
+      }
+
+      await connection.commit();
+
+      return {
+        success: true,
+        xpAwarded: xpAmount,
+        totalXP: newXP,
+        currentLevel: newLevel,
+        leveledUp,
+        oldLevel: currentLevel,
+        rewards: leveledUp ? LEVEL_REWARDS[newLevel] : null
+      };
+
+    } catch (error) {
+      await connection.rollback();
+      console.error('Error awarding XP:', error);
+      throw error;
+    } finally {
+      connection.release();
+    }
+  }
+
+  /**
+   * Calculate level based on XP
+   * @param {number} xp - Total XP
+   * @returns {string} Level name
+   */
+  calculateLevel(xp) {
+    for (const [level, config] of Object.entries(LEVELS)) {
+      if (xp >= config.minXP && xp <= config.maxXP) {
+        return level;
+      }
+    }
+    return 'Bronze';
+  }
+
+  /**
+   * Get level progress information
+   * @param {number} xp - Total XP
+   * @returns {Object} Progress information
+   */
+  getLevelProgress(xp) {
+    const currentLevel = this.calculateLevel(xp);
+    const levelConfig = LEVELS[currentLevel];
+    
+    if (!levelConfig.next) {
+      return {
+        currentLevel,
+        nextLevel: null,
+        progress: 100,
+        xpToNext: 0,
+        currentLevelMinXP: levelConfig.minXP,
+        currentLevelMaxXP: levelConfig.maxXP
+      };
+    }
+
+    const nextLevelConfig = LEVELS[levelConfig.next];
+    const xpInCurrentLevel = xp - levelConfig.minXP;
+    const xpNeededForLevel = nextLevelConfig.minXP - levelConfig.minXP;
+    const progress = (xpInCurrentLevel / xpNeededForLevel) * 100;
+
+    return {
+      currentLevel,
+      nextLevel: levelConfig.next,
+      progress: Math.min(progress, 100),
+      xpToNext: nextLevelConfig.minXP - xp,
+      currentLevelMinXP: levelConfig.minXP,
+      currentLevelMaxXP: levelConfig.maxXP,
+      nextLevelMinXP: nextLevelConfig.minXP
+    };
+  }
+
+  /**
+   * Check and unlock achievements for a user
+   * @param {number} telegramId - User's Telegram ID
+   * @param {string} achievementKey - Achievement to check
+   * @returns {Promise<Object>} Result with unlock status
+   */
+  async checkAndUnlockAchievement(telegramId, achievementKey) {
+    await this.init();
+    const connection = await this.pool.getConnection();
+
+    try {
+      await connection.beginTransaction();
+
+      // Check if already unlocked
+      const [existing] = await connection.query(
+        'SELECT * FROM user_achievements WHERE telegram_id = ? AND achievement_key = ?',
+        [telegramId, achievementKey]
+      );
+
+      if (existing.length > 0) {
+        await connection.commit();
+        return { success: true, alreadyUnlocked: true };
+      }
+
+      // Get achievement details
+      const [achievements] = await connection.query(
+        'SELECT * FROM achievements WHERE achievement_key = ?',
+        [achievementKey]
+      );
+
+      if (achievements.length === 0) {
+        throw new Error('Achievement not found');
+      }
+
+      const achievement = achievements[0];
+
+      // Unlock achievement
+      await connection.query(
+        'INSERT INTO user_achievements (telegram_id, achievement_key, unlocked_at, xp_awarded) VALUES (?, ?, NOW(), ?)',
+        [telegramId, achievementKey, achievement.xp_reward]
+      );
+
+      // Award XP bonus
+      let xpResult = null;
+      if (achievement.xp_reward > 0) {
+        xpResult = await this.awardXP(
+          telegramId,
+          achievement.xp_reward,
+          'achievement',
+          achievement.id,
+          `Unlocked: ${achievement.name}`
+        );
+      }
+
+      await connection.commit();
+
+      return {
+        success: true,
+        alreadyUnlocked: false,
+        achievement: {
+          key: achievement.achievement_key,
+          name: achievement.name,
+          description: achievement.description,
+          icon: achievement.icon,
+          xpReward: achievement.xp_reward
+        },
+        xpAwarded: xpResult
+      };
+
+    } catch (error) {
+      await connection.rollback();
+      console.error('Error unlocking achievement:', error);
+      throw error;
+    } finally {
+      connection.release();
+    }
+  }
+
+  /**
+   * Get all achievements for a user
+   * @param {number} telegramId - User's Telegram ID
+   * @returns {Promise<Array>} List of all achievements with unlock status
+   */
+  async getUserAchievements(telegramId) {
+    await this.init();
+
+    const [allAchievements] = await this.pool.query(
+      'SELECT * FROM achievements ORDER BY category, id'
+    );
+
+    const [userAchievements] = await this.pool.query(
+      'SELECT achievement_key, unlocked_at FROM user_achievements WHERE telegram_id = ?',
+      [telegramId]
+    );
+
+    const unlockedMap = {};
+    userAchievements.forEach(ua => {
+      unlockedMap[ua.achievement_key] = ua.unlocked_at;
+    });
+
+    return allAchievements.map(achievement => ({
+      key: achievement.achievement_key,
+      name: achievement.name,
+      description: achievement.description,
+      category: achievement.category,
+      icon: achievement.icon,
+      requirement: achievement.requirement,
+      xpReward: achievement.xp_reward,
+      unlocked: !!unlockedMap[achievement.achievement_key],
+      unlockedAt: unlockedMap[achievement.achievement_key] || null
+    }));
+  }
+
+  /**
+   * Update daily login streak
+   * @param {number} telegramId - User's Telegram ID
+   * @returns {Promise<Object>} Updated streak info
+   */
+  async updateDailyLogin(telegramId) {
+    await this.init();
+    const connection = await this.pool.getConnection();
+
+    try {
+      await connection.beginTransaction();
+
+      const [users] = await connection.query(
+        'SELECT last_daily_login, login_streak FROM users WHERE telegram_id = ?',
+        [telegramId]
+      );
+
+      if (users.length === 0) {
+        throw new Error('User not found');
+      }
+
+      const today = new Date().toISOString().split('T')[0];
+      const lastLogin = users[0].last_daily_login ? users[0].last_daily_login.toISOString().split('T')[0] : null;
+      const currentStreak = users[0].login_streak || 0;
+
+      let newStreak = currentStreak;
+
+      if (lastLogin === today) {
+        // Already logged in today
+        await connection.commit();
+        return { streak: currentStreak, alreadyLoggedToday: true };
+      }
+
+      if (!lastLogin) {
+        // First login ever
+        newStreak = 1;
+      } else {
+        const lastDate = new Date(lastLogin);
+        const todayDate = new Date(today);
+        const diffDays = Math.floor((todayDate - lastDate) / (1000 * 60 * 60 * 24));
+
+        if (diffDays === 1) {
+          // Consecutive day
+          newStreak = currentStreak + 1;
+        } else {
+          // Streak broken
+          newStreak = 1;
+        }
+      }
+
+      await connection.query(
+        'UPDATE users SET last_daily_login = ?, login_streak = ? WHERE telegram_id = ?',
+        [today, newStreak, telegramId]
+      );
+
+      await connection.commit();
+
+      // Check for streak achievements
+      if (newStreak === 5) {
+        await this.checkAndUnlockAchievement(telegramId, 'daily_ritual');
+      } else if (newStreak === 28) {
+        await this.checkAndUnlockAchievement(telegramId, 'lunar_cycle');
+      } else if (newStreak === 365) {
+        await this.checkAndUnlockAchievement(telegramId, 'year_of_dragon');
+      }
+
+      return { streak: newStreak, alreadyLoggedToday: false };
+
+    } catch (error) {
+      await connection.rollback();
+      console.error('Error updating daily login:', error);
+      throw error;
+    } finally {
+      connection.release();
+    }
+  }
+
+  /**
+   * Check achievements after order completion
+   * @param {number} telegramId - User's Telegram ID
+   * @param {number} orderId - Order ID
+   * @param {number} orderHour - Hour of order (0-23)
+   * @returns {Promise<Array>} Unlocked achievements
+   */
+  async checkOrderAchievements(telegramId, orderId, orderHour = null) {
+    await this.init();
+    const unlocked = [];
+
+    // Get order count
+    const [orderStats] = await this.pool.query(
+      'SELECT COUNT(*) as total FROM orders WHERE telegram_id = ?',
+      [telegramId]
+    );
+
+    const totalOrders = orderStats[0].total;
+
+    // Dragon Newbie - First order
+    if (totalOrders === 1) {
+      const result = await this.checkAndUnlockAchievement(telegramId, 'dragon_newbie');
+      if (!result.alreadyUnlocked) unlocked.push(result);
+    }
+
+    // Lucky Number - 8th order
+    if (totalOrders === 8) {
+      const result = await this.checkAndUnlockAchievement(telegramId, 'lucky_number');
+      if (!result.alreadyUnlocked) unlocked.push(result);
+    }
+
+    // Emperor of Purchases - 10 orders
+    if (totalOrders === 10) {
+      const result = await this.checkAndUnlockAchievement(telegramId, 'emperor_purchases');
+      if (!result.alreadyUnlocked) unlocked.push(result);
+    }
+
+    // Night Hunter - Order after 22:00
+    if (orderHour !== null && orderHour >= 22) {
+      const result = await this.checkAndUnlockAchievement(telegramId, 'night_hunter');
+      if (!result.alreadyUnlocked) unlocked.push(result);
+    }
+
+    // Check for 3 orders in a week (Chain Orders)
+    const [recentOrders] = await this.pool.query(
+      'SELECT COUNT(*) as count FROM orders WHERE telegram_id = ? AND created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)',
+      [telegramId]
+    );
+
+    if (recentOrders[0].count >= 3) {
+      const result = await this.checkAndUnlockAchievement(telegramId, 'chain_orders');
+      if (!result.alreadyUnlocked) unlocked.push(result);
+    }
+
+    // Check for seasonal achievements
+    const now = new Date();
+    const month = now.getMonth() + 1;
+
+    // New Year Luck - 3 orders in January
+    if (month === 1) {
+      const [januaryOrders] = await this.pool.query(
+        'SELECT COUNT(*) as count FROM orders WHERE telegram_id = ? AND MONTH(created_at) = 1 AND YEAR(created_at) = YEAR(NOW())',
+        [telegramId]
+      );
+
+      if (januaryOrders[0].count >= 3) {
+        const result = await this.checkAndUnlockAchievement(telegramId, 'new_year_luck');
+        if (!result.alreadyUnlocked) unlocked.push(result);
+      }
+    }
+
+    return unlocked;
+  }
+
+  /**
+   * Check achievements after referral registration
+   * @param {number} referrerId - Referrer's Telegram ID
+   * @param {number} referredId - Referred user's Telegram ID
+   * @returns {Promise<Array>} Unlocked achievements
+   */
+  async checkReferralAchievements(referrerId, referredId) {
+    await this.init();
+    const unlocked = [];
+
+    // Get referral count
+    const [referralStats] = await this.pool.query(
+      'SELECT COUNT(*) as total FROM users WHERE referred_by = ?',
+      [referrerId]
+    );
+
+    const totalReferrals = referralStats[0].total;
+
+    // Golden Chain - First active referral
+    const [activeReferrals] = await this.pool.query(
+      'SELECT COUNT(DISTINCT u.telegram_id) as count FROM users u JOIN orders o ON u.telegram_id = o.telegram_id WHERE u.referred_by = ?',
+      [referrerId]
+    );
+
+    if (activeReferrals[0].count >= 1) {
+      const result = await this.checkAndUnlockAchievement(referrerId, 'golden_chain');
+      if (!result.alreadyUnlocked) unlocked.push(result);
+    }
+
+    // Referral Festival - 3 referrals in a month
+    const [monthlyReferrals] = await this.pool.query(
+      'SELECT COUNT(*) as count FROM users WHERE referred_by = ? AND created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)',
+      [referrerId]
+    );
+
+    if (monthlyReferrals[0].count >= 3) {
+      const result = await this.checkAndUnlockAchievement(referrerId, 'referral_festival');
+      if (!result.alreadyUnlocked) unlocked.push(result);
+    }
+
+    // Check for Summer Fire
+    const now = new Date();
+    const month = now.getMonth() + 1;
+    if (month >= 6 && month <= 8) {
+      const result = await this.checkAndUnlockAchievement(referrerId, 'summer_fire');
+      if (!result.alreadyUnlocked) unlocked.push(result);
+    }
+
+    return unlocked;
+  }
+
+  /**
+   * Check achievements after yuan purchase
+   * @param {number} telegramId - User's Telegram ID
+   * @param {number} amountRub - Amount spent in rubles
+   * @returns {Promise<Array>} Unlocked achievements
+   */
+  async checkYuanAchievements(telegramId, amountRub) {
+    await this.init();
+    const unlocked = [];
+
+    // Get total savings
+    const [savingsStats] = await this.pool.query(
+      'SELECT COALESCE(SUM(savings), 0) as total FROM yuan_purchases WHERE telegram_id = ?',
+      [telegramId]
+    );
+
+    const totalSavings = savingsStats[0].total;
+
+    // Economy Dragon - 5000₽ total savings
+    if (totalSavings >= 5000) {
+      const result = await this.checkAndUnlockAchievement(telegramId, 'economy_dragon');
+      if (!result.alreadyUnlocked) unlocked.push(result);
+    }
+
+    return unlocked;
+  }
+
+  /**
+   * Проверяет достижения по активности
+   */
+  async checkActivityAchievements(telegramId) {
+    await this.init();
+    const unlocked = [];
+
+    // Примечание: достижения по стрику уже проверяются в updateDailyLogin
+    // Здесь проверяем только другие достижения по активности
+
+    // Год удачи - 365 дней с регистрации
+    const [registrationDays] = await this.pool.query(
+      'SELECT DATEDIFF(NOW(), created_at) as days FROM users WHERE telegram_id = ?',
+      [telegramId]
+    );
+    
+    if (registrationDays[0]?.days >= 365) {
+      const result = await this.checkAndUnlockAchievement(telegramId, 'year_of_luck');
+      if (!result.alreadyUnlocked) unlocked.push(result);
+    }
+
+    // Активный расчетчик - 5 расчетов за неделю
+    const weekAgo = new Date();
+    weekAgo.setDate(weekAgo.getDate() - 7);
+    
+    const [weeklyCalculations] = await this.pool.query(
+      'SELECT COUNT(*) as count FROM users WHERE telegram_id = ? AND last_calculation_date >= ?',
+      [telegramId, weekAgo]
+    );
+    
+    if (weeklyCalculations[0]?.count >= 5) {
+      const result = await this.checkAndUnlockAchievement(telegramId, 'active_calculator');
+      if (!result.alreadyUnlocked) unlocked.push(result);
+    }
+
+    // Комбо-активность - вход + расчет + заказ в один день
+    const today = new Date().toISOString().split('T')[0];
+    
+    const [todayOrders] = await this.pool.query(
+      'SELECT COUNT(*) as count FROM orders WHERE telegram_id = ? AND status = "completed" AND DATE(created_at) = ?',
+      [telegramId, today]
+    );
+    
+    const [userData] = await this.pool.query(
+      'SELECT last_login_date, calculation_count FROM users WHERE telegram_id = ?',
+      [telegramId]
+    );
+    
+    const hasOrder = todayOrders[0].count > 0;
+    const hasLogin = userData[0]?.last_login_date === today;
+    const hasCalculation = (userData[0]?.calculation_count || 0) > 0;
+    
+    if (hasOrder && hasLogin && hasCalculation) {
+      const result = await this.checkAndUnlockAchievement(telegramId, 'combo_activity');
+      if (!result.alreadyUnlocked) unlocked.push(result);
+    }
+
+    return unlocked;
+  }
+
+  /**
+   * Проверяет достижения по экономии
+   */
+  async checkSavingsAchievements(telegramId) {
+    await this.init();
+    const unlocked = [];
+
+    // Расчет удачи - первый расчет
+    const [calculationCount] = await this.pool.query(
+      'SELECT calculation_count FROM users WHERE telegram_id = ?',
+      [telegramId]
+    );
+    
+    if (calculationCount[0]?.calculation_count >= 1) {
+      const result = await this.checkAndUnlockAchievement(telegramId, 'lucky_calculation');
+      if (!result.alreadyUnlocked) unlocked.push(result);
+    }
+
+    // Эконом-мастер - 10 расчетов
+    if (calculationCount[0]?.calculation_count >= 10) {
+      const result = await this.checkAndUnlockAchievement(telegramId, 'economy_master');
+      if (!result.alreadyUnlocked) unlocked.push(result);
+    }
+
+    // Дракон-сберегатель - 2,000₽ экономии
+    const [totalSavings] = await this.pool.query(
+      'SELECT total_savings FROM users WHERE telegram_id = ?',
+      [telegramId]
+    );
+    
+    if (totalSavings[0]?.total_savings >= 2000) {
+      const result = await this.checkAndUnlockAchievement(telegramId, 'dragon_saver');
+      if (!result.alreadyUnlocked) unlocked.push(result);
+    }
+
+    // Имперская экономия - 50,000₽ экономии
+    if (totalSavings[0]?.total_savings >= 50000) {
+      const result = await this.checkAndUnlockAchievement(telegramId, 'imperial_economy');
+      if (!result.alreadyUnlocked) unlocked.push(result);
+    }
+
+    // Расчетный комбо - 3 расчета в один день
+    // Проверяем, что пользователь делал расчеты сегодня и у него много расчетов
+    const today = new Date().toISOString().split('T')[0];
+    
+    const [userData] = await this.pool.query(
+      'SELECT calculation_count, last_calculation_date FROM users WHERE telegram_id = ?',
+      [telegramId]
+    );
+    
+    const hasCalculationsToday = userData[0]?.last_calculation_date && 
+      userData[0].last_calculation_date.toISOString().split('T')[0] === today;
+    const totalCalculations = userData[0]?.calculation_count || 0;
+    
+    // Если пользователь делал расчеты сегодня и у него много расчетов (3+)
+    if (hasCalculationsToday && totalCalculations >= 3) {
+      const result = await this.checkAndUnlockAchievement(telegramId, 'calculation_combo');
+      if (!result.alreadyUnlocked) unlocked.push(result);
+    }
+
+    return unlocked;
+  }
+
+  /**
+   * Применяет временную скидку
+   */
+  async applyTemporaryDiscount(telegramId, durationDays = 7) {
+    await this.init();
+    
+    const endDate = new Date();
+    endDate.setDate(endDate.getDate() + durationDays);
+    
+    await this.pool.query(
+      'UPDATE users SET temp_discount_active = TRUE, temp_discount_end_date = ? WHERE telegram_id = ?',
+      [endDate, telegramId]
+    );
+  }
+
+  /**
+   * Проверяет активность временной скидки
+   */
+  async checkTemporaryDiscount(telegramId) {
+    await this.init();
+    
+    const [discountData] = await this.pool.query(
+      'SELECT temp_discount_active, temp_discount_end_date FROM users WHERE telegram_id = ?',
+      [telegramId]
+    );
+    
+    if (discountData[0]?.temp_discount_active && discountData[0]?.temp_discount_end_date > new Date()) {
+      return true;
+    }
+    
+    return false;
+  }
+
+  /**
+   * Get user statistics
+   * @param {number} telegramId - User's Telegram ID
+   * @returns {Promise<Object>} User statistics
+   */
+  async getUserStats(telegramId) {
+    await this.init();
+
+    const [userData] = await this.pool.query(
+      'SELECT xp, current_level, login_streak, total_savings, total_orders, total_yuan_bought, total_referrals, calculation_count FROM users WHERE telegram_id = ?',
+      [telegramId]
+    );
+
+    if (userData.length === 0) {
+      return {
+        xp: 0,
+        currentLevel: 'Bronze',
+        loginStreak: 0,
+        totalSavings: 0,
+        totalOrders: 0,
+        totalYuanBought: 0,
+        totalReferrals: 0,
+        calculationCount: 0
+      };
+    }
+
+    const user = userData[0];
+    return {
+      xp: user.xp || 0,
+      currentLevel: user.current_level || 'Bronze',
+      loginStreak: user.login_streak || 0,
+      totalSavings: parseFloat(user.total_savings) || 0,
+      totalOrders: user.total_orders || 0,
+      totalYuanBought: parseFloat(user.total_yuan_bought) || 0,
+      totalReferrals: user.total_referrals || 0,
+      calculationCount: user.calculation_count || 0
+    };
+  }
+
+  /**
+   * Get next level for current level
+   * @param {string} currentLevel - Current level name
+   * @returns {string} Next level name
+   */
+  getNextLevel(currentLevel) {
+    const level = LEVELS[currentLevel];
+    return level ? level.next : 'Silver';
+  }
+
+  /**
+   * Get XP needed to reach next level
+   * @param {string} currentLevel - Current level name
+   * @param {number} currentXP - Current XP amount
+   * @returns {number} XP needed to reach next level
+   */
+  getXPToNextLevel(currentLevel, currentXP) {
+    const level = LEVELS[currentLevel];
+    if (!level || !level.next) {
+      return 0; // Max level reached
+    }
+    
+    const nextLevel = LEVELS[level.next];
+    if (!nextLevel) {
+      return 0;
+    }
+    
+    return Math.max(0, nextLevel.minXP - currentXP);
+  }
+}
+
+module.exports = {
+  GamificationService,
+  LEVELS,
+  LEVEL_REWARDS,
+  XP_RULES
+};
+

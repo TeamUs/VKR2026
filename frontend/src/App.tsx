@@ -662,8 +662,10 @@ const LoadingSubtext = styled.div`
 interface TelegramUser {
   id: number;
   first_name: string;
+  last_name?: string;
   username?: string;
   language_code?: string;
+  photo_url?: string;
 }
 
 interface TelegramWebApp {
@@ -958,6 +960,13 @@ const App: React.FC = () => {
   const navigateTo = (view: string) => {
     setCurrentView(view as AppView);
     
+    // Сбрасываем скролл при переходе на главное меню
+    if (view === 'main') {
+      window.scrollTo(0, 0);
+      document.documentElement.scrollTop = 0;
+      document.body.scrollTop = 0;
+    }
+    
     // Обработка навигации к админке
     if (view === 'admin') {
       setActiveTab('admin' as any);
@@ -983,6 +992,10 @@ const App: React.FC = () => {
     // Reset to main view when switching tabs
     if (tabView === 'main') {
       setCurrentView('main');
+      // Сбрасываем скролл при переходе на главную вкладку
+      window.scrollTo(0, 0);
+      document.documentElement.scrollTop = 0;
+      document.body.scrollTop = 0;
     }
   };
 

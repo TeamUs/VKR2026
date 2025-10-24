@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useLayoutEffect } from 'react';
 import styled, { keyframes } from 'styled-components';
+import Confetti from 'react-confetti';
 import LevelsModal from './LevelsModal';
 import { HapticFeedback } from '../utils/hapticFeedback';
 
@@ -44,6 +45,7 @@ interface Achievement {
   unlocked: boolean;
   progress?: number;
   maxProgress?: number;
+  xpReward?: number;
 }
 
 interface ProfileData {
@@ -80,6 +82,8 @@ interface ProfileData {
     levelProgress: number;
     nextLevel: string;
     ordersToNext: number;
+    xp?: number;
+    xpToNext?: number;
     achievements: Array<{
       id: string;
       name: string;
@@ -307,10 +311,10 @@ const UserName = styled.h3`
   margin-bottom: 4px;
 `;
 
-const UserId = styled.p`
+const UserId = styled.p<{ $isDark: boolean }>`
   font-family: 'JetBrains Mono', monospace;
   font-size: 12px;
-  color: var(--text-accent);
+  color: ${props => props.$isDark ? 'var(--text-accent)' : 'var(--text-secondary)'};
   margin-bottom: 8px;
 `;
 
@@ -1115,18 +1119,58 @@ const ProgressFill = styled.div<{ $progress: number }>`
   transition: width 0.3s ease;
 `;
 
+// Стили для сообщения о отсутствии достижений
+const NoAchievementsMessage = styled.div<{ $isDark: boolean }>`
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 20px;
+  text-align: center;
+  margin: 20px 0;
+`;
+
+const NoAchievementsIcon = styled.div`
+  font-size: 48px;
+  margin-bottom: 16px;
+  opacity: 0.7;
+`;
+
+const NoAchievementsText = styled.div<{ $isDark: boolean }>`
+  font-family: 'Noto Sans SC', 'Inter', Arial, sans-serif;
+  font-size: 18px;
+  font-weight: 600;
+  color: ${props => props.$isDark ? 'var(--text-primary)' : 'var(--text-primary)'};
+  margin-bottom: 8px;
+`;
+
+const NoAchievementsSubtext = styled.div<{ $isDark: boolean }>`
+  font-family: 'Noto Sans SC', 'Inter', Arial, sans-serif;
+  font-size: 14px;
+  color: ${props => props.$isDark ? 'var(--text-secondary)' : 'var(--text-secondary)'};
+  line-height: 1.4;
+`;
+
 const Profile: React.FC<ProfileProps> = ({ telegramId, isDarkTheme, toggleTheme, onNavigate, onModalStateChange }) => {
   const [profileData, setProfileData] = useState<ProfileData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showAchievements, setShowAchievements] = useState(false);
   const [allAchievements, setAllAchievements] = useState<Achievement[]>([]);
+  
+  
+  
   const [showLevels, setShowLevels] = useState(false);
   const [telegramUser, setTelegramUser] = useState<any>(null);
   const [achievementsModalPosition, setAchievementsModalPosition] = useState({ top: '50%', transform: 'translateY(-50%)' });
   const [levelsModalPosition, setLevelsModalPosition] = useState({ top: '50%', transform: 'translateY(-50%)' });
   const [yuanHistory, setYuanHistory] = useState<any[]>([]);
   const [ordersHistory, setOrdersHistory] = useState<any[]>([]);
+  
+  // Confetti state
+  const [showConfetti, setShowConfetti] = useState(false);
+  const [confettiColors, setConfettiColors] = useState<string[]>(['#A23B3B', '#D2691E', '#E6D3B3']);
+  const [success, setSuccess] = useState<string>('');
   const [ordersHistoryExpanded, setOrdersHistoryExpanded] = useState(false);
   const [combinedHistory, setCombinedHistory] = useState<any[]>([]);
   const [isAdmin, setIsAdmin] = useState(false);
@@ -1139,6 +1183,26 @@ const Profile: React.FC<ProfileProps> = ({ telegramId, isDarkTheme, toggleTheme,
   // Состояния для заказов в пути
   const [userOrders, setUserOrders] = useState<any[]>([]);
   const [loadingOrders, setLoadingOrders] = useState(false);
+  
+  // Функция для показа confetti
+  const triggerConfetti = (colors?: string[]) => {
+    if (colors) setConfettiColors(colors);
+    setShowConfetti(true);
+    
+    // Автоматически скрыть через 5 секунд
+    setTimeout(() => {
+      setShowConfetti(false);
+    }, 5000);
+  };
+  
+  // Цвета для разных уровней
+  const levelColors: Record<string, string[]> = {
+    Bronze: ['#CD7F32', '#A0522D', '#8B4513'],
+    Silver: ['#C0C0C0', '#A9A9A9', '#D3D3D3'],
+    Gold: ['#FFD700', '#FFA500', '#FF8C00'],
+    Platinum: ['#E5E4E2', '#C0C0C0', '#B0E0E6'],
+    Diamond: ['#B9F2FF', '#4169E1', '#1E90FF']
+  };
 
   // Проверяем права доступа к админке
   useEffect(() => {
@@ -1162,17 +1226,41 @@ const Profile: React.FC<ProfileProps> = ({ telegramId, isDarkTheme, toggleTheme,
       setTelegramUser(window.Telegram.WebApp.initDataUnsafe.user);
     }
     
+    // Загружаем реальные данные из API
     fetchProfileData();
-    fetchYuanHistory();
-    fetchOrdersHistory();
-    fetchUserOrders();
+    
+    fetchYuanHistory(telegramId);
+    fetchOrdersHistory(telegramId);
+    fetchUserOrders(telegramId);
+    
+    // ========== GAMIFICATION: Обновляем ежедневный логин ==========
+    const updateDailyLogin = async () => {
+      try {
+        const response = await fetch('/api/gamification/daily-login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ telegramId })
+        });
+        
+        if (response.ok) {
+          const result = await response.json();
+          console.log('✅ Ежедневный логин обновлен:', result);
+        }
+      } catch (error) {
+        console.error('❌ Ошибка обновления ежедневного логина:', error);
+      }
+    };
+    
+    updateDailyLogin();
+    // ========== End Daily Login ==========
   }, [telegramId]);
 
-  useEffect(() => {
-    if (profileData) {
-      generateAllAchievements();
-    }
-  }, [profileData]);
+  // ========== УБРАНО: generateAllAchievements() перезаписывает данные из API ==========
+  // useEffect(() => {
+  //   if (profileData) {
+  //     generateAllAchievements();
+  //   }
+  // }, [profileData]);
 
   // Объединяем и сортируем историю по дате
   useEffect(() => {
@@ -1499,9 +1587,10 @@ const Profile: React.FC<ProfileProps> = ({ telegramId, isDarkTheme, toggleTheme,
   };
 
 
-  const fetchYuanHistory = async () => {
+  const fetchYuanHistory = async (userId?: string) => {
+    const currentTelegramId = userId || telegramId;
     try {
-      const response = await fetch(`/api/yuan-purchases?telegram_id=${telegramId}`);
+      const response = await fetch(`/api/yuan-purchases?telegram_id=${currentTelegramId}`);
       if (response.ok) {
         const data = await response.json();
         setYuanHistory(data.purchases || []);
@@ -1511,9 +1600,10 @@ const Profile: React.FC<ProfileProps> = ({ telegramId, isDarkTheme, toggleTheme,
     }
   };
 
-  const fetchOrdersHistory = async () => {
+  const fetchOrdersHistory = async (userId?: string) => {
+    const currentTelegramId = userId || telegramId;
     try {
-      const response = await fetch(`/api/orders-history?telegram_id=${telegramId}`);
+      const response = await fetch(`/api/orders-history?telegram_id=${currentTelegramId}`);
       if (response.ok) {
         const data = await response.json();
         setOrdersHistory(data.orders || []);
@@ -1524,7 +1614,7 @@ const Profile: React.FC<ProfileProps> = ({ telegramId, isDarkTheme, toggleTheme,
   };
 
   // Загрузка заказов пользователя
-  const fetchUserOrders = async () => {
+  const fetchUserOrders = async (userId?: string) => {
     setLoadingOrders(true);
     try {
       const response = await fetch('/api/user/orders', {
@@ -1550,78 +1640,49 @@ const Profile: React.FC<ProfileProps> = ({ telegramId, isDarkTheme, toggleTheme,
     return (ordersCount * ORDER_SAVINGS_CONSTANT) + yuanSavings;
   };
 
-  const fetchProfileData = async () => {
+
+  const fetchProfileData = async (userId?: string) => {
+    const currentTelegramId = userId || telegramId || 'demo';
     try {
       setLoading(true);
       
-      // Проверяем, что telegramId валидный
-      if (!telegramId || telegramId === '0' || telegramId === 'undefined') {
-        setError('Необходимо авторизоваться через Telegram');
-        setLoading(false);
-        return;
-      }
-      
-      // ДЕМО-ДАННЫЕ для разработки (убрать перед продакшеном!)
-      if (telegramId === 'demo') {
-        const demoData: ProfileData = {
-          user: {
-            telegram_id: 'demo',
-            full_name: 'Демо Пользователь',
-            phone_number: '+7 (999) 123-45-67',
-            preferred_currency: 'RUB',
-            commission: 0.05,
-            created_at: '2024-01-15T10:30:00Z',
-            avatar_url: undefined
-          },
-          statistics: {
-            orders: {
-              total_orders: 12,
-              completed_orders: 12
-            },
-            referrals: {
-              total_referrals: 4,
-              total_clicks: 41
-            },
-            yuan_purchases: {
-              total_purchases: 5,
-              total_spent_rub: 72000,
-              total_bought_cny: 5800,
-              total_savings: 1230
-            },
-            total_savings: {
-              total: calculateTotalSavings(12, 1230) // 12 заказов * 5000р + экономия с юаней
-            }
-          },
-          gamification: {
-            level: 'Silver',
-            levelProgress: 40,
-            nextLevel: 'Gold',
-            ordersToNext: 9,
-            achievements: [
-              { id: 'first_order', name: 'Первый заказ', icon: '🎯', unlocked: true },
-              { id: 'loyal_customer', name: 'Постоянный клиент', icon: '⭐', unlocked: true },
-              { id: 'vip_customer', name: 'VIP клиент', icon: '👑', unlocked: true },
-              { id: 'referrer', name: 'Пригласил друга', icon: '🤝', unlocked: true },
-              { id: 'yuan_buyer', name: 'Покупатель юаня', icon: '¥', unlocked: false }
-            ]
-          }
-        };
-        
-        setProfileData(demoData);
-        setLoading(false);
-        return;
-      }
-      
       // Получаем РЕАЛЬНЫЕ данные профиля из БД
-      const profileResponse = await fetch(`/api/profile?telegram_id=${telegramId}`);
+      const profileResponse = await fetch('/api/profile');
       
       if (!profileResponse.ok) {
         if (profileResponse.status === 404) {
-          setError('Пользователь не найден. Создайте заказ для регистрации.');
+          // Создаем демо-пользователя для входа
+          const demoProfileData: ProfileData = {
+            user: {
+              telegram_id: 'demo',
+              full_name: 'Демо Пользователь',
+              phone_number: '+7 (999) 123-45-67',
+              preferred_currency: 'RUB',
+              commission: 1000,
+              created_at: new Date().toISOString()
+            },
+            statistics: {
+              orders: { total_orders: 0, completed_orders: 0 },
+              referrals: { total_referrals: 0, total_clicks: 0 },
+              yuan_purchases: { total_purchases: 0, total_spent_rub: 0, total_bought_cny: 0, total_savings: 0 },
+              total_savings: { total: 0 }
+            },
+            gamification: {
+              level: 'Bronze',
+              levelProgress: 0,
+              nextLevel: 'Silver',
+              ordersToNext: 1000,
+              xp: 0,
+              xpToNext: 1000,
+              achievements: []
+            }
+          };
+          setProfileData(demoProfileData);
+          setLoading(false);
+          return;
         } else {
           throw new Error('Ошибка загрузки профиля');
         }
-        return;
       }
       
       const profileData = await profileResponse.json();
@@ -1637,6 +1698,74 @@ const Profile: React.FC<ProfileProps> = ({ telegramId, isDarkTheme, toggleTheme,
       
       // Добавляем рассчитанную экономию в данные профиля
       profileData.statistics.total_savings = { total: totalSavings };
+      
+      // Загружаем реальные данные геймификации
+      try {
+        const gamificationResponse = await fetch('/api/gamification/demo');
+        
+        if (gamificationResponse.ok) {
+          const gamificationData = await gamificationResponse.json();
+          
+          // Проверяем, был ли недавно повышен уровень (за последние 10 секунд)
+          const checkRecentLevelUp = async () => {
+            try {
+              const historyResponse = await fetch(`/api/gamification/${currentTelegramId}/level-history`);
+              if (historyResponse.ok) {
+                const historyData = await historyResponse.json();
+                if (historyData.history && historyData.history.length > 0) {
+                  const lastLevelUp = historyData.history[0];
+                  const levelUpTime = new Date(lastLevelUp.created_at).getTime();
+                  const now = Date.now();
+                  
+                  // Если уровень повышен в последние 10 секунд, показываем confetti
+                  if (now - levelUpTime < 10000) {
+                    const newLevel = lastLevelUp.new_level;
+                    if (levelColors[newLevel]) {
+                      triggerConfetti(levelColors[newLevel]);
+                    }
+                  }
+                }
+              }
+            } catch (e) {
+              console.log('Не удалось проверить историю уровней');
+            }
+          };
+          
+          // Обновляем данные профиля с реальной геймификацией (ОБНОВЛЕНО ДЛЯ НОВОЙ СИСТЕМЫ)
+          profileData.gamification = {
+            level: gamificationData.currentLevel,
+            levelProgress: gamificationData.levelProgress.progress,
+            nextLevel: gamificationData.nextLevel || 'Diamond',
+            ordersToNext: gamificationData.xpToNext, // Теперь это XP, не заказы
+            xp: gamificationData.xp,
+            xpToNext: gamificationData.xpToNext,
+            achievements: gamificationData.achievements.slice(0, 6) // Первые 6 для превью
+          };
+          
+          // Сохраняем все достижения отдельно для модального окна (ОБНОВЛЕНО ДЛЯ НОВОЙ СИСТЕМЫ)
+          setAllAchievements(gamificationData.achievements.map((ach: any, index: number) => ({
+            id: ach.id ? ach.id.toString() : `achievement_${index}`,
+            key: ach.name ? ach.name.toLowerCase().replace(/[^a-z0-9]/g, '_') : `achievement_${index}`,
+            name: ach.name || `Достижение ${index + 1}`,
+            description: ach.description || '',
+            icon: ach.icon || '🏆',
+            category: ach.category || 'Общие',
+            requirement: ach.requirement || '',
+            unlocked: Boolean(ach.unlocked),
+            unlockedAt: ach.unlocked_at,
+            xpReward: ach.xp_reward || 0
+          })));
+          
+          // Проверяем недавнее повышение уровня
+          await checkRecentLevelUp();
+          
+          console.log('✅ Данные геймификации загружены:', gamificationData);
+        }
+      } catch (gamificationError) {
+        console.error('❌ Ошибка загрузки геймификации:', gamificationError);
+        // Не блокируем профиль, если геймификация не загрузилась
+      }
+      // ========== End Gamification ==========
       
       setProfileData(profileData);
     } catch (err) {
@@ -1670,6 +1799,113 @@ const Profile: React.FC<ProfileProps> = ({ telegramId, isDarkTheme, toggleTheme,
       style: 'currency',
       currency: 'RUB'
     }).format(amount);
+  };
+
+  // =====================================================
+  // НОВЫЕ ФУНКЦИИ ДЛЯ СИСТЕМЫ ДОСТИЖЕНИЙ
+  // =====================================================
+
+  /**
+   * Получение всех достижений пользователя
+   */
+  const fetchUserAchievements = async () => {
+    try {
+      const response = await fetch(`/api/user/achievements/${telegramId}`);
+      const data = await response.json();
+      
+      if (data.success) {
+        setAllAchievements(data.achievements);
+        console.log('✅ Достижения загружены:', data.achievements.length);
+      } else {
+        console.error('Ошибка загрузки достижений:', data.message);
+      }
+    } catch (error) {
+      console.error('Ошибка загрузки достижений:', error);
+    }
+  };
+
+  /**
+   * Получение статистики пользователя
+   */
+  const fetchUserStats = async () => {
+    try {
+      const response = await fetch(`/api/user/stats/${telegramId}`);
+      const data = await response.json();
+      
+      if (data.success) {
+        console.log('✅ Статистика загружена:', data.stats);
+        return data.stats;
+      } else {
+        console.error('Ошибка загрузки статистики:', data.message);
+      }
+    } catch (error) {
+      console.error('Ошибка загрузки статистики:', error);
+    }
+  };
+
+  /**
+   * Ежедневный вход с начислением XP
+   */
+  const handleDailyLogin = async () => {
+    try {
+      const response = await fetch('/api/daily-login', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ telegramId }),
+      });
+      
+      const data = await response.json();
+      
+      if (data.success) {
+        console.log('✅ Ежедневный вход засчитан:', data);
+        
+        // Показываем уведомление
+        if (data.achievementsUnlocked > 0) {
+          setSuccess(`🎉 Разблокировано ${data.achievementsUnlocked} достижений!`);
+        }
+        
+        if (data.levelUp) {
+          setSuccess(`🎊 Повышение уровня! ${data.levelUp.oldLevel} → ${data.levelUp.newLevel}`);
+          triggerConfetti(['#FFD700', '#FFA500', '#FF6B35']);
+        }
+        
+        // Обновляем данные профиля
+        await fetchProfileData();
+      } else {
+        console.error('Ошибка ежедневного входа:', data.message);
+      }
+    } catch (error) {
+      console.error('Ошибка ежедневного входа:', error);
+    }
+  };
+
+  /**
+   * Группировка достижений по категориям
+   */
+  const groupAchievementsByCategory = (achievements: Achievement[]) => {
+    return achievements.reduce((acc, achievement) => {
+      if (!acc[achievement.category]) {
+        acc[achievement.category] = [];
+      }
+      acc[achievement.category].push(achievement);
+      return acc;
+    }, {} as { [key: string]: Achievement[] });
+  };
+
+  /**
+   * Получение иконки категории
+   */
+  const getCategoryIcon = (category: string) => {
+    const icons: { [key: string]: string } = {
+      'Заказы': '🛍️',
+      'Юани': '💰',
+      'Рефералы': '🤝',
+      'Активность': '⚡',
+      'Экономия': '💸'
+    };
+    return icons[category] || '🏆';
   };
 
   // Функция для проверки пароля
@@ -1803,6 +2039,18 @@ const Profile: React.FC<ProfileProps> = ({ telegramId, isDarkTheme, toggleTheme,
 
   return (
     <ProfileContainer $isDark={isDarkTheme}>
+      {/* Confetti Animation */}
+      {showConfetti && (
+        <Confetti
+          width={window.innerWidth}
+          height={window.innerHeight}
+          recycle={false}
+          numberOfPieces={window.innerWidth < 768 ? 100 : 200}
+          colors={confettiColors}
+          gravity={0.3}
+        />
+      )}
+      
       <BackgroundHieroglyphs>
         <Hieroglyph>龍</Hieroglyph>
         <Hieroglyph>福</Hieroglyph>
@@ -1868,8 +2116,11 @@ const Profile: React.FC<ProfileProps> = ({ telegramId, isDarkTheme, toggleTheme,
                 : telegramUser?.first_name || profileData.user.full_name || 'Пользователь'
               }
             </UserName>
-            <UserId>ID: {profileData.user.telegram_id}</UserId>
-            <div style={{ fontSize: '12px', color: 'var(--text-accent)' }}>
+            <UserId $isDark={isDarkTheme}>ID: {profileData.user.telegram_id}</UserId>
+            <div style={{ 
+              fontSize: '12px', 
+              color: isDarkTheme ? 'var(--text-accent)' : 'var(--text-secondary)' 
+            }}>
               Участник с {formatDate(profileData.user.created_at)}
             </div>
           </UserDetails>
@@ -1937,55 +2188,84 @@ const Profile: React.FC<ProfileProps> = ({ telegramId, isDarkTheme, toggleTheme,
           />
         </ProgressBar>
         
-        {profileData.gamification.ordersToNext > 0 && (
+        <div style={{ 
+          marginTop: '12px', 
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '8px'
+        }}>
+          {/* XP информация */}
           <div style={{ 
-            marginTop: '12px', 
             fontSize: '14px', 
-            color: 'var(--text-secondary)',
-            textAlign: 'center'
+            color: 'var(--text-primary)',
+            textAlign: 'center',
+            fontWeight: '600'
           }}>
-            До следующего уровня: {profileData.gamification.ordersToNext} заказов
+            ✨ {profileData.gamification.xp || 0} XP
+            {profileData.gamification.xpToNext && profileData.gamification.xpToNext > 0 && (
+              <span style={{ color: 'var(--text-secondary)', fontWeight: '400', marginLeft: '8px' }}>
+                (+{profileData.gamification.xpToNext} XP до {profileData.gamification.nextLevel})
+              </span>
+            )}
           </div>
-        )}
+          
+        </div>
       </LevelCard>
 
-      {profileData.gamification.achievements.length > 0 && (
-        <AchievementsSection $isDark={isDarkTheme}>
-          <SectionTitle>
-            🏆 Достижения
-          </SectionTitle>
-          <AchievementsGrid>
-            {profileData.gamification.achievements.map((achievement) => (
-              <AchievementItem 
-                key={achievement.id} 
-                $isDark={isDarkTheme}
-              >
-                <AchievementIcon $unlocked={achievement.unlocked}>{achievement.icon}</AchievementIcon>
-                <AchievementName $unlocked={achievement.unlocked}>{achievement.name}</AchievementName>
-              </AchievementItem>
-            ))}
-          </AchievementsGrid>
-          <ViewAllButton 
-            $isDark={isDarkTheme}
-            onClick={() => {
-              setAchievementsModalPosition({
-                top: '50%',
-                transform: 'translateY(-50%)'
-              });
-              
-              setShowAchievements(true);
-              onModalStateChange?.(true);
-              
-              // Фиксируем скролл страницы при открытии модального окна
-              document.body.style.overflow = 'hidden';
-              document.body.style.position = 'fixed';
-              document.body.style.width = '100%';
-            }}
-          >
-            Посмотреть все достижения
-          </ViewAllButton>
-        </AchievementsSection>
-      )}
+      <AchievementsSection $isDark={isDarkTheme}>
+        <SectionTitle>
+          🏆 Достижения
+        </SectionTitle>
+        {(() => {
+          // Фильтруем только разблокированные достижения
+          const unlockedAchievements = profileData.gamification.achievements.filter(achievement => achievement.unlocked);
+          
+          if (unlockedAchievements.length === 0) {
+            // Если нет разблокированных достижений, показываем сообщение
+            return (
+              <NoAchievementsMessage $isDark={isDarkTheme}>
+                <NoAchievementsIcon>🎯</NoAchievementsIcon>
+                <NoAchievementsText $isDark={isDarkTheme}>Получите свое первое достижение!</NoAchievementsText>
+                <NoAchievementsSubtext $isDark={isDarkTheme}>Сделайте заказ или приведите реферала, чтобы разблокировать достижения</NoAchievementsSubtext>
+              </NoAchievementsMessage>
+            );
+          }
+          
+          // Показываем только разблокированные достижения
+          return (
+            <AchievementsGrid>
+              {unlockedAchievements.map((achievement, index) => (
+                <AchievementItem 
+                  key={achievement.id || achievement.name || index} 
+                  $isDark={isDarkTheme}
+                >
+                  <AchievementIcon $unlocked={achievement.unlocked}>{achievement.icon}</AchievementIcon>
+                  <AchievementName $unlocked={achievement.unlocked}>{achievement.name}</AchievementName>
+                </AchievementItem>
+              ))}
+            </AchievementsGrid>
+          );
+        })()}
+        <ViewAllButton 
+          $isDark={isDarkTheme}
+          onClick={() => {
+            setAchievementsModalPosition({
+              top: '50%',
+              transform: 'translateY(-50%)'
+            });
+            
+            setShowAchievements(true);
+            onModalStateChange?.(true);
+            
+            // Фиксируем скролл страницы при открытии модального окна
+            document.body.style.overflow = 'hidden';
+            document.body.style.position = 'fixed';
+            document.body.style.width = '100%';
+          }}
+        >
+          Посмотреть все достижения
+        </ViewAllButton>
+      </AchievementsSection>
 
       {/* Заказы в пути */}
       {userOrders && userOrders.length > 0 && (
@@ -2175,9 +2455,9 @@ const Profile: React.FC<ProfileProps> = ({ telegramId, isDarkTheme, toggleTheme,
                       <CategorySection key={category}>
                         <CategoryTitle>{category}</CategoryTitle>
                         <ModalAchievementsGrid>
-                          {categoryAchievements.map((achievement) => (
+                                          {categoryAchievements.map((achievement, index) => (
                             <ModalAchievementCard
-                              key={achievement.id}
+                              key={achievement.id || achievement.name || index}
                               $isDark={isDarkTheme}
                               $unlocked={achievement.unlocked}
                               onClick={() => {
@@ -2199,7 +2479,7 @@ const Profile: React.FC<ProfileProps> = ({ telegramId, isDarkTheme, toggleTheme,
                                 </ModalAchievementContent>
                               </ModalAchievementHeader>
                               <ModalAchievementRequirement>
-                                {achievement.requirement}
+                                {achievement.unlocked ? `✅ Разблокировано! +${achievement.xpReward || 0} XP` : `${achievement.requirement} (+${achievement.xpReward || 0} XP)`}
                               </ModalAchievementRequirement>
                             </ModalAchievementCard>
                           ))}

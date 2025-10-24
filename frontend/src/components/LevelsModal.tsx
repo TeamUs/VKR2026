@@ -7,13 +7,8 @@ interface Level {
   description: string;
   icon: string;
   color: string;
-  requirements: {
-    orders: number;
-    referrals: number;
-    yuanSpent: number;
-  };
+  xpRequired: number;
   rewards: string[];
-  benefits: string[];
 }
 
 interface LevelsModalProps {
@@ -234,121 +229,59 @@ const LevelsModal: React.FC<LevelsModalProps> = ({
   const levels: Level[] = [
     {
       id: 'bronze',
-      name: 'Бронзовый',
+      name: 'Bronze',
       description: 'Начинающий покупатель',
       icon: '🥉',
       color: '#CD7F32',
-      requirements: {
-        orders: 0,
-        referrals: 0,
-        yuanSpent: 0
-      },
+      xpRequired: 0,
       rewards: [
-        'Добро пожаловать в Poizonic!',
-        'Базовые скидки на товары'
-      ],
-      benefits: [
-        'Доступ к каталогу товаров',
-        'Базовая поддержка клиентов',
-        'Стандартная доставка'
+        'Первый заказ без комиссии за оформление'
       ]
     },
     {
       id: 'silver',
-      name: 'Серебряный',
+      name: 'Silver',
       description: 'Постоянный клиент',
       icon: '🥈',
       color: '#C0C0C0',
-      requirements: {
-        orders: 6,
-        referrals: 1,
-        yuanSpent: 10000
-      },
+      xpRequired: 1000,
       rewards: [
-        'Скидка 3% на все заказы',
-        'Приоритетная поддержка',
-        'Бонус 100₽ за реферала'
-      ],
-      benefits: [
-        'Ускоренная доставка',
-        'Эксклюзивные предложения',
-        'Персональные рекомендации'
+        'Комиссия 900₽ навсегда (вместо 1000₽)'
       ]
     },
     {
       id: 'gold',
-      name: 'Золотой',
+      name: 'Gold',
       description: 'VIP клиент',
       icon: '🥇',
       color: '#FFD700',
-      requirements: {
-        orders: 21,
-        referrals: 5,
-        yuanSpent: 50000
-      },
+      xpRequired: 5000,
       rewards: [
-        'Скидка 5% на все заказы',
-        'Персональный менеджер',
-        'Бонус 200₽ за реферала',
-        'Эксклюзивные товары'
-      ],
-      benefits: [
-        'Экспресс доставка',
-        'Ранний доступ к новинкам',
-        'Персональные скидки',
-        'VIP статус'
+        'Комиссия 700₽ навсегда (вместо 1000₽)'
       ]
     },
     {
       id: 'platinum',
-      name: 'Платиновый',
+      name: 'Platinum',
       description: 'Премиум клиент',
       icon: '💎',
       color: '#E5E4E2',
-      requirements: {
-        orders: 50,
-        referrals: 10,
-        yuanSpent: 100000
-      },
+      xpRequired: 25000,
       rewards: [
-        'Скидка 7% на все заказы',
-        'Персональный консультант',
-        'Бонус 500₽ за реферала',
-        'Эксклюзивные коллекции',
-        'Приглашения на мероприятия'
-      ],
-      benefits: [
-        'Бесплатная доставка',
-        'Эксклюзивный доступ',
-        'Персональные предложения',
-        'Приоритет в очереди'
+        'Комиссия 400₽ навсегда (вместо 1000₽)'
       ]
     },
     {
       id: 'diamond',
-      name: 'Бриллиантовый',
+      name: 'Diamond',
       description: 'Легендарный клиент',
       icon: '💠',
       color: '#B9F2FF',
-      requirements: {
-        orders: 100,
-        referrals: 20,
-        yuanSpent: 250000
-      },
+      xpRequired: 100000,
       rewards: [
-        'Скидка 10% на все заказы',
-        'Персональный ассистент',
-        'Бонус 1000₽ за реферала',
-        'Эксклюзивные лимитированные товары',
-        'Приглашения на закрытые мероприятия',
-        'Персональные подарки'
-      ],
-      benefits: [
-        'Мгновенная доставка',
-        'Эксклюзивный доступ к новинкам',
-        'Персональные коллекции',
-        'Приоритет во всем',
-        'Статус легенды'
+        'Комиссия 0₽ навсегда (полное освобождение)',
+        'Специальные предложения на покупку юаней',
+        'Повышенные бонусы для рефералов'
       ]
     }
   ];
@@ -409,14 +342,26 @@ const LevelsModal: React.FC<LevelsModalProps> = ({
                   📋 Требования:
                 </RequirementsTitle>
                 <RequirementItem $isCurrent={level.id === currentLevel.toLowerCase()}>
-                  • {level.requirements.orders} заказов
+                  • {level.xpRequired.toLocaleString()} XP
                 </RequirementItem>
-                <RequirementItem $isCurrent={level.id === currentLevel.toLowerCase()}>
-                  • {level.requirements.referrals} рефералов
-                </RequirementItem>
-                <RequirementItem $isCurrent={level.id === currentLevel.toLowerCase()}>
-                  • {level.requirements.yuanSpent.toLocaleString()}₽ потрачено на юань
-                </RequirementItem>
+                {level.id === 'bronze' && (
+                  <RequirementItem $isCurrent={level.id === currentLevel.toLowerCase()}>
+                    • Начальный уровень
+                  </RequirementItem>
+                )}
+                {level.id !== 'bronze' && (
+                  <>
+                    <RequirementItem $isCurrent={level.id === currentLevel.toLowerCase()}>
+                      • 100 XP за подтвержденный заказ
+                    </RequirementItem>
+                    <RequirementItem $isCurrent={level.id === currentLevel.toLowerCase()}>
+                      • 50 XP за приведенного реферала
+                    </RequirementItem>
+                    <RequirementItem $isCurrent={level.id === currentLevel.toLowerCase()}>
+                      • 1 XP за каждые 100₽ потраченных на юани
+                    </RequirementItem>
+                  </>
+                )}
               </LevelRequirements>
 
               <LevelRewards $isCurrent={level.id === currentLevel.toLowerCase()}>
@@ -431,17 +376,6 @@ const LevelsModal: React.FC<LevelsModalProps> = ({
                 ))}
               </LevelRewards>
 
-              <LevelRewards $isCurrent={level.id === currentLevel.toLowerCase()}>
-                <RewardsTitle $isCurrent={level.id === currentLevel.toLowerCase()}>
-                  ⭐ Привилегии:
-                </RewardsTitle>
-                {level.benefits.map((benefit, index) => (
-                  <RewardItem key={index} $isCurrent={level.id === currentLevel.toLowerCase()}>
-                    <RewardIcon>🌟</RewardIcon>
-                    {benefit}
-                  </RewardItem>
-                ))}
-              </LevelRewards>
             </LevelCard>
           ))}
         </LevelsList>

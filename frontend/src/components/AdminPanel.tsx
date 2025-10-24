@@ -1478,8 +1478,8 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
     }
 
     const commission = parseFloat(commissionValue);
-    if (isNaN(commission) || commission < 0 || commission > 1) {
-      alert('Комиссия должна быть числом от 0 до 1 (например, 0.05 для 5%)');
+    if (isNaN(commission) || commission < 0 || commission > 1000) {
+      alert('Комиссия должна быть числом от 0 до 1000 (например, 1000 для 1000₽)');
       return;
     }
 
@@ -1664,7 +1664,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
     setSelectedOrderForProfit(order);
     
     // Автоматически заполняем комиссию пользователя (в процентах)
-    setCustomerCommission(((order.commission || 0.05) * 100).toFixed(2));
+    setCustomerCommission((order.commission || 1000).toString());
     
     // Сбрасываем остальные поля
     setCustomerProductCostCny('');
@@ -1700,7 +1700,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
 
     try {
       // Конвертируем в числа
-      const custCommPercent = parseFloat(customerCommission); // Комиссия в процентах (например, 5)
+      const custCommAmount = parseFloat(customerCommission); // Комиссия в рублях (например, 1000)
       const custProdCny = parseFloat(customerProductCostCny);
       const custRate = parseFloat(customerRate);
       const custDel = parseFloat(customerDelivery);
@@ -1712,8 +1712,8 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
       // Расчет стоимости товара для покупателя
       const productCostRub = custProdCny * custRate;
       
-      // Расчет комиссии в рублях (процент от стоимости товара)
-      const custCommRub = productCostRub * (custCommPercent / 100);
+      // Расчет комиссии в рублях (фиксированная сумма)
+      const custCommRub = custCommAmount;
       
       // Расчет суммы от покупателя: стоимость товара + комиссия + доставка
       const custTotal = productCostRub + custCommRub + custDel;
@@ -4163,16 +4163,16 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
 
                 <div>
                   <label style={{ display: 'block', marginBottom: '8px', color: 'var(--text-primary)', fontWeight: 'bold' }}>
-                    Новая комиссия (0.05 = 5%):
+                    Новая комиссия (в рублях):
                   </label>
                   <input
                     type="number"
                     value={commissionValue}
                     onChange={(e) => setCommissionValue(e.target.value)}
-                    placeholder="0.05"
+                    placeholder="1000"
                     min="0"
-                    max="1"
-                    step="0.01"
+                    max="1000"
+                    step="100"
                     style={{
                       width: '100%',
                       padding: '12px',
@@ -4291,7 +4291,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
                   <div style={{ display: 'grid', gap: '12px', marginBottom: '20px' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                       <span>Комиссия:</span>
-                      <span style={{ fontWeight: 'bold' }}>{((userHistory.user.commission || 0) * 100).toFixed(1)}%</span>
+                      <span style={{ fontWeight: 'bold' }}>{userHistory.user.commission || 1000} ₽</span>
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                       <span>Заказов:</span>
@@ -4479,7 +4479,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
                       <MobileCardRow $isDark={isDarkTheme}>
                         <MobileCardLabel $isDark={isDarkTheme}>Комиссия:</MobileCardLabel>
                         <MobileCardValue $isDark={isDarkTheme} style={{ color: 'var(--matte-red)', fontWeight: 'bold' }}>
-                          {((order.commission || 0.05) * 100).toFixed(2)}%
+                          {order.commission || 1000} ₽
                         </MobileCardValue>
                       </MobileCardRow>
                       
@@ -4535,14 +4535,14 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
                           opacity: 0.8,
                           whiteSpace: 'nowrap'
                         }}>
-                          Комиссия (%)
+                          Комиссия (₽)
                         </label>
                         <input
                           type="number"
-                          step="0.01"
+                          step="100"
                           value={customerCommission}
                           onChange={(e) => setCustomerCommission(e.target.value)}
-                          placeholder="5.00"
+                          placeholder="1000"
                           style={{
                             width: '100%',
                             height: '48px',
@@ -6103,7 +6103,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
                           <div>
                             <div style={{ color: 'var(--text-secondary)', marginBottom: '2px' }}>Комиссия реферала</div>
                             <div style={{ color: 'var(--matte-red)', fontWeight: 'bold' }}>
-                              {(referral.referral_commission * 100).toFixed(1)}%
+                              {referral.referral_commission} ₽
                             </div>
                           </div>
                           <div>
