@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import styled, { keyframes, css } from 'styled-components';
 import { HapticFeedback } from '../utils/hapticFeedback';
 import WriteReviewModal from './WriteReviewModal';
+import PurchasesGallery from './PurchasesGallery';
 
 // Минималистичные анимации в стиле главного меню
 const fadeIn = keyframes`
@@ -905,6 +906,12 @@ const Reviews: React.FC<ReviewsProps> = ({ onNavigate, toggleTheme, isDarkTheme,
           </WriteReviewButton>
         </Section>
       </WriteReviewCard>
+
+      {/* Галерея выкупов */}
+      <PurchasesGallery 
+        isDarkTheme={isDarkTheme} 
+        onModalStateChange={onModalStateChange}
+      />
 
       {/* Средняя оценка */}
       {averageRating > 0 && (

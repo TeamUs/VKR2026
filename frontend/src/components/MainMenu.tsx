@@ -333,12 +333,12 @@ const MenuButton = styled.button<{ $variant?: 'primary' | 'secondary'; $isDark: 
     bottom: 0;
     background: ${props => props.$variant === 'primary' 
       ? 'linear-gradient(45deg, var(--matte-red), var(--terracotta), var(--dark-beige))'
-      : 'linear-gradient(45deg, var(--dark-beige), var(--terracotta), var(--matte-red))'};
+      : 'transparent'};
     border-radius: 16px;
     padding: 1px;
     mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
     mask-composite: exclude;
-    opacity: 0;
+    opacity: ${props => props.$variant === 'primary' ? 0 : 0};
     transition: opacity 0.4s ease;
   }
   
@@ -350,12 +350,12 @@ const MenuButton = styled.button<{ $variant?: 'primary' | 'secondary'; $isDark: 
     background: ${props => props.$variant === 'primary' 
       ? 'var(--terracotta)' 
       : 'rgba(164, 151, 132, 0.3)'};
-    border-color: var(--matte-red);
+    border-color: ${props => props.$variant === 'primary' ? 'var(--matte-red)' : 'var(--border-color)'};
     color: ${props => props.$variant === 'primary' ? 'var(--bg-primary)' : 'var(--text-primary)'};
   }
   
   &:hover::before {
-    opacity: 1;
+    opacity: ${props => props.$variant === 'primary' ? 1 : 0};
   }
   
   &:active {
@@ -363,6 +363,24 @@ const MenuButton = styled.button<{ $variant?: 'primary' | 'secondary'; $isDark: 
     box-shadow: 
       0 8px 30px var(--shadow-card),
       0 4px 15px var(--shadow-soft);
+  }
+  
+  &:focus {
+    outline: none;
+    transform: translateY(0) scale(1);
+    box-shadow: 
+      0 4px 20px var(--shadow-card),
+      0 2px 8px var(--shadow-soft);
+  }
+  
+  &:not(:hover):not(:focus):not(:active) {
+    transform: translateY(0) scale(1);
+    background: ${props => props.$variant === 'primary' 
+      ? 'var(--matte-red)' 
+      : props.$isDark ? 'rgba(42, 42, 42, 0.8)' : 'rgba(230, 211, 179, 0.8)'};
+    box-shadow: 
+      0 4px 20px var(--shadow-card),
+      0 2px 8px var(--shadow-soft);
   }
 `;
 
@@ -560,7 +578,18 @@ const MainMenu: React.FC<MainMenuProps> = ({ onNavigate, toggleTheme, isDarkThem
             <ChineseAccent>福</ChineseAccent>
           </MenuButton>
           
-          <MenuButton $isDark={isDarkTheme} onClick={() => handleButtonClick('calculator')}>
+          <MenuButton 
+            $variant="secondary" 
+            $isDark={isDarkTheme} 
+            onClick={() => handleButtonClick('calculator')}
+            style={{
+              transform: 'translateY(0) scale(1)',
+              boxShadow: '0 4px 20px var(--shadow-card), 0 2px 8px var(--shadow-soft)',
+              background: isDarkTheme ? 'rgba(42, 42, 42, 0.8)' : 'rgba(230, 211, 179, 0.8)',
+              borderColor: 'var(--border-color)',
+              color: 'var(--text-primary)'
+            }}
+          >
             <ButtonIcon>💰</ButtonIcon>
             <ButtonText>Расчет стоимости</ButtonText>
             <ChineseAccent>財</ChineseAccent>

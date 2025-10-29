@@ -148,7 +148,7 @@ const Button = styled.button<{ $variant?: 'primary' | 'secondary' }>`
   font-size: 1rem;
   font-weight: 600;
   cursor: pointer;
-  transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: none;
   position: relative;
   z-index: 10;
   pointer-events: auto;
@@ -156,43 +156,44 @@ const Button = styled.button<{ $variant?: 'primary' | 'secondary' }>`
   
   ${props => props.$variant === 'primary' 
     ? css`
-      background: var(--matte-red);
+      background: var(--matte-red) !important;
       color: var(--bg-primary);
       box-shadow: 
         0 4px 12px var(--shadow-soft),
-        0 2px 6px var(--shadow-card);
-      
-      &:hover {
-        transform: translateY(-3px);
-        background: var(--terracotta);
-        box-shadow: 
-          0 8px 20px var(--shadow-card),
-          0 4px 12px var(--shadow-soft);
-        border-color: var(--matte-red);
-      }
+        0 2px 6px var(--shadow-card) !important;
+      transform: translateY(0) !important;
     `
     : css`
-      background: var(--bg-card);
+      background: var(--bg-card) !important;
       color: var(--text-primary);
       box-shadow: 
         0 4px 12px var(--shadow-soft),
-        0 2px 6px var(--shadow-card);
-      
-      &:hover {
-        transform: translateY(-3px);
-        background: var(--sand);
-        box-shadow: 
-          0 8px 20px var(--shadow-card),
-          0 4px 12px var(--shadow-soft);
-        border-color: var(--matte-red);
-      }
+        0 2px 6px var(--shadow-card) !important;
+      transform: translateY(0) !important;
     `
   }
   
   &:disabled {
     opacity: 0.6;
     cursor: not-allowed;
-    transform: none !important;
+    transform: translateY(0) !important;
+  }
+  
+  &:active {
+    transform: translateY(1px) !important;
+    box-shadow: 
+      0 1px 3px var(--shadow-soft),
+      0 1px 2px var(--shadow-card) !important;
+    background: var(--terracotta) !important;
+  }
+  
+  &:focus {
+    outline: none;
+    transform: translateY(0) !important;
+    box-shadow: 
+      0 4px 12px var(--shadow-soft),
+      0 2px 6px var(--shadow-card) !important;
+    background: var(--matte-red) !important;
   }
 `;
 
@@ -905,8 +906,25 @@ const PriceCalculator: React.FC<PriceCalculatorProps> = ({ onNavigate, toggleThe
     { value: 'accessories_perfume', label: '👜 Аксессуары и духи', weight: 1.0 }
   ];
 
+  const resetButton = () => {
+    const button = document.querySelector('button[type="button"]') as HTMLButtonElement;
+    if (button) {
+      button.blur();
+      // Принудительно сбрасываем все стили к исходному состоянию
+      button.style.transform = 'translateY(0)';
+      button.style.boxShadow = '0 4px 12px var(--shadow-soft), 0 2px 6px var(--shadow-card)';
+      button.style.background = 'var(--matte-red)';
+      // Принудительно перерисовываем элемент
+      button.offsetHeight;
+    }
+  };
+
   const handleCalculate = async () => {
     await handleManualCalculate();
+    // Принудительно сбрасываем состояние кнопки после расчета
+    setTimeout(() => {
+      resetButton();
+    }, 10);
   };
 
   const handleManualCalculate = async () => {
@@ -1167,6 +1185,15 @@ const PriceCalculator: React.FC<PriceCalculatorProps> = ({ onNavigate, toggleThe
 
         <Button 
           onClick={handleCalculate} 
+          onMouseUp={resetButton}
+          onTouchStart={(e) => {
+            // Показываем активное состояние при касании
+            e.currentTarget.style.transform = 'translateY(1px)';
+            e.currentTarget.style.boxShadow = '0 1px 3px var(--shadow-soft), 0 1px 2px var(--shadow-card)';
+            e.currentTarget.style.background = 'var(--terracotta)';
+          }}
+          onTouchEnd={resetButton}
+          onTouchCancel={resetButton}
           $variant="primary"
           disabled={isLoading}
         >
