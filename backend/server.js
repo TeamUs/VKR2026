@@ -820,6 +820,23 @@ app.post('/api/calculate-price', async (req, res) => {
     const commissionAmount = Math.round(finalCommission); // Округляем до целых рублей
     const totalCost = itemCostRub + commissionAmount + deliveryCost;
 
+    // Обновляем статистику пользователя: увеличиваем счетчик расчетов
+    if (telegramId && dbConnection) {
+      try {
+        await dbConnection.execute(
+          `UPDATE users 
+           SET calculation_count = calculation_count + 1,
+               last_calculation_date = NOW(),
+               last_activity = NOW()
+           WHERE telegram_id = ?`,
+          [telegramId]
+        );
+      } catch (updateError) {
+        console.error('Ошибка обновления счетчика расчетов:', updateError);
+        // Не прерываем выполнение, если не удалось обновить статистику
+      }
+    }
+
     const result = {
       originalPrice: parseFloat(price),
       priceInRubles: parseFloat(itemCostRub.toFixed(2)),
@@ -1213,6 +1230,15 @@ app.post('/api/referral', async (req, res) => {
           referredBy: referralId,
           commission: 400
         });
+
+        // Обновляем статистику реферера: увеличиваем счетчик рефералов
+        await dbConnection.execute(
+          `UPDATE users 
+           SET total_referrals = total_referrals + 1,
+               last_activity = NOW()
+           WHERE telegram_id = ?`,
+          [referralId]
+        );
 
         // Логируем активность реферера
         await logUserActivity(referralId, 'referral_success', {
@@ -1717,25 +1743,34 @@ app.get('/api/profile', async (req, res) => {
     
     const user = userRows[0];
     
-    // Получаем статистику заказов
+    // Получаем статистику из users (обновляется в реальном времени)
+    const [userStats] = await dbConnection.execute(`
+      SELECT 
+        total_orders,
+        total_referrals,
+        total_yuan_bought,
+        total_savings
+      FROM users 
+      WHERE telegram_id = ?
+    `, [telegram_id]);
+    
+    // Получаем статистику заказов (для completed_orders)
     const [orderStats] = await dbConnection.execute(`
       SELECT 
-        COUNT(*) as total_orders,
         COALESCE(SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END), 0) as completed_orders
       FROM orders 
       WHERE telegram_id = ?
     `, [telegram_id]);
     
-    // Получаем статистику рефералов
+    // Получаем статистику рефералов (для clicks)
     const [referralStats] = await dbConnection.execute(`
       SELECT 
-        COUNT(*) as total_referrals,
         COALESCE(SUM(clicks), 0) as total_clicks
       FROM referrals 
       WHERE referred_by = ?
     `, [telegram_id]);
     
-    // Получаем статистику покупок юаня
+    // Получаем статистику покупок юаня (для сумм)
     const [yuanStats] = await dbConnection.execute(`
       SELECT 
         COUNT(*) as total_purchases,
@@ -1745,14 +1780,13 @@ app.get('/api/profile', async (req, res) => {
       FROM yuan_purchases 
       WHERE telegram_id = ? AND status = 'completed'
     `, [telegram_id]);
-
+    
     // Получаем экономию от заказов
     const [orderSavingsStats] = await dbConnection.execute(`
       SELECT 
-        COUNT(*) as total_orders,
         COALESCE(SUM(estimated_savings), 0) as total_order_savings
       FROM orders 
-      WHERE telegram_id = ?
+      WHERE telegram_id = ? AND status = 'completed'
     `, [telegram_id]);
 
     // Получаем данные геймификации из новой системы
@@ -1806,6 +1840,9 @@ app.get('/api/profile', async (req, res) => {
       }
     }
     
+    // Формируем ответ с правильными данными
+    const stats = userStats[0] || { total_orders: 0, total_referrals: 0, total_yuan_bought: 0, total_savings: 0 };
+    
     res.json({
       user: {
         telegram_id: user.telegram_id,
@@ -1817,14 +1854,27 @@ app.get('/api/profile', async (req, res) => {
         avatar_url: user.avatar_url
       },
       statistics: {
-        orders: orderStats[0],
-        referrals: referralStats[0],
-        yuan_purchases: yuanStats[0],
-        order_savings: orderSavingsStats[0],
+        orders: {
+          total_orders: stats.total_orders || 0,
+          completed_orders: orderStats[0]?.completed_orders || 0
+        },
+        referrals: {
+          total_referrals: stats.total_referrals || 0,
+          total_clicks: referralStats[0]?.total_clicks || 0
+        },
+        yuan_purchases: {
+          total_purchases: yuanStats[0]?.total_purchases || 0,
+          total_spent_rub: yuanStats[0]?.total_spent_rub || 0,
+          total_bought_cny: yuanStats[0]?.total_bought_cny || 0,
+          total_savings: yuanStats[0]?.total_savings || 0
+        },
+        order_savings: {
+          total_order_savings: orderSavingsStats[0]?.total_order_savings || 0
+        },
         total_savings: {
-          yuan_savings: yuanStats[0].total_savings || 0,
-          order_savings: orderSavingsStats[0].total_order_savings || 0,
-          total: (yuanStats[0].total_savings || 0) + (orderSavingsStats[0].total_order_savings || 0)
+          yuan_savings: yuanStats[0]?.total_savings || 0,
+          order_savings: orderSavingsStats[0]?.total_order_savings || 0,
+          total: stats.total_savings || 0
         }
       },
       gamification: gamificationData
@@ -2819,31 +2869,34 @@ async function updateUserStatsAfterConfirmation(telegramId, orderId, type) {
         // Обновляем статистику пользователя
         await dbConnection.execute(`
           UPDATE users 
-          SET total_savings = total_savings + ?,
+          SET total_orders = total_orders + 1,
+              total_savings = total_savings + ?,
               last_activity = NOW()
           WHERE telegram_id = ?
         `, [savings, telegramId]);
         
-        console.log(`✅ Обновлена статистика пользователя ${telegramId}: +${savings} руб. экономии`);
+        console.log(`✅ Обновлена статистика пользователя ${telegramId}: +1 заказ, +${savings} руб. экономии`);
       }
     } else if (type === 'yuan') {
       // Получаем данные покупки юаней
       const [yuanData] = await dbConnection.execute(`
-        SELECT savings FROM yuan_purchases WHERE id = ? AND telegram_id = ?
+        SELECT amount_cny, savings FROM yuan_purchases WHERE id = ? AND telegram_id = ?
       `, [orderId, telegramId]);
       
       if (yuanData.length > 0) {
+        const amountCny = yuanData[0].amount_cny || 0;
         const savings = yuanData[0].savings || 0;
         
         // Обновляем статистику пользователя
         await dbConnection.execute(`
           UPDATE users 
           SET total_savings = total_savings + ?,
+              total_yuan_bought = total_yuan_bought + ?,
               last_activity = NOW()
           WHERE telegram_id = ?
-        `, [savings, telegramId]);
+        `, [savings, amountCny, telegramId]);
         
-        console.log(`✅ Обновлена статистика пользователя ${telegramId}: +${savings} руб. экономии`);
+        console.log(`✅ Обновлена статистика пользователя ${telegramId}: +${amountCny} CNY, +${savings} руб. экономии`);
         
         // Обновляем достижения и уровни
         await updateUserAchievementsAndLevels(telegramId, type);

@@ -393,13 +393,13 @@ class GamificationService {
     await this.init();
     const unlocked = [];
 
-    // Get order count
+    // Get order count from users table (учитываются только подтвержденные заказы)
     const [orderStats] = await this.pool.query(
-      'SELECT COUNT(*) as total FROM orders WHERE telegram_id = ?',
+      'SELECT total_orders FROM users WHERE telegram_id = ?',
       [telegramId]
     );
 
-    const totalOrders = orderStats[0].total;
+    const totalOrders = orderStats[0]?.total_orders || 0;
 
     // Dragon Newbie - First order
     if (totalOrders === 1) {
@@ -466,13 +466,13 @@ class GamificationService {
     await this.init();
     const unlocked = [];
 
-    // Get referral count
+    // Get referral count from users table (updated immediately when referral registers)
     const [referralStats] = await this.pool.query(
-      'SELECT COUNT(*) as total FROM users WHERE referred_by = ?',
+      'SELECT total_referrals FROM users WHERE telegram_id = ?',
       [referrerId]
     );
 
-    const totalReferrals = referralStats[0].total;
+    const totalReferrals = referralStats[0]?.total_referrals || 0;
 
     // Golden Chain - First active referral
     const [activeReferrals] = await this.pool.query(
