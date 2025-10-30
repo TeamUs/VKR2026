@@ -1,19 +1,60 @@
 const express = require('express');
 const cors = require('cors');
 const mysql = require('mysql2/promise');
-const cheerio = require('cheerio');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 const https = require('https');
+const axios = require('axios');
 // Используем встроенный fetch в Node.js 18+
-require('dotenv').config();
+
+// Загружаем переменные окружения
+const envPath = path.join(__dirname, '.env');
+const result = require('dotenv').config({ path: envPath });
+
+if (result.error) {
+  console.error('❌ Ошибка загрузки .env файла:', result.error);
+  process.exit(1);
+}
+
+// Нормализация возможного BOM у первого ключа (например, \uFEFFMANAGER_TELEGRAM_ID)
+// Такое бывает, если файл .env сохранён с BOM и ключ стоит на первой строке
+if (!process.env.MANAGER_TELEGRAM_ID) {
+  const weirdKey = Object.keys(process.env).find((k) => k.endsWith('MANAGER_TELEGRAM_ID'));
+  if (weirdKey && weirdKey !== 'MANAGER_TELEGRAM_ID') {
+    process.env.MANAGER_TELEGRAM_ID = process.env[weirdKey];
+  }
+}
+
+// ============================================
+// ВАЛИДАЦИЯ ПЕРЕМЕННЫХ ОКРУЖЕНИЯ
+// ============================================
+const requiredEnvVars = [
+  'BOT_TOKEN',
+  'MANAGER_TELEGRAM_ID',
+  'DB_HOST',
+  'DB_USER',
+  'DB_PASSWORD',
+  'DB_NAME'
+];
+
+const missingVars = requiredEnvVars.filter(key => !process.env[key] || process.env[key].trim() === '');
+
+if (missingVars.length > 0) {
+  console.error('❌ ОШИБКА: Отсутствуют обязательные переменные окружения:');
+  missingVars.forEach(key => {
+    console.error(`   - ${key}`);
+  });
+  console.error('\n📝 Пожалуйста, создайте файл .env на основе env.example');
+  console.error('    и заполните все обязательные переменные.\n');
+  process.exit(1);
+}
 
 // Gamification System
 const { GamificationService, LEVELS, LEVEL_REWARDS, XP_RULES } = require('./gamification');
 
 // Scheduler for daily notifications
-const { startScheduler, testNotification, checkExpiredDiscounts } = require('./scheduler');
+const { startScheduler, testNotification, checkExpiredDiscounts, checkDiscountsExpiringSoon } = require('./scheduler');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -60,8 +101,8 @@ let gamificationService = null;
 
 // Функция отправки сообщения менеджеру
 async function sendManagerMessage(message) {
-  const botToken = process.env.BOT_TOKEN || '8113129973:AAHePXZqOW2MnajUEnporDpoYULAEyX1N_8';
-  const managerChatId = process.env.MANAGER_CHAT_ID || '7696515351';
+  const botToken = process.env.BOT_TOKEN;
+  const managerChatId = process.env.MANAGER_CHAT_ID || process.env.MANAGER_TELEGRAM_ID;
   
   if (!botToken || !managerChatId) {
     console.log('⚠️ BOT_TOKEN или MANAGER_CHAT_ID не настроены, сообщение не отправлено');
@@ -119,9 +160,7 @@ async function sendManagerMessage(message) {
 async function testBotPermissions() {
   try {
     const channelId = '-1002499442701';
-    const botToken = process.env.BOT_TOKEN || '8113129973:AAHePXZqOW2MnajUEnporDpoYULAEyX1N_8';
-    
-    console.log('🔍 Проверяем права бота в канале...');
+    const botToken = process.env.BOT_TOKEN;
     
     // Проверяем информацию о канале
     const getChatUrl = `https://api.telegram.org/bot${botToken}/getChat`;
@@ -132,8 +171,6 @@ async function testBotPermissions() {
     });
     
     if (response.ok) {
-      const chatInfo = await response.json();
-      console.log('✅ Бот имеет доступ к каналу:', chatInfo.result.title);
       return true;
     } else {
       const error = await response.text();
@@ -175,11 +212,8 @@ async function sendReviewToFeedbackChannel(reviewData, userInfo) {
       }
     } else {
       // Отправляем только текст
-      console.log('📝 Отправляем текст в канал');
       await sendTelegramMessage(channelId, message);
     }
-    
-    console.log('✅ Отзыв успешно отправлен в канал отзывов');
   } catch (error) {
     console.error('❌ Ошибка отправки отзыва в канал:', error);
   }
@@ -187,7 +221,7 @@ async function sendReviewToFeedbackChannel(reviewData, userInfo) {
 
 // Функция отправки фото в Telegram по URL
 async function sendTelegramPhoto(chatId, photoUrl, caption = '') {
-  const botToken = process.env.BOT_TOKEN || '8113129973:AAHePXZqOW2MnajUEnporDpoYULAEyX1N_8';
+  const botToken = BOT_TOKEN;
   const telegramApiUrl = `https://api.telegram.org/bot${botToken}/sendPhoto`;
   
   const response = await fetch(telegramApiUrl, {
@@ -220,7 +254,7 @@ async function sendTelegramPhoto(chatId, photoUrl, caption = '') {
 
 // Функция отправки текстового сообщения в Telegram
 async function sendTelegramMessage(chatId, message) {
-  const botToken = process.env.BOT_TOKEN || '8113129973:AAHePXZqOW2MnajUEnporDpoYULAEyX1N_8';
+  const botToken = BOT_TOKEN;
   const telegramApiUrl = `https://api.telegram.org/bot${botToken}/sendMessage`;
   
   const response = await fetch(telegramApiUrl, {
@@ -278,8 +312,6 @@ async function connectDB() {
       }
     });
     
-    console.log('✅ База данных подключена успешно (UTF8MB4 активирован)');
-    
     // Initialize Gamification Service
     if (!gamificationService) {
       const dbConfig = {
@@ -296,7 +328,6 @@ async function connectDB() {
       };
       gamificationService = new GamificationService(dbConfig);
       await gamificationService.init();
-      console.log('✅ Gamification Service инициализирован');
     }
   } catch (error) {
     console.error('❌ Ошибка подключения к базе данных:', error);
@@ -310,6 +341,28 @@ async function ensureDBConnection() {
   try {
     if (!dbConnection || dbConnection.state === 'disconnected' || dbConnection.state === 'protocol_error') {
       console.log('🔄 Переподключение к базе данных...');
+      
+      // Отправляем уведомление админу о сбое БД
+      try {
+        const botToken = process.env.BOT_TOKEN;
+        const managerChatId = process.env.MANAGER_CHAT_ID || process.env.MANAGER_TELEGRAM_ID;
+        
+        if (botToken && managerChatId) {
+          const errorMessage = `🚨 <b>ПРОБЛЕМА С БД</b>\n\n` +
+            `⚠️ <b>Статус:</b> Соединение с базой данных разорвано\n\n` +
+            `🔄 <b>Действие:</b> Попытка переподключения...\n\n` +
+            `📅 <b>Время:</b> ${new Date().toLocaleString('ru-RU')}`;
+          
+          await axios.post(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+            chat_id: managerChatId,
+            text: errorMessage,
+            parse_mode: 'HTML'
+          }).catch(() => {});
+        }
+      } catch (notifyError) {
+        console.error('❌ Не удалось отправить уведомление о сбое БД:', notifyError);
+      }
+      
       if (dbConnection) {
         try {
           await dbConnection.end();
@@ -326,6 +379,29 @@ async function ensureDBConnection() {
     }
   } catch (error) {
     console.error('❌ Ошибка при проверке соединения с БД:', error);
+    
+    // Отправляем уведомление админу о критической ошибке БД
+    try {
+      const botToken = process.env.BOT_TOKEN;
+      const managerChatId = process.env.MANAGER_CHAT_ID || process.env.MANAGER_TELEGRAM_ID;
+      
+      if (botToken && managerChatId) {
+        const errorMessage = `🚨 <b>КРИТИЧЕСКАЯ ОШИБКА БД</b>\n\n` +
+          `❌ <b>Ошибка:</b> ${error.message}\n\n` +
+          `🔄 <b>Действие:</b> Попытка принудительного переподключения...\n\n` +
+          `📅 <b>Время:</b> ${new Date().toLocaleString('ru-RU')}\n\n` +
+          `🔴 <b>ВНИМАНИЕ:</b> Сервис может работать некорректно!`;
+        
+        await axios.post(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+          chat_id: managerChatId,
+          text: errorMessage,
+          parse_mode: 'HTML'
+        }).catch(() => {});
+      }
+    } catch (notifyError) {
+      console.error('❌ Не удалось отправить уведомление о сбое БД:', notifyError);
+    }
+    
     console.log('🔄 Принудительное переподключение...');
     if (dbConnection) {
       try {
@@ -374,8 +450,8 @@ async function createSystemLog(logLevel, logMessage, logData = {}, telegramId = 
 const DELIVERY_COST_PER_KG = 800;
 // РЕЗЕРВНЫЙ курс (используется ТОЛЬКО если ЦБ РФ недоступен)
 const DEFAULT_EXCHANGE_RATE = 12.5;
-const MANAGER_TELEGRAM_ID = process.env.MANAGER_TELEGRAM_ID || '7696515351';
-const BOT_TOKEN = process.env.BOT_TOKEN || '8113129973:AAHePXZqOW2MnajUEnporDpoYULAEyX1N_8';
+const MANAGER_TELEGRAM_ID = process.env.MANAGER_TELEGRAM_ID;
+const BOT_TOKEN = process.env.BOT_TOKEN;
 
 // Функция отправки сообщения в Telegram
 async function sendTelegramMessage(chatId, message) {
@@ -398,7 +474,6 @@ async function sendTelegramMessage(chatId, message) {
     });
 
     if (response.ok) {
-      console.log('✅ Сообщение отправлено менеджеру');
       return true;
     } else {
       console.error('❌ Ошибка отправки сообщения:', await response.text());
@@ -410,1063 +485,9 @@ async function sendTelegramMessage(chatId, message) {
   }
 }
 
-// Функция извлечения ссылки из текста
-function extractUrlFromText(text) {
-  try {
-    // Ищем URL в тексте с помощью регулярного выражения
-    const urlRegex = /(https?:\/\/[^\s]+)/g;
-    const matches = text.match(urlRegex);
-    
-    if (matches && matches.length > 0) {
-      // Возвращаем первую найденную ссылку
-      return matches[0];
-    }
-    
-    return null;
-  } catch (error) {
-    console.error('Ошибка извлечения ссылки:', error);
-    return null;
-  }
-}
-
-// Функция для получения редиректа от dw4.co
-async function getRedirectUrl(shortUrl) {
-  try {
-    console.log('🔗 Получаем редирект для:', shortUrl);
-    
-    const response = await fetch(shortUrl, {
-      method: 'HEAD',
-      redirect: 'manual',
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1'
-      }
-    });
-    
-    if (response.status >= 300 && response.status < 400) {
-      const redirectUrl = response.headers.get('location');
-      console.log('✅ Получен редирект:', redirectUrl);
-      return redirectUrl;
-    }
-    
-    return null;
-  } catch (error) {
-    console.error('❌ Ошибка получения редиректа:', error);
-    return null;
-  }
-}
-
-// Функция для извлечения spuId из URL Poizon
-function extractSpuIdFromUrl(url) {
-  try {
-    // Пытаемся извлечь spuId из различных форматов URL
-    const spuIdMatch = url.match(/spuId=(\d+)/);
-    if (spuIdMatch) {
-      return spuIdMatch[1];
-    }
-    
-    // Для коротких ссылок dw4.co нужно будет делать редирект
-    if (url.includes('dw4.co')) {
-      console.log('🔗 Обнаружена короткая ссылка dw4.co, нужен редирект для получения spuId');
-      return null;
-    }
-    
-    return null;
-  } catch (error) {
-    console.error('Ошибка извлечения spuId:', error);
-    return null;
-  }
-}
-
-// Функция определения категории товара по названию
-function determineCategory(productName, productDescription = '') {
-  const text = (productName + ' ' + productDescription).toLowerCase();
-  
-  // Словарь категорий с ключевыми словами
-  const categories = {
-    'shoes_clothing': ['鞋', 'sneaker', 'boot', 'sandal', 'heel', 'slipper', 'sport', 'running', 'basketball', 'hiking', '徒步', '低帮', '高帮', '运动鞋', '篮球鞋', '跑鞋', '板鞋', '帆布鞋', '皮鞋', '靴子', '凉鞋', '拖鞋'],
-    'backpacks_bags': ['包', 'bag', '背包', '手提包', '钱包'],
-    'hoodies_pants': ['hoodie', 'sweater', 'pants', 'jeans', '卫衣', '毛衣', '裤子', '牛仔裤'],
-    'tshirts_shorts': ['shirt', 'dress', 't恤', '短袖', '长袖', '衬衫', '裙子', '连衣裙'],
-    'underwear_socks': ['underwear', 'socks', '内衣', '袜子', '内裤'],
-    'accessories_perfume': ['watch', 'belt', 'hat', 'cap', 'glasses', 'jewelry', 'perfume', '手表', '眼镜', '帽子', '腰带', '首饰', '项链', '手链', '戒指', '耳环', '香水']
-  };
-  
-  // Счетчики для каждой категории
-  const scores = {
-    'shoes_clothing': 0,
-    'backpacks_bags': 0,
-    'hoodies_pants': 0,
-    'tshirts_shorts': 0,
-    'underwear_socks': 0,
-    'accessories_perfume': 0
-  };
-  
-  // Подсчет совпадений
-  Object.keys(categories).forEach(category => {
-    categories[category].forEach(keyword => {
-      if (text.includes(keyword.toLowerCase())) {
-        scores[category]++;
-      }
-    });
-  });
-  
-  // Возвращаем категорию с наибольшим счетом
-  const maxScore = Math.max(...Object.values(scores));
-  if (maxScore === 0) {
-    return 'tshirts_shorts'; // Если ничего не найдено, возвращаем футболки/шорты
-  }
-  
-  return Object.keys(scores).find(category => scores[category] === maxScore);
-}
-
-// Функция парсинга страницы товара
-async function parseProductPage(url) {
-  try {
-    console.log('🔄 Парсинг страницы товара:', url);
-    
-    // Если это короткая ссылка dw4.co, получаем редирект
-    let finalUrl = url;
-    if (url.includes('dw4.co')) {
-      const redirectUrl = await getRedirectUrl(url);
-      if (redirectUrl) {
-        finalUrl = redirectUrl;
-        console.log('🔄 Используем редирект URL:', finalUrl);
-      }
-    }
-    
-    const response = await fetch(finalUrl, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
-        'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
-        'Accept-Encoding': 'gzip, deflate, br',
-        'Connection': 'keep-alive',
-        'Upgrade-Insecure-Requests': '1',
-        'Sec-Fetch-Dest': 'document',
-        'Sec-Fetch-Mode': 'navigate',
-        'Sec-Fetch-Site': 'none',
-        'Cache-Control': 'max-age=0',
-        'Referer': 'https://www.poizon.com/',
-        'Origin': 'https://www.poizon.com'
-      }
-    });
-    
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-    }
-
-    const html = await response.text();
-    const $ = cheerio.load(html);
-    
-    // Ищем цену товара (различные селекторы)
-    let price = null;
-    const priceSelectors = [
-      '.price',
-      '.product-price',
-      '.current-price',
-      '.sale-price',
-      '[class*="price"]',
-      '[class*="Price"]',
-      '.money',
-      '.cost',
-      'button[class*="price"]',
-      'button[class*="Price"]',
-      'a[class*="price"]',
-      'a[class*="Price"]',
-      '[class*="btn"][class*="price"]',
-      '[class*="button"][class*="price"]',
-      'button:contains("¥")',
-      'a:contains("¥")',
-      '[class*="blue"]',
-      '[style*="blue"]',
-      'button[style*="background"]',
-      'a[style*="background"]'
-    ];
-    
-    // Сначала пробуем стандартные селекторы
-    for (const selector of priceSelectors) {
-      try {
-        const priceElement = $(selector).first();
-        if (priceElement.length > 0) {
-          const priceText = priceElement.text().trim();
-          console.log(`🔍 Проверяем селектор "${selector}": "${priceText}"`);
-          
-          // Ищем цену в тексте (включая символы ¥, 元, 块)
-          const priceMatch = priceText.match(/(\d+(?:\.\d+)?)\s*(?:¥|元|块|RMB|CNY)?/);
-          if (priceMatch) {
-            price = parseFloat(priceMatch[1]);
-            console.log(`✅ Найдена цена через селектор "${selector}": ${price}`);
-            break;
-          }
-        }
-      } catch (e) {
-        // Игнорируем ошибки селекторов
-      }
-    }
-    
-    // Если не нашли, ищем все кнопки и ссылки с числовыми значениями
-    if (!price) {
-      console.log('🔍 Ищем цену во всех кнопках и ссылках...');
-      $('button, a, [role="button"]').each((i, element) => {
-        const $el = $(element);
-        const text = $el.text().trim();
-        
-        // Ищем числа в тексте кнопок
-        const numberMatch = text.match(/(\d+(?:\.\d+)?)/);
-        if (numberMatch) {
-          const num = parseFloat(numberMatch[1]);
-          // Проверяем, что это похоже на цену (от 1 до 10000 юаней)
-          if (num >= 1 && num <= 10000) {
-            console.log(`🔍 Найдена потенциальная цена в кнопке: "${text}" -> ${num}`);
-            // Если в тексте есть символы валюты или это кнопка с голубым фоном
-            if (text.includes('¥') || text.includes('元') || text.includes('块') || 
-                $el.css('background-color').includes('blue') || 
-                $el.attr('class')?.includes('blue')) {
-              price = num;
-              console.log(`✅ Найдена цена в кнопке: ${price}`);
-              return false; // Прерываем цикл
-            }
-          }
-        }
-      });
-    }
-    
-    // Если все еще не нашли, ищем в атрибутах
-    if (!price) {
-      console.log('🔍 Ищем цену в атрибутах элементов...');
-      $('[data-price], [data-cost], [data-value]').each((i, element) => {
-        const $el = $(element);
-        const dataPrice = $el.attr('data-price') || $el.attr('data-cost') || $el.attr('data-value');
-        if (dataPrice) {
-          const num = parseFloat(dataPrice);
-          if (!isNaN(num) && num > 0) {
-            price = num;
-            console.log(`✅ Найдена цена в атрибуте: ${price}`);
-            return false;
-          }
-        }
-      });
-    }
-    
-    // Ищем название товара
-    let productName = '';
-    const nameSelectors = [
-      'h1',
-      '.product-title',
-      '.product-name',
-      '.title',
-      '[class*="title"]',
-      '[class*="name"]'
-    ];
-    
-    for (const selector of nameSelectors) {
-      const nameElement = $(selector).first();
-      if (nameElement.length > 0) {
-        productName = nameElement.text().trim();
-        if (productName) break;
-      }
-    }
-    
-    // Ищем описание товара
-    let productDescription = '';
-    const descSelectors = [
-      '.product-description',
-      '.description',
-      '.product-detail',
-      '[class*="desc"]'
-    ];
-    
-    for (const selector of descSelectors) {
-      const descElement = $(selector).first();
-      if (descElement.length > 0) {
-        productDescription = descElement.text().trim();
-        if (productDescription) break;
-      }
-    }
-    
-    // Ищем доступные размеры в размерной сетке
-    let availableSizes = [];
-    let sizePriceMap = {}; // Карта размер -> цена
-    
-    console.log('🔍 Ищем размерную сетку...');
-    
-    // Сначала проверим, есть ли вообще элементы с классом jsx-2601963492
-    const allContainerElements = $('[class*="jsx-2601963492"]');
-    console.log(`🔍 Найдено элементов с классом jsx-2601963492: ${allContainerElements.length}`);
-    
-    // Проверим, есть ли элементы с классом jsx-706577070
-    const allJsxElements = $('[class*="jsx-706577070"]');
-    console.log(`🔍 Найдено элементов с классом jsx-706577070: ${allJsxElements.length}`);
-    
-    // Проверим, есть ли элементы с классом list
-    const allListElements = $('[class*="list"]');
-    console.log(`🔍 Найдено элементов с классом list: ${allListElements.length}`);
-    
-    // Проверим, есть ли элементы с классом square
-    const allSquareElements = $('[class*="square"]');
-    console.log(`🔍 Найдено элементов с классом square: ${allSquareElements.length}`);
-    
-    // Проверим, есть ли элементы с атрибутом title
-    const allTitleElements = $('[title]');
-    console.log(`🔍 Найдено элементов с атрибутом title: ${allTitleElements.length}`);
-    
-    // Проверим, есть ли элементы с текстом "尺码"
-    const sizeTitleElements = $('*:contains("尺码")');
-    console.log(`🔍 Найдено элементов с текстом "尺码": ${sizeTitleElements.length}`);
-    
-    // Выведем подробную информацию о найденных элементах с текстом "尺码"
-    sizeTitleElements.each((i, element) => {
-      const $el = $(element);
-      const text = $el.text().trim();
-      const classes = $el.attr('class') || '';
-      const html = $el.html();
-      console.log(`🔍 Элемент ${i + 1} с текстом "尺码": текст="${text}", классы="${classes}"`);
-      console.log(`🔍 HTML элемента ${i + 1}: ${html.substring(0, 200)}...`);
-    });
-    
-    // Выведем первые несколько элементов с title для отладки
-    allTitleElements.slice(0, 10).each((i, element) => {
-      const $el = $(element);
-      const title = $el.attr('title');
-      const classes = $el.attr('class') || '';
-      console.log(`🔍 Элемент ${i + 1} с title: "${title}", классы="${classes}"`);
-    });
-    
-    // Попробуем найти все div элементы на странице
-    const allDivs = $('div');
-    console.log(`🔍 Найдено div элементов: ${allDivs.length}`);
-    
-    // Найдем div элементы, которые содержат числа (размеры)
-    const divsWithNumbers = allDivs.filter(function() {
-      const $el = $(this);
-      const text = $el.text().trim();
-      return text.match(/^\d+(\.\d+)?$/);
-    });
-    console.log(`🔍 Найдено div элементов с числами: ${divsWithNumbers.length}`);
-    
-    // Выведем первые несколько div с числами
-    divsWithNumbers.slice(0, 10).each((i, element) => {
-      const $el = $(element);
-      const text = $el.text().trim();
-      const classes = $el.attr('class') || '';
-      console.log(`🔍 Div ${i + 1} с числом: "${text}", классы="${classes}"`);
-    });
-    
-    // Попробуем найти элементы с точной структурой: div[title] с классом square
-    const squareElements = $('div.square[title]');
-    console.log(`🔍 Найдено элементов div.square[title]: ${squareElements.length}`);
-    
-    // Выведем первые несколько элементов с точной структурой
-    squareElements.slice(0, 10).each((i, element) => {
-      const $el = $(element);
-      const title = $el.attr('title');
-      const text = $el.text().trim();
-      const classes = $el.attr('class') || '';
-      console.log(`🔍 Square элемент ${i + 1}: title="${title}", текст="${text}", классы="${classes}"`);
-    });
-    
-    // Попробуем найти элементы с классом jsx-706577070
-    const jsxElements = $('[class*="jsx-706577070"]');
-    console.log(`🔍 Найдено элементов с классом jsx-706577070: ${jsxElements.length}`);
-    
-    // Выведем первые несколько элементов с классом jsx-706577070
-    jsxElements.slice(0, 10).each((i, element) => {
-      const $el = $(element);
-      const title = $el.attr('title');
-      const text = $el.text().trim();
-      const classes = $el.attr('class') || '';
-      console.log(`🔍 JSX элемент ${i + 1}: title="${title}", текст="${text}", классы="${classes}"`);
-    });
-    
-             // Ищем размерную сетку с ценами (на основе реальной структуры Poizon)
-             const sizeGridSelectors = [
-               'div.jsx-2601963492 .jsx-706577070.list', // Контейнер с размерной сеткой
-               '.jsx-2601963492 .jsx-706577070.list', // Более общий селектор
-               '.jsx-706577070.list', // Основной контейнер размерной сетки
-               '#__next > main > div > div.jsx-488613455.side > div.jsx-706577070 > div:nth-child(2) > div.jsx-706577070.list', // Точный селектор
-               '[class*="jsx-706577070"][class*="list"]', // Более общий селектор
-               'div[class*="jsx-706577070"]', // Еще более общий
-               'div[title]', // Все div с title
-               // Добавляем более общие селекторы для поиска размеров
-               'div[class*="square"][title]', // Элементы размеров
-               'div[class*="size"][title]', // Элементы размеров
-               'div[title*="3"]', // Элементы с размерами
-               'div[title*="4"]' // Элементы с размерами
-             ];
-             
-             // Также попробуем найти контейнер с текстом "尺码" и искать в нем размеры
-             // Ищем только в div элементах, исключая script теги и JavaScript код
-             const sizeContainer = $('div:contains("尺码")').not('script').filter(function() {
-               const $el = $(this);
-               const text = $el.text();
-               return !text.includes('__remixContext') && !text.includes('script') && !text.includes('function');
-             });
-             if (sizeContainer.length > 0) {
-               console.log(`🔍 Найден контейнер с текстом "尺码": ${sizeContainer.length} элементов`);
-               
-               // Выведем подробную информацию о найденном контейнере
-               sizeContainer.each((i, container) => {
-                 const $container = $(container);
-                 const html = $container.html();
-                 const classes = $container.attr('class') || '';
-                 console.log(`🔍 Контейнер ${i + 1}: классы="${classes}"`);
-                 console.log(`🔍 HTML контейнера ${i + 1}: ${html.substring(0, 500)}...`);
-                 
-                 // Ищем размеры прямо в этом контейнере
-                 const sizesInContainer = $container.find('div[title]').filter(function() {
-                   const $el = $(this);
-                   const title = $el.attr('title');
-                   return title && title.match(/^\d+(\.\d+)?$/);
-                 });
-                 
-                 console.log(`🔍 Найдено размеров в контейнере ${i + 1}: ${sizesInContainer.length}`);
-                 
-                 sizesInContainer.each((j, element) => {
-                   const $el = $(element);
-                   const title = $el.attr('title');
-                   const text = $el.text().trim();
-                   const classes = $el.attr('class') || '';
-                   console.log(`🔍 Размер ${j + 1} в контейнере: title="${title}", текст="${text}", классы="${classes}"`);
-                   
-                   const size = title.trim();
-                   if (parseFloat(size) >= 30 && parseFloat(size) <= 50) {
-                     if (!availableSizes.includes(size)) {
-                       availableSizes.push(size);
-                       console.log(`✅ Найден размер в контейнере "尺码": ${size} (источник: title атрибут)`);
-                     }
-                   }
-                 });
-                 
-                 // Если размеры не найдены в title, ищем в тексте контейнера
-                 if (sizesInContainer.length === 0) {
-                   console.log(`🔍 Размеры не найдены в title, ищем в тексте контейнера ${i + 1}...`);
-                   
-                   const containerText = $container.text();
-                   console.log(`🔍 Текст контейнера ${i + 1}: ${containerText.substring(0, 200)}...`);
-                   
-                   // Ищем числа в тексте контейнера, но только в определенном контексте
-                   // Проверяем, что это не JavaScript код
-                   if (!containerText.includes('__remixContext') && !containerText.includes('script') && !containerText.includes('function')) {
-                     const numberMatches = containerText.match(/\b(3[0-9](?:\.5)?|4[0-9](?:\.5)?|50)\b/g);
-                     if (numberMatches) {
-                       console.log(`🔍 Найдены числа в тексте контейнера: ${numberMatches.join(', ')}`);
-                       
-                       numberMatches.forEach(match => {
-                         const size = match.trim();
-                         if (parseFloat(size) >= 30 && parseFloat(size) <= 50) {
-                           if (!availableSizes.includes(size)) {
-                             availableSizes.push(size);
-                             console.log(`✅ Найден размер в тексте контейнера "尺码": ${size} (источник: текст контейнера)`);
-                           }
-                         }
-                       });
-                     }
-                   } else {
-                     console.log(`⚠️ Пропускаем поиск в JavaScript коде контейнера`);
-                   }
-                 }
-               });
-               
-               sizeGridSelectors.unshift(sizeContainer.find('.jsx-706577070.list').selector || 'div.jsx-2601963492 .jsx-706577070.list');
-             }
-    
-    let foundSizeGrid = false;
-    for (const selector of sizeGridSelectors) {
-      const sizeGrid = $(selector);
-      console.log(`🔍 Проверяем селектор "${selector}": найдено ${sizeGrid.length} элементов`);
-      
-      if (sizeGrid.length > 0) {
-        console.log(`✅ Найдена размерная сетка: "${selector}"`);
-        foundSizeGrid = true;
-        
-                 // Ищем элементы размеров в сетке (структура Poizon)
-                 // Сначала попробуем найти по точному селектору
-                 let sizeItems = sizeGrid.find('div.jsx-706577070.square[title]').filter(function() {
-                   const $el = $(this);
-                   const title = $el.attr('title');
-                   // Ищем элементы с атрибутом title, содержащим размер
-                   return title && title.match(/^\d+(\.\d+)?$/);
-                 });
-                 
-                 // Если не нашли по точному селектору, ищем div.square[title]
-                 if (sizeItems.length === 0) {
-                   console.log('🔍 Ищем размеры в div.square[title]...');
-                   sizeItems = sizeGrid.find('div.square[title]').filter(function() {
-                     const $el = $(this);
-                     const title = $el.attr('title');
-                     // Ищем элементы с атрибутом title, содержащим размер
-                     return title && title.match(/^\d+(\.\d+)?$/);
-                   });
-                 }
-                 
-                 // Если не нашли по точному селектору, ищем все div с title
-                 if (sizeItems.length === 0) {
-                   console.log('🔍 Ищем размеры во всех div с title...');
-                   sizeItems = sizeGrid.find('div[title]').filter(function() {
-                     const $el = $(this);
-                     const title = $el.attr('title');
-                     // Ищем элементы с атрибутом title, содержащим размер
-                     return title && title.match(/^\d+(\.\d+)?$/);
-                   });
-                 }
-        
-        console.log(`🔍 Найдено ${sizeItems.length} потенциальных элементов размеров`);
-        
-                 sizeItems.each((i, element) => {
-                   const $el = $(element);
-                   const title = $el.attr('title');
-                   const text = $el.text().trim();
-                   const classes = $el.attr('class') || '';
-                   
-                   console.log(`🔍 Элемент ${i + 1}: title="${title}", text="${text}", classes="${classes}"`);
-                   
-                   // Определяем размер из title
-                   let size = null;
-                   if (title && title.match(/^\d+(\.\d+)?$/)) {
-                     size = title.trim();
-                   }
-                   
-                   if (size) {
-                     // Проверяем, что размер в разумных пределах (для обуви 30-50)
-                     if (parseFloat(size) >= 30 && parseFloat(size) <= 50) {
-                       // Проверяем, есть ли классы, указывающие на недоступность
-                       const isUnavailable = classes.includes('unavailable') || 
-                                            classes.includes('disabled') || 
-                                            classes.includes('sold-out') ||
-                                            text.includes('--') ||
-                                            text.includes('无') ||
-                                            text.includes('缺货') ||
-                                            text.includes('售罄') ||
-                                            text.includes('无货') ||
-                                            // Проверяем на двойную волнистую линию (частный случай)
-                                            text.includes('≈') ||
-                                            text.includes('~') ||
-                                            // Проверяем стили, указывающие на недоступность
-                                            $el.css('opacity') === '0.5' ||
-                                            $el.css('pointer-events') === 'none';
-                       
-                       if (!isUnavailable) {
-                         availableSizes.push(size);
-                         console.log(`✅ Найден доступный размер: ${size}`);
-      } else {
-                         console.log(`❌ Размер ${size} недоступен`);
-                       }
-                     } else {
-                       console.log(`⚠️ Размер ${size} вне диапазона 30-50`);
-                     }
-                   }
-                 });
-        
-        if (availableSizes.length > 0) break;
-      }
-    }
-    
-    // Если размерная сетка не найдена, попробуем найти размеры в контейнере jsx-2601963492
-    if (!foundSizeGrid || availableSizes.length === 0) {
-      console.log('⚠️ Размерная сетка не найдена, ищем размеры в контейнере jsx-2601963492...');
-      
-      // Ищем размеры в контейнере с классом jsx-2601963492
-      const container = $('.jsx-2601963492');
-      if (container.length > 0) {
-        console.log(`🔍 Найден контейнер jsx-2601963492: ${container.length} элементов`);
-        
-        // Ищем все div с title в этом контейнере
-        const sizeItems = container.find('div[title]').filter(function() {
-          const $el = $(this);
-          const title = $el.attr('title');
-          return title && title.match(/^\d+(\.\d+)?$/);
-        });
-        
-        console.log(`🔍 Найдено ${sizeItems.length} элементов размеров в контейнере`);
-        
-        sizeItems.each((i, element) => {
-          const $el = $(element);
-          const title = $el.attr('title');
-          const text = $el.text().trim();
-          const classes = $el.attr('class') || '';
-          
-          const size = title.trim();
-          
-          // Проверяем, что размер в разумных пределах (для обуви 30-50)
-          if (parseFloat(size) >= 30 && parseFloat(size) <= 50) {
-            // Проверяем, есть ли классы, указывающие на недоступность
-            const isUnavailable = classes.includes('unavailable') || 
-                                 classes.includes('disabled') || 
-                                 classes.includes('sold-out') ||
-                                 text.includes('--') ||
-                                 text.includes('无') ||
-                                 text.includes('缺货') ||
-                                 text.includes('售罄') ||
-                                 text.includes('无货') ||
-                                 text.includes('≈') ||
-                                 text.includes('~') ||
-                                 $el.css('opacity') === '0.5' ||
-                                 $el.css('pointer-events') === 'none';
-            
-                       if (!isUnavailable && !availableSizes.includes(size)) {
-                         availableSizes.push(size);
-                         console.log(`✅ Найден размер в контейнере jsx-2601963492: ${size} (источник: контейнер jsx-2601963492)`);
-                       }
-          }
-        });
-      }
-      
-               // Если все еще не найдены размеры, ищем в любых элементах с title
-               if (availableSizes.length === 0) {
-                 console.log('⚠️ Размеры не найдены в контейнере, ищем в любых элементах с title...');
-                 
-                 // Ищем все элементы с title, содержащие размеры
-                 const allTitleElements = $('[title]');
-                 console.log(`🔍 Найдено элементов с title: ${allTitleElements.length}`);
-                 
-                 allTitleElements.each((i, element) => {
-                   const $el = $(element);
-                   const title = $el.attr('title');
-                   const text = $el.text().trim();
-                   const classes = $el.attr('class') || '';
-                   
-                   // Проверяем, содержит ли title размер
-                   if (title && title.match(/^\d+(\.\d+)?$/)) {
-                     const size = title.trim();
-                     
-                     // Проверяем, что размер в разумных пределах (для обуви 30-50)
-                     if (parseFloat(size) >= 30 && parseFloat(size) <= 50) {
-                       // Проверяем, есть ли классы, указывающие на недоступность
-                       const isUnavailable = classes.includes('unavailable') || 
-                                            classes.includes('disabled') || 
-                                            classes.includes('sold-out') ||
-                                            text.includes('--') ||
-                                            text.includes('无') ||
-                                            text.includes('缺货') ||
-                                            text.includes('售罄') ||
-                                            text.includes('无货') ||
-                                            text.includes('≈') ||
-                                            text.includes('~') ||
-                                            $el.css('opacity') === '0.5' ||
-                                            $el.css('pointer-events') === 'none';
-                       
-                       if (!isUnavailable && !availableSizes.includes(size)) {
-                         availableSizes.push(size);
-                         console.log(`✅ Найден размер в любом элементе: ${size} (источник: любой элемент с title)`);
-                       }
-                     }
-                   }
-                 });
-        
-        // Если все еще не найдены размеры, ищем в div элементах с точной структурой
-        if (availableSizes.length === 0) {
-          console.log('⚠️ Размеры не найдены в title, ищем в div.square[title] элементах...');
-          
-          // Ищем элементы с точной структурой: div.square[title]
-          const squareElements = $('div.square[title]');
-          console.log(`🔍 Найдено div.square[title] элементов: ${squareElements.length}`);
-          
-          squareElements.each((i, element) => {
-            const $el = $(element);
-            const title = $el.attr('title');
-            const text = $el.text().trim();
-            const classes = $el.attr('class') || '';
-            
-            // Проверяем, содержит ли title размер
-            if (title && title.match(/^\d+(\.\d+)?$/)) {
-              const size = title.trim();
-              
-              // Проверяем, что размер в разумных пределах (для обуви 30-50)
-              if (parseFloat(size) >= 30 && parseFloat(size) <= 50) {
-                // Проверяем, есть ли классы, указывающие на недоступность
-                const isUnavailable = classes.includes('unavailable') || 
-                                     classes.includes('disabled') || 
-                                     classes.includes('sold-out') ||
-                                     text.includes('--') ||
-                                     text.includes('无') ||
-                                     text.includes('缺货') ||
-                                     text.includes('售罄') ||
-                                     text.includes('无货') ||
-                                     text.includes('≈') ||
-                                     text.includes('~') ||
-                                     $el.css('opacity') === '0.5' ||
-                                     $el.css('pointer-events') === 'none';
-                
-                if (!isUnavailable && !availableSizes.includes(size)) {
-                  availableSizes.push(size);
-                  console.log(`✅ Найден размер в div.square[title]: ${size} (источник: div.square[title])`);
-                }
-              }
-            }
-          });
-        }
-        
-                 // Если все еще не найдены размеры, ищем в div элементах с числами
-                 if (availableSizes.length === 0) {
-                   console.log('⚠️ Размеры не найдены в div.square[title], ищем в div элементах с числами...');
-                   
-                   const divsWithNumbers = $('div').filter(function() {
-                     const $el = $(this);
-                     const text = $el.text().trim();
-                     return text.match(/^\d+(\.\d+)?$/) && text.length < 10;
-                   });
-                   
-                   divsWithNumbers.each((i, element) => {
-                     const $el = $(element);
-                     const text = $el.text().trim();
-                     const classes = $el.attr('class') || '';
-                     
-                     const size = text.trim();
-                     
-                     // Проверяем, что размер в разумных пределах (для обуви 30-50)
-                     if (parseFloat(size) >= 30 && parseFloat(size) <= 50) {
-                       // Проверяем, есть ли классы, указывающие на недоступность
-                       const isUnavailable = classes.includes('unavailable') || 
-                                            classes.includes('disabled') || 
-                                            classes.includes('sold-out') ||
-                                            text.includes('--') ||
-                                            text.includes('无') ||
-                                            text.includes('缺货') ||
-                                            text.includes('售罄') ||
-                                            text.includes('无货') ||
-                                            text.includes('≈') ||
-                                            text.includes('~') ||
-                                            $el.css('opacity') === '0.5' ||
-                                            $el.css('pointer-events') === 'none';
-                       
-                       if (!isUnavailable && !availableSizes.includes(size)) {
-                         availableSizes.push(size);
-                         console.log(`✅ Найден размер в div элементе: ${size} (источник: div с числом)`);
-                       }
-                     }
-                   });
-                 }
-                 
-                 // Если все еще не найдены размеры, ищем в HTML-коде страницы
-                 if (availableSizes.length === 0) {
-                   console.log('⚠️ Размеры не найдены в элементах, ищем в HTML-коде страницы...');
-                   
-                   // Получаем весь HTML страницы
-                   const pageHTML = $.html();
-                   console.log(`🔍 Размер HTML страницы: ${pageHTML.length} символов`);
-                   
-    // Умная логика поиска размеров на основе анализа реальных данных
-    console.log('🧠 Применяем умную логику поиска размеров...');
-    
-    // 1. Сначала ищем размеры в структурированных элементах (title атрибуты)
-    const titleElements = $('[title]');
-    console.log(`🔍 Найдено элементов с title: ${titleElements.length}`);
-    
-    titleElements.each((i, element) => {
-      const $el = $(element);
-      const title = $el.attr('title');
-      const classes = $el.attr('class') || '';
-      const text = $el.text().trim();
-      
-      // Проверяем, является ли title размером обуви
-      if (title && /^[2-5][0-9](\.5)?$/.test(title)) {
-        const numSize = parseFloat(title);
-        
-        // Проверяем контекст элемента
-        const isInSizeGrid = classes.includes('jsx-706577070') || 
-                           classes.includes('square') ||
-                           classes.includes('size') ||
-                           text === title; // Текст элемента совпадает с title
-        
-        // Проверяем, что это не технические данные
-        const isNotTechnical = !classes.includes('__') &&
-                              !classes.includes('script') &&
-                              !classes.includes('function') &&
-                              !text.includes('skuId') &&
-                              !text.includes('spuId');
-        
-        if (isInSizeGrid && isNotTechnical && numSize >= 20 && numSize <= 60) {
-          if (!availableSizes.includes(title)) {
-            availableSizes.push(title);
-            console.log(`✅ Найден размер в title: ${title} (классы: ${classes}, текст: ${text})`);
-          }
-        }
-      }
-    });
-    
-    // 2. Если размеры не найдены в title, ищем в тексте контейнеров с размерной сеткой
-    if (availableSizes.length === 0) {
-      console.log('🔍 Размеры в title не найдены, ищем в тексте контейнеров...');
-      
-      // Ищем контейнеры с размерной сеткой
-      const sizeContainers = $('div:contains("尺码"), div[class*="list"], div[class*="size"]');
-      console.log(`🔍 Найдено контейнеров размерной сетки: ${sizeContainers.length}`);
-      
-      sizeContainers.each((i, container) => {
-        const $container = $(container);
-        const html = $container.html();
-        const text = $container.text();
-        
-        // Ищем размеры в тексте контейнера
-        const sizeMatches = text.match(/\b([2-5][0-9](?:\.5)?)\b/g);
-        if (sizeMatches) {
-          const uniqueSizes = [...new Set(sizeMatches)];
-          uniqueSizes.forEach(size => {
-            const numSize = parseFloat(size);
-            if (numSize >= 20 && numSize <= 60 && !availableSizes.includes(size)) {
-              availableSizes.push(size);
-              console.log(`✅ Найден размер в контейнере: ${size} (контейнер ${i + 1})`);
-            }
-          });
-        }
-      });
-    }
-    
-    // 3. Если все еще не найдены размеры, используем общий поиск по HTML
-    if (availableSizes.length === 0) {
-      console.log('🔍 Размеры в контейнерах не найдены, используем общий поиск...');
-      
-      const sizeMatches = pageHTML.match(/\b([2-5][0-9](?:\.5)?)\b/g);
-      if (sizeMatches) {
-        const uniqueSizes = [...new Set(sizeMatches)];
-        
-        uniqueSizes.forEach(size => {
-          const numSize = parseFloat(size);
-          if (numSize >= 20 && numSize <= 60) {
-            // Анализируем контекст
-            const sizeIndex = pageHTML.indexOf(size);
-            const contextStart = Math.max(0, sizeIndex - 100);
-            const contextEnd = Math.min(pageHTML.length, sizeIndex + 100);
-            const context = pageHTML.substring(contextStart, contextEnd);
-            
-            // Проверяем, что размер находится в контексте размерной сетки
-            const isInSizeGrid = context.includes('尺码') || 
-                               context.includes('jsx-706577070') ||
-                               context.includes('title="' + size + '"') ||
-                               context.includes('class="jsx-706577070 square"');
-            
-            // Проверяем, что это не технические данные
-            const isNotTechnical = !context.includes('skuId') &&
-                                  !context.includes('spuId') &&
-                                  !context.includes('__remixContext') &&
-                                  !context.includes('function') &&
-                                  !context.includes('script');
-            
-            if (isInSizeGrid && isNotTechnical && !availableSizes.includes(size)) {
-              availableSizes.push(size);
-              console.log(`✅ Найден размер в HTML: ${size} (общий поиск)`);
-            }
-          }
-        });
-      }
-    }
-                   
-                   // Если размеры все еще не найдены, ищем в JSON-данных
-                   if (availableSizes.length === 0) {
-                     console.log('⚠️ Размеры не найдены в HTML, ищем в JSON-данных...');
-                     
-                     // Ищем JSON-данные в script тегах
-                     const scriptTags = $('script');
-                     scriptTags.each((i, script) => {
-                       const $script = $(script);
-                       const scriptContent = $script.html();
-                       
-                       if (scriptContent && scriptContent.includes('skuId')) {
-                         console.log(`🔍 Найден script с skuId: ${scriptContent.substring(0, 200)}...`);
-                         
-                         // Ищем размеры в JSON-данных с контекстным анализом
-                         const jsonSizeMatches = scriptContent.match(/\b([2-5][0-9](?:\.5)?|60)\b/g);
-                         if (jsonSizeMatches) {
-                           console.log(`🔍 Найдены размеры в JSON: ${jsonSizeMatches.join(', ')}`);
-                           
-                           const uniqueJsonSizes = [...new Set(jsonSizeMatches)];
-                           uniqueJsonSizes.forEach(size => {
-                             if (parseFloat(size) >= 20 && parseFloat(size) <= 60) {
-                               // Анализируем контекст в JSON
-                               const sizeIndex = scriptContent.indexOf(size);
-                               const contextStart = Math.max(0, sizeIndex - 50);
-                               const contextEnd = Math.min(scriptContent.length, sizeIndex + 50);
-                               const context = scriptContent.substring(contextStart, contextEnd);
-                               
-                               // Проверяем, что размер НЕ находится в контексте, который указывает на то, что это не размер
-                               const isNotSize = context.includes('skuId') ||
-                                                context.includes('spuId') ||
-                                                context.includes('pointMap') ||
-                                                context.includes('dataFromNodeFetch') ||
-                                                context.includes('query') ||
-                                                context.includes('propertyValueId');
-                               
-                               if (!isNotSize) {
-                                 if (!availableSizes.includes(size)) {
-                                   availableSizes.push(size);
-                                   console.log(`✅ Найден размер в JSON: ${size} (источник: JSON-данные, контекст: ${context.substring(0, 30)}...)`);
-                                 }
-                               } else {
-                                 console.log(`❌ Размер ${size} найден в JSON, но в контексте данных (контекст: ${context.substring(0, 30)}...)`);
-                               }
-                             }
-                           });
-                         }
-                       }
-                     });
-                   }
-                 }
-        
-        if (availableSizes.length === 0) {
-          console.log('⚠️ Размеры не найдены ни в размерной сетке, ни в контейнере, ни в любых элементах');
-        }
-      }
-    }
-    
-    // Убираем дубликаты
-    availableSizes = [...new Set(availableSizes)];
-    
-    // Если размеры не найдены, но это обувь, НЕ предлагаем стандартные размеры
-    // Вместо этого оставляем пустой массив, чтобы пользователь ввел цену вручную
-    if (availableSizes.length === 0) {
-      console.log('⚠️ Размеры не найдены на странице, пользователь должен ввести цену вручную');
-    }
-    
-    console.log(`📏 Найдено размеров: ${availableSizes.length}`, availableSizes);
-    
-    // Детальная отладка: проверим, какие размеры могут быть лишними
-    // Определяем стандартные размеры обуви для фильтрации
-    const standardShoeSizes = [];
-    for (let i = 30; i <= 50; i += 0.5) {
-      standardShoeSizes.push(i.toString());
-    }
-    
-    // Умная фильтрация размеров на основе анализа реальных данных
-    console.log('🧠 Применяем умную фильтрацию размеров...');
-    
-    const filteredSizes = availableSizes.filter(size => {
-      const numSize = parseFloat(size);
-      
-      // Базовые проверки
-      if (numSize < 20 || numSize > 60) return false;
-      
-      // Проверяем, что размер является стандартным (целое число или .5)
-      const isStandardSize = numSize === Math.floor(numSize) || numSize === Math.floor(numSize) + 0.5;
-      if (!isStandardSize) return false;
-      
-      // Дополнительная проверка: размер должен быть в разумных пределах для обуви
-      // Детская обувь: 20-40, мужская/женская: 35-50, большие размеры: до 60
-      const isReasonableSize = (numSize >= 20 && numSize <= 40) || // Детские размеры
-                              (numSize >= 35 && numSize <= 50) || // Стандартные размеры
-                              (numSize >= 51 && numSize <= 60);   // Большие размеры
-      
-      return isReasonableSize;
-    });
-    
-    const extraSizes = availableSizes.filter(size => !filteredSizes.includes(size));
-    
-    if (extraSizes.length > 0) {
-      console.log(`⚠️ Найдены лишние размеры: ${extraSizes.join(', ')}`);
-    }
-    
-    if (filteredSizes.length !== availableSizes.length) {
-      console.log(`🔧 Фильтруем размеры, убираем лишние...`);
-      console.log(`📏 Размеров до фильтрации: ${availableSizes.length}, после: ${filteredSizes.length}`);
-      availableSizes = filteredSizes;
-    }
-    
-    // Умная фильтрация по логической последовательности размеров
-    if (filteredSizes.length > 0) {
-      console.log(`🔧 Анализируем логическую последовательность размеров...`);
-      
-      // Сортируем размеры по числовому значению
-      const sortedSizes = filteredSizes.sort((a, b) => parseFloat(a) - parseFloat(b));
-      console.log(`📏 Отсортированные размеры: ${sortedSizes.join(', ')}`);
-      
-      // Анализируем последовательность размеров
-      const logicalSizes = [];
-      let consecutiveCount = 0;
-      let maxConsecutiveCount = 0;
-      let bestSequenceStart = 0;
-      
-      for (let i = 0; i < sortedSizes.length; i++) {
-        const currentSize = parseFloat(sortedSizes[i]);
-        const prevSize = i > 0 ? parseFloat(sortedSizes[i-1]) : null;
-        
-        // Проверяем, является ли размер логичным
-        const isLogical = prevSize === null || 
-                         (currentSize - prevSize >= 0.5 && currentSize - prevSize <= 1.5);
-        
-        if (isLogical) {
-          consecutiveCount++;
-          if (consecutiveCount > maxConsecutiveCount) {
-            maxConsecutiveCount = consecutiveCount;
-            bestSequenceStart = i - consecutiveCount + 1;
-          }
-        } else {
-          consecutiveCount = 1;
-        }
-      }
-      
-      // Если найдена хорошая последовательность, используем ее
-      if (maxConsecutiveCount >= 3) {
-        console.log(`✅ Найдена хорошая последовательность из ${maxConsecutiveCount} размеров`);
-        logicalSizes.push(...sortedSizes.slice(bestSequenceStart, bestSequenceStart + maxConsecutiveCount));
-      } else {
-        // Если последовательность не найдена, используем все отфильтрованные размеры
-        console.log(`⚠️ Хорошая последовательность не найдена, используем все размеры`);
-        logicalSizes.push(...sortedSizes);
-      }
-      
-      if (logicalSizes.length !== filteredSizes.length) {
-        console.log(`🔧 Убираем размеры, не вписывающиеся в последовательность...`);
-        console.log(`📏 Размеров до фильтрации: ${filteredSizes.length}, после: ${logicalSizes.length}`);
-        availableSizes = logicalSizes;
-      } else {
-        availableSizes = filteredSizes;
-      }
-    } else {
-      availableSizes = filteredSizes;
-    }
-    
-    // Отладочная информация
-    console.log('📊 Результаты парсинга:', {
-      price,
-      productName: productName.substring(0, 100),
-      productDescription: productDescription.substring(0, 100)
-    });
-    
-    // Если цена не найдена, выводим отладочную информацию
-    if (!price) {
-      console.log('🔍 Отладочная информация:');
-      console.log('📄 Размер HTML:', html.length, 'символов');
-      console.log('🔍 Количество кнопок:', $('button').length);
-      console.log('🔍 Количество ссылок:', $('a').length);
-      
-      // Выводим первые 10 кнопок с их текстом
-      $('button').slice(0, 10).each((i, element) => {
-        const $el = $(element);
-        const text = $el.text().trim();
-        if (text) {
-          console.log(`🔘 Кнопка ${i + 1}: "${text}"`);
-        }
-      });
-      
-      // Выводим первые 10 ссылок с их текстом
-      $('a').slice(0, 10).each((i, element) => {
-        const $el = $(element);
-        const text = $el.text().trim();
-        if (text && text.length < 50) {
-          console.log(`🔗 Ссылка ${i + 1}: "${text}"`);
-        }
-      });
-    }
-    
-    return {
-      price,
-      productName,
-      productDescription,
-      url,
-      availableSizes,
-      sizePriceMap
-    };
-    
-  } catch (error) {
-    console.error('❌ Ошибка парсинга страницы:', error.message);
-    throw error;
-  }
-}
-
 // Функция получения курса юаня (только API Центробанка России)
 async function getYuanToRubExchangeRate() {
   try {
-    console.log('🔄 Получение курса юаня с ЦБРФ...');
-    
     const cbrResponse = await fetch('https://www.cbr-xml-daily.ru/daily_json.js', {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
@@ -1490,8 +511,7 @@ async function getYuanToRubExchangeRate() {
       console.log(`✅ Курс юаня получен с ЦБРФ: ${cnyRate} + 1.1 = ${adjustedRate}`);
       return adjustedRate;
     } else {
-      console.log('⚠️ Курс юаня не найден в данных ЦБРФ');
-      console.log(`⚠️ Используется резервный курс: ${DEFAULT_EXCHANGE_RATE}`);
+      console.error('⚠️ Курс юаня не найден в данных ЦБРФ, используется резервный');
       return DEFAULT_EXCHANGE_RATE;
     }
   } catch (error) {
@@ -1517,361 +537,6 @@ app.get('/api/exchange-rate', async (req, res) => {
   }
 });
 
-// Расчет стоимости по ссылке на товар
-app.post('/api/calculate-from-link', async (req, res) => {
-  try {
-    console.log('📊 Получен запрос на расчет стоимости по ссылке:', req.body);
-    const { linkText, telegramId } = req.body;
-    
-    if (!linkText) {
-      return res.status(400).json({ error: 'Необходим текст с ссылкой на товар' });
-    }
-
-    // 1. Извлекаем ссылку из текста
-    const productUrl = extractUrlFromText(linkText);
-    if (!productUrl) {
-      return res.status(400).json({ error: 'Не удалось найти ссылку в тексте' });
-    }
-
-    console.log('🔗 Извлеченная ссылка:', productUrl);
-
-    // 2. Парсим страницу товара
-    const productData = await parseProductPage(productUrl);
-    
-    // Если цена не найдена, проверяем есть ли размеры
-    if (!productData.price || productData.price <= 0) {
-      if (productData.availableSizes && productData.availableSizes.length > 0) {
-        console.log('💰 Цена не найдена, но есть размеры, предлагаем выбор размера');
-        return res.status(200).json({ 
-          requiresSizeSelection: true,
-          productData: {
-            productName: productData.productName,
-            url: productData.url,
-            availableSizes: productData.availableSizes,
-            sizePriceMap: productData.sizePriceMap || {}
-          }
-        });
-      } else {
-        console.log('💰 Цена не найдена и размеры не найдены, предлагаем ручной ввод');
-        return res.status(400).json({ 
-          error: 'Не удалось определить цену товара. Попробуйте ввести цену вручную.',
-          productData: {
-            productName: productData.productName,
-            url: productData.url
-          }
-        });
-      }
-    }
-
-    // 3. Определяем категорию товара
-    const category = determineCategory(productData.productName, productData.productDescription);
-    console.log('🏷️ Определенная категория:', category);
-
-    // 4. Получаем вес по категории
-    const categoryWeights = {
-      'shoes_clothing': 2.5,        // 2000₽ / 800₽ = 2.5 кг
-      'backpacks_bags': 1.875,      // 1500₽ / 800₽ = 1.875 кг
-      'hoodies_pants': 1.875,       // 1500₽ / 800₽ = 1.875 кг
-      'tshirts_shorts': 1.25,       // 1000₽ / 800₽ = 1.25 кг
-      'underwear_socks': 1.0,       // 800₽ / 800₽ = 1.0 кг
-      'accessories_perfume': 1.0    // 800₽ / 800₽ = 1.0 кг
-    };
-
-    const weight = categoryWeights[category] || 1.0;
-
-    // 5. Получаем комиссию пользователя
-    let commission = 1000; // По умолчанию 1000₽
-    if (telegramId && dbConnection) {
-      try {
-        await ensureDBConnection();
-        const [rows] = await dbConnection.execute(
-          'SELECT commission, access_expires_at FROM users WHERE telegram_id = ?',
-          [telegramId]
-        );
-        
-        if (rows.length > 0) {
-          const user = rows[0];
-          if (user.access_expires_at && new Date() < new Date(user.access_expires_at)) {
-            commission = user.commission; // 400₽ для рефералов
-          } else {
-            commission = user.commission; // 1000₽ по умолчанию
-          }
-        }
-      } catch (dbError) {
-        console.error('Ошибка получения данных пользователя:', dbError);
-      }
-    }
-
-    // 6. Рассчитываем стоимость
-    console.log('💰 Начинаем расчет стоимости...');
-    const currentRate = await getYuanToRubExchangeRate();
-    console.log('📈 Курс юаня:', currentRate);
-    
-    const itemCostRub = productData.price * currentRate;
-    const deliveryCost = weight * DELIVERY_COST_PER_KG;
-    const commissionAmount = commission; // Фиксированная сумма в рублях
-    const totalCost = itemCostRub + commissionAmount + deliveryCost;
-
-    const result = {
-      originalPrice: parseFloat(productData.price),
-      priceInRubles: parseFloat(itemCostRub.toFixed(2)),
-      deliveryCost: parseFloat(deliveryCost.toFixed(2)),
-      commission: parseFloat(commissionAmount.toFixed(2)),
-      commissionRate: commission, // Теперь это просто сумма в рублях
-      totalCost: parseFloat(totalCost.toFixed(2)),
-      exchangeRate: parseFloat(currentRate.toFixed(2)),
-      weight: parseFloat(weight.toFixed(1)),
-      productName: productData.productName,
-      productUrl: productData.url,
-      detectedCategory: category
-    };
-
-    console.log('✅ Результат расчета по ссылке:', result);
-    res.json(result);
-  } catch (error) {
-    console.error('Ошибка расчета стоимости по ссылке:', error);
-    res.status(500).json({ error: 'Ошибка расчета стоимости по ссылке' });
-  }
-});
-
-// Функция для получения цены с голубой кнопки после выбора размера
-async function getPriceWithSize(url, selectedSize) {
-  try {
-    console.log(`🔍 Получаем цену для размера ${selectedSize} с ${url}`);
-    
-    // Делаем запрос к странице товара с правильными заголовками
-    const response = await fetch(url, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
-        'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
-        'Accept-Encoding': 'gzip, deflate, br',
-        'Connection': 'keep-alive',
-        'Upgrade-Insecure-Requests': '1',
-        'Sec-Fetch-Dest': 'document',
-        'Sec-Fetch-Mode': 'navigate',
-        'Sec-Fetch-Site': 'none',
-        'Cache-Control': 'max-age=0'
-      }
-    });
-    
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-    }
-    
-    const html = await response.text();
-    const $ = cheerio.load(html);
-    
-    // Ищем голубую кнопку с ценой (как на фото 2)
-    let price = null;
-    
-    // Селекторы для голубой кнопки с ценой (на основе реальной структуры Poizon)
-    const priceButtonSelectors = [
-      '.jsx-684859300.btn.primary', // Основная кнопка покупки
-      '[class*="jsx-684859300"]', // Любые элементы с этим классом
-      'button[class*="primary"]',
-      'button[class*="buy"]',
-      'button[class*="purchase"]',
-      'a[class*="primary"]',
-      'a[class*="buy"]',
-      'a[class*="purchase"]',
-      '[class*="buy-button"]',
-      '[class*="purchase-button"]',
-      '[class*="add-to-cart"]'
-    ];
-    
-    for (const selector of priceButtonSelectors) {
-      const button = $(selector).first();
-      if (button.length > 0) {
-        const buttonText = button.text().trim();
-        console.log(`🔍 Проверяем кнопку "${selector}": "${buttonText}"`);
-        
-        // Проверяем, есть ли кнопка "找相似" (поиск похожих) - значит размер недоступен
-        if (buttonText.includes('找相似') || buttonText.includes('找类似') || buttonText.includes('相似商品')) {
-          console.log(`❌ Размер недоступен - найдена кнопка "找相似"`);
-          return { price: null, isUnavailable: true };
-        }
-        
-        // Ищем цену в тексте кнопки
-        const priceMatch = buttonText.match(/¥(\d+)/);
-        const approximateMatch = buttonText.match(/≈\s*¥(\d+)/);
-        
-        if (approximateMatch) {
-          // Если есть знак ≈, это частный случай - рассчитываем с предупреждением
-          price = parseInt(approximateMatch[1]);
-          console.log(`⚠️ Найдена примерная цена (≈): ¥${price}`);
-          return { price, isApproximate: true };
-        } else if (priceMatch) {
-          price = parseInt(priceMatch[1]);
-          console.log(`✅ Найдена точная цена в кнопке: ¥${price}`);
-          break;
-        }
-      }
-    }
-    
-    // Если не нашли в кнопках, ищем в других элементах
-    if (!price) {
-      console.log('🔍 Ищем цену в других элементах...');
-      
-      // Ищем элементы с голубым фоном или классом
-      const blueElements = $('[style*="blue"], [class*="blue"], [class*="primary"], [class*="price"]');
-      blueElements.each((i, element) => {
-        const $el = $(element);
-        const text = $el.text().trim();
-        const priceMatch = text.match(/¥(\d+)/);
-        if (priceMatch) {
-          const foundPrice = parseInt(priceMatch[1]);
-          if (foundPrice > 100 && foundPrice < 2000) { // Разумный диапазон цен
-            price = foundPrice;
-            console.log(`✅ Найдена цена в элементе: ¥${price}`);
-            return false; // Прерываем цикл
-          }
-        }
-      });
-    }
-    
-    return price;
-  } catch (error) {
-    console.error('❌ Ошибка получения цены с размером:', error.message);
-    return null;
-  }
-}
-
-// Получение цены товара с выбранным размером
-app.post('/api/get-price-with-size', async (req, res) => {
-  try {
-    console.log('📊 Получен запрос на получение цены с размером:', req.body);
-    const { url, selectedSize, telegramId } = req.body;
-    
-    if (!url || !selectedSize) {
-      return res.status(400).json({ error: 'Необходимы URL товара и выбранный размер' });
-    }
-
-    // Получаем реальную цену с голубой кнопки
-    const priceResult = await getPriceWithSize(url, selectedSize);
-    let estimatedPrice = null;
-    let isApproximate = false;
-    
-    if (priceResult) {
-      if (typeof priceResult === 'object') {
-        if (priceResult.isUnavailable) {
-          // Если размер недоступен, возвращаем ошибку
-          return res.status(400).json({ 
-            error: 'Данного размера нет в наличии',
-            isUnavailable: true
-          });
-        } else if (priceResult.isApproximate) {
-          // Если цена примерная (≈), рассчитываем с предупреждением
-          estimatedPrice = priceResult.price;
-          isApproximate = true;
-          console.log(`⚠️ Получена примерная цена: ≈¥${estimatedPrice}`);
-        } else {
-          estimatedPrice = priceResult.price;
-        }
-      } else {
-        estimatedPrice = priceResult;
-      }
-    }
-    
-    // Если не удалось получить цену с голубой кнопки, используем резервные варианты
-    if (!estimatedPrice) {
-      console.log('⚠️ Не удалось получить цену с голубой кнопки, используем резервные варианты');
-      
-      // Для данного товара используем примерные цены на основе ваших данных
-      const examplePrices = {
-        '32': 439,
-        '33.5': 439,
-        '35': 449,
-        '36': 409,
-        '36.5': 389,
-        '37.5': 419,
-        '38.5': 539,
-        '39': 529
-      };
-      
-      if (examplePrices[selectedSize]) {
-        estimatedPrice = examplePrices[selectedSize];
-        console.log(`💰 Используем примерную цену для размера ${selectedSize}: ¥${estimatedPrice}`);
-      } else {
-        // Если нет точной цены, используем среднюю цену
-        const prices = Object.values(examplePrices);
-        const avgPrice = prices.reduce((sum, price) => sum + price, 0) / prices.length;
-        estimatedPrice = Math.round(avgPrice);
-        console.log(`💰 Используем среднюю цену: ¥${estimatedPrice}`);
-      }
-    }
-    
-
-    // Получаем данные о товаре для определения категории
-    const productData = await parseProductPage(url);
-    
-    // Определяем категорию и рассчитываем стоимость
-    const category = determineCategory(productData.productName, productData.productDescription);
-    const categoryWeights = {
-      'shoes_clothing': 2.5,        // 2000₽ / 800₽ = 2.5 кг
-      'backpacks_bags': 1.875,      // 1500₽ / 800₽ = 1.875 кг
-      'hoodies_pants': 1.875,       // 1500₽ / 800₽ = 1.875 кг
-      'tshirts_shorts': 1.25,       // 1000₽ / 800₽ = 1.25 кг
-      'underwear_socks': 1.0,       // 800₽ / 800₽ = 1.0 кг
-      'accessories_perfume': 1.0    // 800₽ / 800₽ = 1.0 кг
-    };
-
-    const weight = categoryWeights[category] || 1.0;
-
-    // Получаем комиссию пользователя
-    let commission = 1000; // По умолчанию 1000₽
-    if (telegramId && dbConnection) {
-      try {
-        await ensureDBConnection();
-        const [rows] = await dbConnection.execute(
-          'SELECT commission, access_expires_at FROM users WHERE telegram_id = ?',
-          [telegramId]
-        );
-        
-        if (rows.length > 0) {
-          const user = rows[0];
-          if (user.access_expires_at && new Date() < new Date(user.access_expires_at)) {
-            commission = user.commission; // 400₽ для рефералов
-          } else {
-            commission = user.commission; // 1000₽ по умолчанию
-          }
-        }
-      } catch (dbError) {
-        console.error('Ошибка получения данных пользователя:', dbError);
-      }
-    }
-
-    // Рассчитываем стоимость
-    const currentRate = await getYuanToRubExchangeRate();
-    const itemCostRub = estimatedPrice * currentRate;
-    const deliveryCost = weight * DELIVERY_COST_PER_KG;
-    const commissionAmount = commission; // Фиксированная сумма в рублях
-    const totalCost = itemCostRub + commissionAmount + deliveryCost;
-
-    const result = {
-      originalPrice: parseFloat(estimatedPrice),
-      priceInRubles: parseFloat(itemCostRub.toFixed(2)),
-      deliveryCost: parseFloat(deliveryCost.toFixed(2)),
-      commission: parseFloat(commissionAmount.toFixed(2)),
-      commissionRate: commission, // Теперь это просто сумма в рублях
-      totalCost: parseFloat(totalCost.toFixed(2)),
-      exchangeRate: parseFloat(currentRate.toFixed(2)),
-      weight: parseFloat(weight.toFixed(1)),
-      productName: productData.productName,
-      productUrl: productData.url,
-      detectedCategory: category,
-      selectedSize: selectedSize,
-      isApproximate: isApproximate
-    };
-
-    console.log('✅ Результат расчета с размером:', result);
-    res.json(result);
-  } catch (error) {
-    console.error('Ошибка получения цены с размером:', error);
-    res.status(500).json({ error: 'Ошибка получения цены с размером' });
-  }
-});
-
 // Отправка отзыва
 app.post('/api/submit-review', async (req, res) => {
   try {
@@ -1882,15 +547,16 @@ app.post('/api/submit-review', async (req, res) => {
     }
 
     // Отправляем отзыв менеджеру в Telegram
-    const managerId = 'YOUR_MANAGER_TELEGRAM_ID'; // Замените на реальный ID менеджера
+    const managerId = process.env.MANAGER_TELEGRAM_ID;
     
-    const message = `📝 Новый отзыв от пользователя:\n\n` +
-                   `👤 Пользователь: @${username || 'неизвестно'} (ID: ${telegramId})\n` +
-                   `📝 Отзыв: ${reviewText}\n\n` +
-                   `⏰ Время: ${new Date().toLocaleString('ru-RU')}`;
-
-    // Здесь должен быть код отправки сообщения в Telegram
-    // await sendTelegramMessage(managerId, message);
+    if (managerId) {
+      const message = `📝 Новый отзыв от пользователя:\n\n` +
+                     `👤 Пользователь: @${username || 'неизвестно'} (ID: ${telegramId})\n` +
+                     `📝 Отзыв: ${reviewText}\n\n` +
+                     `⏰ Время: ${new Date().toLocaleString('ru-RU')}`;
+      
+      await sendTelegramMessage(managerId, message);
+    }
     
     console.log('Review submitted:', { telegramId, username, reviewText });
 
@@ -1995,14 +661,16 @@ app.post('/api/submit-review-direct', async (req, res) => {
       );
 
       // Отправляем уведомление менеджеру
-      const managerId = 'YOUR_MANAGER_TELEGRAM_ID'; // Замените на реальный ID менеджера
-      const message = `📝 Новый отзыв от пользователя:\n\n` +
-                     `👤 Пользователь: @${username || 'неизвестно'} (ID: ${telegramId})\n` +
-                     `📝 Отзыв: ${reviewText}\n\n` +
-                     `⏰ Время: ${new Date(timestamp).toLocaleString('ru-RU')}`;
-
-      // Здесь должен быть код отправки сообщения в Telegram
-      // await sendTelegramMessage(managerId, message);
+      const managerId = process.env.MANAGER_TELEGRAM_ID;
+      
+      if (managerId) {
+        const message = `📝 Новый отзыв от пользователя:\n\n` +
+                       `👤 Пользователь: @${username || 'неизвестно'} (ID: ${telegramId})\n` +
+                       `📝 Отзыв: ${reviewText}\n\n` +
+                       `⏰ Время: ${new Date(timestamp).toLocaleString('ru-RU')}`;
+        
+        await sendTelegramMessage(managerId, message);
+      }
       
       console.log('Review saved to database:', { telegramId, username, reviewText });
     }
@@ -2020,7 +688,6 @@ app.post('/api/submit-review-direct', async (req, res) => {
 // Расчет стоимости товара
 app.post('/api/calculate-price', async (req, res) => {
   try {
-    console.log('📊 Получен запрос на расчет стоимости:', req.body);
     const { price, weight, category, telegramId } = req.body;
     
     if (!price || !weight) {
@@ -2052,10 +719,8 @@ app.post('/api/calculate-price', async (req, res) => {
         console.error('Ошибка получения данных пользователя:', dbError);
       }
     }
-
-    console.log('💰 Начинаем расчет стоимости...');
+    
     const currentRate = await getYuanToRubExchangeRate();
-    console.log('📈 Курс юаня:', currentRate);
     
     const itemCostRub = price * currentRate;
     const deliveryCost = weight * DELIVERY_COST_PER_KG;
@@ -2168,8 +833,7 @@ app.post('/api/calculate-price', async (req, res) => {
       exchangeRate: parseFloat(currentRate.toFixed(2)),
       weight: parseFloat(weight)
     };
-
-    console.log('✅ Результат расчета:', result);
+    
     res.json(result);
   } catch (error) {
     console.error('Ошибка расчета стоимости:', error);
@@ -2193,6 +857,20 @@ app.post('/api/orders', async (req, res) => {
     
     if (!telegramId || !items || !Array.isArray(items) || items.length === 0) {
       return res.status(400).json({ error: 'Необходимы telegram ID и массив товаров' });
+    }
+
+    // Валидация номера телефона (интернациональный формат)
+    function validatePhoneNumber(phone) {
+      if (!phone) return false;
+      const cleaned = phone.replace(/\D/g, ''); // оставить только цифры
+      // Допускаем международные номера: от 7 до 15 цифр (E.164 максимум 15)
+      return cleaned.length >= 7 && cleaned.length <= 15;
+    }
+
+    if (!validatePhoneNumber(phoneNumber)) {
+      return res.status(400).json({ 
+        error: 'Некорректный номер телефона. Укажите международный формат (например: +1 415 555 2671)' 
+      });
     }
 
     // Валидация товаров
@@ -2220,13 +898,14 @@ app.post('/api/orders', async (req, res) => {
         [telegramId, telegramId]
       );
 
-      // Получаем username из базы данных
+      // Получаем username и комиссию из базы данных
       const [userRows] = await dbConnection.execute(
-        'SELECT username FROM users WHERE telegram_id = ?',
+        'SELECT username, commission FROM users WHERE telegram_id = ?',
         [telegramId]
       );
       
       const dbUsername = userRows.length > 0 ? userRows[0].username : username;
+      const userCommission = userRows.length > 0 ? userRows[0].commission : 1000;
 
               // Создаем заказ (без товаров)
       const [result] = await dbConnection.execute(
@@ -2240,7 +919,9 @@ app.post('/api/orders', async (req, res) => {
 
       // Добавляем товары в заказ
       for (const item of items) {
-        const itemSavings = 5000.00; // 5000₽ за каждый товар
+        // Рассчитываем реальную экономию: базовая 5000₽ + скидка на комиссию
+        const commissionDiscount = 1000 - userCommission;
+        const itemSavings = 5000.00 + commissionDiscount;
         totalSavings += itemSavings;
 
         await dbConnection.execute(
@@ -2730,9 +1411,6 @@ app.post('/api/reviews', upload.single('photo'), async (req, res) => {
   try {
     await ensureDBConnection();
     
-    console.log('📝 Получен отзыв:', req.body);
-    console.log('📸 Файл:', req.file ? req.file.filename : 'нет');
-    
     // Поддержка обоих форматов данных (camelCase и snake_case)
     const telegram_id = req.body.telegram_id || req.body.telegramId;
     const username = req.body.username;
@@ -3196,26 +1874,6 @@ app.patch('/api/users', async (req, res) => {
   } catch (error) {
     console.error('Ошибка обновления профиля:', error);
     res.status(500).json({ error: 'Ошибка обновления профиля' });
-  }
-});
-
-// Получение курса валют
-app.get('/api/exchange-rate', async (req, res) => {
-  try {
-    // Здесь можно интегрировать с реальным API курса валют
-    // Пока возвращаем фиксированный курс с благоприятным коэффициентом
-    const baseRate = 12.5; // Базовый курс CNY/RUB
-    const favorableRate = baseRate * 0.95; // 5% скидка
-    
-    res.json({
-      base_rate: baseRate,
-      favorable_rate: favorableRate,
-      savings_percent: 5,
-      last_updated: new Date().toISOString()
-    });
-  } catch (error) {
-    console.error('Ошибка получения курса валют:', error);
-    res.status(500).json({ error: 'Ошибка получения курса валют' });
   }
 });
 
@@ -3905,374 +2563,6 @@ app.get('/api/admin/system-logs', async (req, res) => {
   }
 });
 
-// ============================================
-// АДМИНСКИЕ ЭНДПОИНТЫ
-// ============================================
-
-// Проверка прав доступа админа
-function checkAdminAccess(req, res, next) {
-  // Временно отключаем проверку для тестирования
-  // const adminIds = ['7696515351', '690296532'];
-  // const telegramId = req.headers['x-telegram-user-id'] || req.query.admin_id || req.body.admin_id;
-  // 
-  // if (!adminIds.includes(telegramId)) {
-  //   return res.status(403).json({ error: 'Доступ запрещен' });
-  // }
-  
-  next();
-}
-
-// Общая статистика для админов
-app.get('/api/admin/stats', async (req, res) => {
-  try {
-    await ensureDBConnection();
-    
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    
-    // Общее количество пользователей
-    const [totalUsersResult] = await dbConnection.execute(
-      'SELECT COUNT(*) as total FROM users'
-    );
-    const totalUsers = totalUsersResult[0].total;
-    
-    // Новые пользователи сегодня
-    const [newUsersTodayResult] = await dbConnection.execute(
-      'SELECT COUNT(*) as total FROM users WHERE DATE(created_at) = CURDATE()'
-    );
-    const newUsersToday = newUsersTodayResult[0].total;
-    
-    // Общее количество заказов
-    const [totalOrdersResult] = await dbConnection.execute(
-      'SELECT COUNT(*) as total FROM orders'
-    );
-    const totalOrders = totalOrdersResult[0].total;
-    
-    // Заказы сегодня
-    const [ordersTodayResult] = await dbConnection.execute(
-      'SELECT COUNT(*) as total FROM orders WHERE DATE(created_at) = CURDATE()'
-    );
-    const ordersToday = ordersTodayResult[0].total;
-    
-    // Общее количество покупок юаней
-    const [totalYuanResult] = await dbConnection.execute(
-      'SELECT COUNT(*) as total FROM yuan_purchases'
-    );
-    const totalYuanPurchases = totalYuanResult[0].total;
-    
-    // Покупки юаней сегодня
-    const [yuanTodayResult] = await dbConnection.execute(
-      'SELECT COUNT(*) as total FROM yuan_purchases WHERE DATE(created_at) = CURDATE()'
-    );
-    const yuanPurchasesToday = yuanTodayResult[0].total;
-    
-    // Общая экономия (только завершенные заказы)
-    const [totalSavingsResult] = await dbConnection.execute(`
-      SELECT 
-        COALESCE(SUM(yuan_savings), 0) + COALESCE(SUM(order_savings), 0) as total_savings
-      FROM (
-        SELECT SUM(savings) as yuan_savings, 0 as order_savings FROM yuan_purchases WHERE status = 'completed'
-        UNION ALL
-        SELECT 0 as yuan_savings, SUM(estimated_savings) as order_savings FROM orders WHERE status = 'completed'
-      ) as combined_savings
-    `);
-    const totalSavings = totalSavingsResult[0].total_savings || 0;
-    
-    // Общий доход (реальная прибыль из расчетов)
-    const [totalRevenueResult] = await dbConnection.execute(`
-      SELECT 
-        COALESCE(SUM(profit), 0) as total_revenue
-      FROM profit_calculations
-    `);
-    const totalRevenue = totalRevenueResult[0].total_revenue || 0;
-    
-    // Активные пользователи (пользователи с активностью за последние 7 дней)
-    const [activeUsersResult] = await dbConnection.execute(`
-      SELECT COUNT(DISTINCT telegram_id) as active_users
-      FROM (
-        SELECT telegram_id FROM orders WHERE created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)
-        UNION
-        SELECT telegram_id FROM yuan_purchases WHERE created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)
-      ) as active_users_combined
-    `);
-    const activeUsers = activeUsersResult[0].active_users || 0;
-    
-    // Конверсия (процент пользователей, которые сделали заказ или покупку)
-    const [conversionResult] = await dbConnection.execute(`
-      SELECT 
-        COUNT(DISTINCT active_users.telegram_id) as converted_users
-      FROM users
-      LEFT JOIN (
-        SELECT telegram_id FROM orders
-        UNION
-        SELECT telegram_id FROM yuan_purchases
-      ) as active_users ON users.telegram_id = active_users.telegram_id
-      WHERE active_users.telegram_id IS NOT NULL
-    `);
-    const convertedUsers = conversionResult[0].converted_users || 0;
-    const conversionRate = totalUsers > 0 ? (convertedUsers / totalUsers) * 100 : 0;
-    
-    res.json({
-      totalUsers,
-      newUsersToday,
-      totalOrders,
-      ordersToday,
-      totalYuanPurchases,
-      yuanPurchasesToday,
-      totalSavings,
-      totalRevenue,
-      activeUsers,
-      conversionRate
-    });
-    
-  } catch (error) {
-    console.error('Ошибка получения админ статистики:', error);
-    res.status(500).json({ error: 'Ошибка получения статистики' });
-  }
-});
-
-// Получение всех пользователей
-app.get('/api/admin/users', async (req, res) => {
-  try {
-    await ensureDBConnection();
-    
-    const [users] = await dbConnection.execute(`
-      SELECT 
-        u.telegram_id,
-        u.username,
-        u.full_name,
-        u.created_at,
-        u.last_activity,
-        u.commission,
-        u.referred_by,
-        CASE 
-          WHEN u.last_activity IS NULL THEN 'offline'
-          WHEN TIMESTAMPDIFF(SECOND, u.last_activity, NOW()) <= 30 THEN 'online'
-          ELSE 'offline'
-        END as status,
-        COUNT(DISTINCT CASE WHEN o.status = 'completed' THEN o.order_id END) as orders_count,
-        COUNT(DISTINCT CASE WHEN yp.status = 'completed' THEN yp.id END) as yuan_purchases_count,
-        COALESCE(SUM(CASE WHEN yp.status = 'completed' THEN yp.savings ELSE 0 END), 0) as yuan_savings,
-        COALESCE(SUM(CASE WHEN o.status = 'completed' THEN o.estimated_savings ELSE 0 END), 0) as order_savings,
-        COALESCE(SUM(CASE WHEN yp.status = 'completed' THEN yp.savings ELSE 0 END), 0) + COALESCE(SUM(CASE WHEN o.status = 'completed' THEN o.estimated_savings ELSE 0 END), 0) as total_savings,
-        COUNT(DISTINCT r.telegram_id) as referrals_count
-      FROM users u
-      LEFT JOIN orders o ON u.telegram_id = o.telegram_id
-      LEFT JOIN yuan_purchases yp ON u.telegram_id = yp.telegram_id
-      LEFT JOIN users r ON u.telegram_id = r.referred_by
-      GROUP BY u.telegram_id, u.username, u.full_name, u.created_at, u.last_activity, u.commission, u.referred_by
-      ORDER BY u.created_at DESC
-    `);
-    
-    res.json({ users });
-  } catch (error) {
-    console.error('Ошибка получения пользователей:', error);
-    res.status(500).json({ error: 'Ошибка получения пользователей' });
-  }
-});
-
-// Получение всех заказов
-app.get('/api/admin/orders', async (req, res) => {
-  try {
-    await ensureDBConnection();
-    
-    const [orders] = await dbConnection.execute(`
-      SELECT 
-        o.order_id,
-        o.telegram_id,
-        o.username,
-        o.full_name,
-        o.phone_number,
-        o.pickup_point,
-        o.pickup_point_address,
-        o.comments,
-        o.estimated_savings,
-        o.status,
-        o.created_at,
-        COUNT(oi.id) as items_count
-      FROM orders o
-      LEFT JOIN order_items oi ON o.order_id = oi.order_id
-      GROUP BY o.order_id, o.telegram_id, o.username, o.full_name, o.phone_number, o.pickup_point, o.pickup_point_address, o.comments, o.estimated_savings, o.status, o.created_at
-      ORDER BY o.created_at DESC
-    `);
-    
-    res.json({ orders });
-  } catch (error) {
-    console.error('Ошибка получения заказов:', error);
-    res.status(500).json({ error: 'Ошибка получения заказов' });
-  }
-});
-
-// Получение всех покупок юаней
-app.get('/api/admin/yuan-purchases', async (req, res) => {
-  try {
-    await ensureDBConnection();
-    
-    const [purchases] = await dbConnection.execute(`
-      SELECT 
-        yp.id,
-        yp.telegram_id,
-        yp.amount_rub,
-        yp.amount_cny,
-        yp.exchange_rate,
-        yp.favorable_rate,
-        yp.savings,
-        yp.status,
-        yp.created_at,
-        u.username,
-        u.full_name
-      FROM yuan_purchases yp
-      LEFT JOIN users u ON yp.telegram_id = u.telegram_id
-      ORDER BY yp.created_at DESC
-    `);
-    
-    res.json({ purchases });
-  } catch (error) {
-    console.error('Ошибка получения покупок юаней:', error);
-    res.status(500).json({ error: 'Ошибка получения покупок юаней' });
-  }
-});
-
-// Получение детальной информации о пользователе
-app.get('/api/admin/user-details/:telegramId', async (req, res) => {
-  try {
-    await ensureDBConnection();
-    const { telegramId } = req.params;
-    
-    // Информация о пользователе
-    const [userInfo] = await dbConnection.execute(
-      'SELECT * FROM users WHERE telegram_id = ?',
-      [telegramId]
-    );
-    
-    if (userInfo.length === 0) {
-      return res.status(404).json({ error: 'Пользователь не найден' });
-    }
-    
-    // Заказы пользователя
-    const [orders] = await dbConnection.execute(`
-      SELECT 
-        o.*,
-        COUNT(oi.id) as items_count
-      FROM orders o
-      LEFT JOIN order_items oi ON o.order_id = oi.order_id
-      WHERE o.telegram_id = ?
-      GROUP BY o.order_id
-      ORDER BY o.created_at DESC
-    `, [telegramId]);
-    
-    // Покупки юаней пользователя
-    const [yuanPurchases] = await dbConnection.execute(
-      'SELECT * FROM yuan_purchases WHERE telegram_id = ? ORDER BY created_at DESC',
-      [telegramId]
-    );
-    
-    // Активность пользователя
-    const [activity] = await dbConnection.execute(
-      'SELECT * FROM user_activity WHERE telegram_id = ? ORDER BY created_at DESC LIMIT 50',
-      [telegramId]
-    );
-    
-    // Достижения пользователя
-    const [achievements] = await dbConnection.execute(
-      'SELECT * FROM user_achievements WHERE telegram_id = ? ORDER BY unlocked_at DESC',
-      [telegramId]
-    );
-    
-    res.json({
-      user: userInfo[0],
-      orders,
-      yuanPurchases,
-      activity,
-      achievements
-    });
-    
-  } catch (error) {
-    console.error('Ошибка получения детальной информации о пользователе:', error);
-    res.status(500).json({ error: 'Ошибка получения информации о пользователе' });
-  }
-});
-
-// Получение системных логов
-app.get('/api/admin/system-logs', async (req, res) => {
-  try {
-    await ensureDBConnection();
-    
-    const { level, limit = 100 } = req.query;
-    
-    let query = 'SELECT * FROM system_logs';
-    const params = [];
-    
-    if (level) {
-      query += ' WHERE level = ?';
-      params.push(level);
-    }
-    
-    query += ' ORDER BY created_at DESC LIMIT ?';
-    params.push(parseInt(limit));
-    
-    const [logs] = await dbConnection.execute(query, params);
-    
-    res.json({ logs });
-  } catch (error) {
-    console.error('Ошибка получения системных логов:', error);
-    res.status(500).json({ error: 'Ошибка получения логов' });
-  }
-});
-
-// Получение заказов, ожидающих подтверждения
-app.get('/api/admin/pending-orders', async (req, res) => {
-  try {
-    await ensureDBConnection();
-    
-    // Заказы, ожидающие подтверждения
-    const [orders] = await dbConnection.execute(`
-      SELECT 
-        o.order_id,
-        o.telegram_id,
-        o.username,
-        o.full_name,
-        o.phone_number,
-        o.pickup_point,
-        o.pickup_point_address,
-        o.comments,
-        o.estimated_savings,
-        o.created_at,
-        COUNT(oi.id) as items_count,
-        GROUP_CONCAT(oi.product_link SEPARATOR '; ') as product_links
-      FROM orders o
-      LEFT JOIN order_items oi ON o.order_id = oi.order_id
-      WHERE o.status = 'pending'
-      GROUP BY o.order_id, o.telegram_id, o.username, o.full_name, o.phone_number, o.pickup_point, o.pickup_point_address, o.comments, o.estimated_savings, o.created_at
-      ORDER BY o.created_at DESC
-    `);
-    
-    // Покупки юаней, ожидающие подтверждения
-    const [yuanPurchases] = await dbConnection.execute(`
-      SELECT 
-        yp.id,
-        yp.telegram_id,
-        yp.amount_rub,
-        yp.amount_cny,
-        yp.exchange_rate,
-        yp.favorable_rate,
-        yp.savings,
-        yp.created_at,
-        u.username,
-        u.full_name
-      FROM yuan_purchases yp
-      LEFT JOIN users u ON yp.telegram_id = u.telegram_id
-      WHERE yp.status = 'pending'
-      ORDER BY yp.created_at DESC
-    `);
-    
-    res.json({ orders, yuanPurchases });
-  } catch (error) {
-    console.error('Ошибка получения заказов, ожидающих подтверждения:', error);
-    res.status(500).json({ error: 'Ошибка получения заказов' });
-  }
-});
-
 // Подтверждение заказа
 app.post('/api/admin/confirm-order', async (req, res) => {
   try {
@@ -4328,7 +2618,6 @@ app.post('/api/admin/confirm-order', async (req, res) => {
                 `✨ Всего XP: ${xpResult.totalXP}`;
               // Включаем уведомления для продакшена
               await sendTelegramMessage(telegramId, levelUpMsg);
-              console.log('🎊 Level up notification sent:', levelUpMsg);
             }
             
             for (const achievement of achievements) {
@@ -4339,7 +2628,6 @@ app.post('/api/admin/confirm-order', async (req, res) => {
                   `🎁 Награда: +${achievement.achievement.xpReward} XP`;
                 // Включаем уведомления для продакшена
                 await sendTelegramMessage(telegramId, achievementMsg);
-                console.log('🏆 Achievement notification sent:', achievementMsg);
               }
             }
           } else if (type === 'yuan') {
@@ -4383,8 +2671,7 @@ app.post('/api/admin/confirm-order', async (req, res) => {
                       `🎁 Награда: +${achievement.achievement.xpReward} XP`;
                     // Включаем уведомления для продакшена
                 await sendTelegramMessage(telegramId, achievementMsg);
-                console.log('🏆 Achievement notification sent:', achievementMsg);
-                  }
+              }
                 }
               }
             }
@@ -4458,7 +2745,7 @@ async function getTelegramIdByOrderId(orderId, type) {
 
 async function sendUserNotification(telegramId, action, type, orderId) {
   try {
-    const botToken = process.env.BOT_TOKEN || '8113129973:AAHePXZqOW2MnajUEnporDpoYULAEyX1N_8';
+    const botToken = process.env.BOT_TOKEN;
     
     let message = '';
     if (action === 'confirm') {
@@ -5997,7 +4284,6 @@ app.post('/api/admin/orders/:orderId/update-status', async (req, res) => {
 // Получение отзывов с пагинацией
 app.get('/api/reviews', async (req, res) => {
   try {
-    console.log('🚀 ЭНДПОИНТ /api/reviews ВЫЗВАН!');
     await ensureDBConnection();
     
     const page = parseInt(req.query.page) || 1;
@@ -6402,6 +4688,66 @@ async function startServer() {
   });
 }
 
+// Обработчики ошибок с уведомлениями админу
+process.on('uncaughtException', async (error) => {
+  console.error('🚨 КРИТИЧЕСКАЯ ОШИБКА (uncaughtException):', error);
+  
+  try {
+    const botToken = process.env.BOT_TOKEN;
+    const managerChatId = process.env.MANAGER_CHAT_ID || process.env.MANAGER_TELEGRAM_ID;
+    
+    if (botToken && managerChatId) {
+      const errorMessage = `🚨 <b>КРИТИЧЕСКАЯ ОШИБКА СЕРВЕРА</b>\n\n` +
+        `⚠️ <b>Тип:</b> Uncaught Exception\n\n` +
+        `❌ <b>Ошибка:</b> ${error.message}\n\n` +
+        `📅 <b>Время:</b> ${new Date().toLocaleString('ru-RU')}\n\n` +
+        `🔄 <b>Действие:</b> Сервер перезапускается...`;
+      
+      await axios.post(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+        chat_id: managerChatId,
+        text: errorMessage,
+        parse_mode: 'HTML'
+      }).catch(() => {});
+    }
+  } catch (notifyError) {
+    console.error('❌ Не удалось отправить уведомление о критической ошибке:', notifyError);
+  }
+  
+  // Закрываем соединение с БД перед выходом
+  if (dbConnection) {
+    await dbConnection.end().catch(() => {});
+  }
+  
+  process.exit(1);
+});
+
+process.on('unhandledRejection', async (reason, promise) => {
+  console.error('🚨 Необработанная ошибка Promise (unhandledRejection):', reason);
+  
+  try {
+    const botToken = process.env.BOT_TOKEN;
+    const managerChatId = process.env.MANAGER_CHAT_ID || process.env.MANAGER_TELEGRAM_ID;
+    
+    if (botToken && managerChatId) {
+      const errorMessage = `🚨 <b>КРИТИЧЕСКАЯ ОШИБКА СЕРВЕРА</b>\n\n` +
+        `⚠️ <b>Тип:</b> Unhandled Rejection\n\n` +
+        `❌ <b>Ошибка:</b> ${reason?.message || String(reason)}\n\n` +
+        `📅 <b>Время:</b> ${new Date().toLocaleString('ru-RU')}\n\n` +
+        `🔴 <b>ВНИМАНИЕ:</b> Процесс может завершиться некорректно!`;
+      
+      await axios.post(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+        chat_id: managerChatId,
+        text: errorMessage,
+        parse_mode: 'HTML'
+      }).catch(() => {});
+    }
+  } catch (notifyError) {
+    console.error('❌ Не удалось отправить уведомление о критической ошибке:', notifyError);
+  }
+  
+  // Не завершаем процесс, только логируем
+});
+
 // Graceful shutdown
 process.on('SIGTERM', async () => {
   console.log('Получен сигнал SIGTERM, завершение работы...');
@@ -6410,94 +4756,6 @@ process.on('SIGTERM', async () => {
   }
   process.exit(0);
 });
-
-// Функция для проверки истечения скидочной комиссии
-async function checkExpiredCommissions() {
-  try {
-    await ensureDBConnection();
-    
-    if (!dbConnection) {
-      console.log('⚠️ Нет соединения с БД для проверки комиссий');
-      return;
-    }
-
-    const now = new Date();
-    const threeDaysFromNow = new Date(now.getTime() + 3 * 24 * 60 * 60 * 1000);
-
-    // 1. Проверяем пользователей, у которых скидка истекает через 3 дня
-    const [warningUsers] = await dbConnection.execute(`
-      SELECT telegram_id, username, full_name, access_expires_at, commission
-      FROM users 
-      WHERE access_expires_at IS NOT NULL 
-        AND access_expires_at > NOW() 
-        AND access_expires_at <= ?
-        AND commission < 1000
-    `, [threeDaysFromNow]);
-
-    // Отправляем предупреждения
-    for (const user of warningUsers) {
-      const expiresAt = new Date(user.access_expires_at);
-      const daysLeft = Math.ceil((expiresAt - now) / (24 * 60 * 60 * 1000));
-      
-      const warningMessage = `⚠️ <b>Скидочная комиссия истекает!</b>\n\n` +
-                            `Ваша сниженная комиссия ${user.commission}₽ истекает через ${daysLeft} дн.\n\n` +
-                            `⏰ <b>Истекает:</b> ${expiresAt.toLocaleString('ru-RU')}\n\n` +
-                            `💰 После истечения комиссия вернется к 1000₽\n\n` +
-                            `🛍️ <b>Успевайте оформить заказ по сниженной цене!</b>`;
-
-      await sendTelegramMessage(user.telegram_id, warningMessage);
-      
-      // Логируем предупреждение
-      await createSystemLog('info', `Отправлено предупреждение об истечении скидки пользователю ${user.telegram_id}`, {
-        telegramId: user.telegram_id,
-        daysLeft: daysLeft,
-        expiresAt: user.access_expires_at
-      });
-    }
-
-    // 2. Проверяем пользователей, у которых скидка уже истекла
-    const [expiredUsers] = await dbConnection.execute(`
-      SELECT telegram_id, username, full_name, commission
-      FROM users 
-      WHERE access_expires_at IS NOT NULL 
-        AND access_expires_at <= NOW() 
-        AND commission < 1000
-    `);
-
-    // Возвращаем комиссию к 1000₽ и отправляем уведомления
-    for (const user of expiredUsers) {
-      const oldCommission = user.commission;
-      
-      // Обновляем комиссию
-      await dbConnection.execute(
-        'UPDATE users SET commission = 1000, access_expires_at = NULL WHERE telegram_id = ?',
-        [user.telegram_id]
-      );
-
-      // Отправляем уведомление
-      const expiryMessage = `📅 <b>Скидочная комиссия истекла</b>\n\n` +
-                           `Ваша сниженная комиссия ${oldCommission}₽ истекла.\n\n` +
-                           `💰 <b>Текущая комиссия:</b> 1000₽\n\n` +
-                           `💡 Вы можете снова получить скидку, пригласив друга по реферальной ссылке!`;
-
-      await sendTelegramMessage(user.telegram_id, expiryMessage);
-      
-      // Логируем возврат комиссии
-      await createSystemLog('info', `Комиссия пользователя ${user.telegram_id} возвращена к 1000₽ после истечения скидки`, {
-        telegramId: user.telegram_id,
-        oldCommission: oldCommission,
-        newCommission: 1000
-      });
-    }
-
-    if (warningUsers.length > 0 || expiredUsers.length > 0) {
-      console.log(`✅ Проверка комиссий: ${warningUsers.length} предупреждений, ${expiredUsers.length} возвратов`);
-    }
-
-  } catch (error) {
-    console.error('❌ Ошибка при проверке истечения комиссий:', error);
-  }
-}
 
 // Периодическая проверка соединения с БД каждые 5 минут
 setInterval(async () => {
@@ -6513,14 +4771,11 @@ setInterval(async () => {
   }
 }, 5 * 60 * 1000); // 5 минут
 
-// Периодическая проверка истечения комиссий каждые 6 часов
-setInterval(checkExpiredCommissions, 6 * 60 * 60 * 1000); // 6 часов
-
 // Ручной endpoint для тестирования проверки комиссий
 app.post('/api/admin/check-expired-commissions', async (req, res) => {
   try {
     console.log('🔍 Ручная проверка истечения комиссий...');
-    await checkExpiredCommissions();
+    await checkExpiredDiscounts();
     res.json({ success: true, message: 'Проверка комиссий выполнена' });
   } catch (error) {
     console.error('Ошибка ручной проверки комиссий:', error);
