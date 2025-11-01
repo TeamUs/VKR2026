@@ -1390,10 +1390,25 @@ app.get('/api/reviews', async (req, res) => {
             LIMIT ${limit} OFFSET ${offset}
           `);
     
+    // Получаем все фото для каждого отзыва
+    const reviewsWithPhotos = await Promise.all(rows.map(async (review) => {
+      const [photos] = await dbConnection.execute(`
+        SELECT photo_url, display_order
+        FROM review_photos
+        WHERE review_id = ?
+        ORDER BY display_order ASC
+      `, [review.review_id]);
+      
+      return {
+        ...review,
+        photos: photos.map(p => p.photo_url) // Массив URL фотографий
+      };
+    }));
+    
     const totalPages = Math.ceil(total / limit);
     
     res.json({ 
-      reviews: rows,
+      reviews: reviewsWithPhotos,
       total: total,
       page: page,
       limit: limit,
@@ -1433,7 +1448,7 @@ app.get('/api/reviews/average-rating', async (req, res) => {
 });
 
 // Создание нового отзыва
-app.post('/api/reviews', upload.single('photo'), async (req, res) => {
+app.post('/api/reviews', upload.array('photos', 10), async (req, res) => {
   try {
     await ensureDBConnection();
     
@@ -1443,6 +1458,7 @@ app.post('/api/reviews', upload.single('photo'), async (req, res) => {
     const full_name = req.body.full_name || req.body.fullName;
     const rating = req.body.rating;
     const review_text = req.body.review_text || req.body.reviewText || req.body.comment;
+    const files = req.files || [];
     
     console.log('Получены данные отзыва:', {
       telegram_id,
@@ -1450,7 +1466,7 @@ app.post('/api/reviews', upload.single('photo'), async (req, res) => {
       full_name,
       rating,
       review_text,
-      hasPhoto: !!req.file
+      photosCount: files.length
     });
     
     // Валидация
@@ -1459,9 +1475,10 @@ app.post('/api/reviews', upload.single('photo'), async (req, res) => {
       return res.status(400).json({ error: 'Неверные данные отзыва' });
     }
     
+    // Берём первое фото для обратной совместимости (старое поле photo_url)
     let photo_url = null;
-    if (req.file) {
-      photo_url = `/uploads/reviews/${req.file.filename}`;
+    if (files.length > 0) {
+      photo_url = `/uploads/reviews/${files[0].filename}`;
     }
     
     // Проверяем, существует ли пользователь, если нет - создаем
@@ -1483,30 +1500,45 @@ app.post('/api/reviews', upload.single('photo'), async (req, res) => {
       VALUES (?, ?, ?, ?, ?, ?, 0)
     `, [telegram_id, username, full_name, rating, review_text, photo_url]);
     
+    const reviewId = result.insertId;
+    
+    // Сохраняем все фото в таблицу review_photos
+    if (files.length > 0) {
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        await dbConnection.execute(`
+          INSERT INTO review_photos (review_id, photo_url, display_order)
+          VALUES (?, ?, ?)
+        `, [reviewId, `/uploads/reviews/${file.filename}`, i]);
+      }
+    }
+    
     // Логируем активность пользователя
     await logUserActivity(telegram_id, 'review_created', {
-      reviewId: result.insertId,
+      reviewId: reviewId,
       rating,
-      hasPhoto: !!photo_url
+      photosCount: files.length
     });
 
     // Создаем системный лог
-    await createSystemLog('info', `Новый отзыв создан: #${result.insertId}`, {
+    await createSystemLog('info', `Новый отзыв создан: #${reviewId}`, {
       telegramId: telegram_id,
-      reviewId: result.insertId,
-      rating
+      reviewId: reviewId,
+      rating,
+      photosCount: files.length
     }, telegram_id);
     
     // Отправляем уведомление менеджеру о новом отзыве
     const stars = '⭐'.repeat(parseInt(rating));
+    const photosInfo = files.length > 0 ? `📸 <b>Фото:</b> ${files.length}\n\n` : '';
     const managerMessage = `📝 <b>Новый отзыв (требует модерации)!</b>\n\n` +
                           `${stars} <b>Оценка:</b> ${rating}/5\n` +
                           `👤 <b>От:</b> ${full_name || username || 'Аноним'} (@${username || 'без username'})\n` +
                           `🆔 <b>ID:</b> ${telegram_id}\n\n` +
                           `💬 <b>Отзыв:</b>\n${review_text || 'Без текста'}\n\n` +
-                          `${photo_url ? `📸 <b>С фото</b>\n\n` : ''}` +
+                          photosInfo +
                           `⏰ <b>Время:</b> ${new Date().toLocaleString('ru-RU')}\n\n` +
-                          `🆔 <b>ID отзыва:</b> ${result.insertId}\n` +
+                          `🆔 <b>ID отзыва:</b> ${reviewId}\n` +
                           `⚠️ <b>Статус:</b> Ожидает модерации`;
     
     await sendManagerMessage(managerMessage);
@@ -1517,7 +1549,7 @@ app.post('/api/reviews', upload.single('photo'), async (req, res) => {
     
     res.json({ 
       success: true, 
-      review_id: result.insertId,
+      review_id: reviewId,
       message: 'Отзыв успешно добавлен!' 
     });
   } catch (error) {
@@ -2027,6 +2059,41 @@ app.post('/api/yuan-purchase', async (req, res) => {
   }
 });
 
+// Получение списка всех изображений выкупов
+app.get('/api/purchases/images', async (req, res) => {
+  try {
+    const purchasesImagesDir = path.join(__dirname, '..', 'frontend', 'public', 'images', 'purchases');
+    
+    if (!fs.existsSync(purchasesImagesDir)) {
+      return res.json({ images: [] });
+    }
+    
+    const files = fs.readdirSync(purchasesImagesDir)
+      .filter(file => {
+        const ext = path.extname(file).toLowerCase();
+        return ['.jpg', '.jpeg', '.png', '.gif', '.webp'].includes(ext);
+      })
+      .map(file => {
+        const filePath = path.join(purchasesImagesDir, file);
+        const stats = fs.statSync(filePath);
+        return {
+          name: file,
+          mtime: stats.mtime.getTime() // Время последнего изменения
+        };
+      })
+      .sort((a, b) => {
+        // Сортируем по дате изменения: новые сверху (от большего к меньшему)
+        return b.mtime - a.mtime;
+      })
+      .map(file => `/images/purchases/${file.name}`);
+    
+    res.json({ images: files });
+  } catch (error) {
+    console.error('Ошибка получения списка изображений выкупов:', error);
+    res.status(500).json({ error: 'Ошибка получения списка изображений' });
+  }
+});
+
 // Получение истории покупок юаня
 app.get('/api/yuan-purchases', async (req, res) => {
   try {
@@ -2472,6 +2539,8 @@ app.get('/api/admin/orders', async (req, res) => {
         o.username,
         o.full_name,
         o.phone_number,
+        o.pickup_point,
+        o.pickup_point_address,
         o.created_at,
         o.estimated_savings,
         o.status,
@@ -2502,15 +2571,18 @@ app.get('/api/admin/yuan-purchases', async (req, res) => {
     
     const [purchases] = await dbConnection.execute(`
       SELECT 
-        id,
-        telegram_id,
-        amount_cny,
-        amount_rub,
-        savings,
-        created_at,
-        status
-      FROM yuan_purchases
-      ORDER BY created_at DESC
+        yp.id,
+        yp.telegram_id,
+        yp.amount_cny,
+        yp.amount_rub,
+        yp.savings,
+        yp.created_at,
+        yp.status,
+        u.username,
+        u.full_name
+      FROM yuan_purchases yp
+      LEFT JOIN users u ON yp.telegram_id = u.telegram_id
+      ORDER BY yp.created_at DESC
     `);
     
     res.json({ purchases });
@@ -2518,6 +2590,66 @@ app.get('/api/admin/yuan-purchases', async (req, res) => {
   } catch (error) {
     console.error('Ошибка получения покупок юаней:', error);
     res.status(500).json({ error: 'Ошибка получения покупок юаней' });
+  }
+});
+
+// Получение ожидающих заказов и покупок юаней
+app.get('/api/admin/pending-orders', async (req, res) => {
+  try {
+    await ensureDBConnection();
+    
+    // Получаем ожидающие заказы
+    const [pendingOrders] = await dbConnection.execute(`
+      SELECT 
+        o.order_id,
+        o.telegram_id,
+        o.username,
+        o.full_name,
+        o.phone_number,
+        o.pickup_point,
+        o.pickup_point_address,
+        o.created_at,
+        o.estimated_savings,
+        o.status,
+        COALESCE(item_stats.items_count, 0) as items_count
+      FROM orders o
+      LEFT JOIN (
+        SELECT 
+          order_id,
+          COUNT(*) as items_count
+        FROM order_items
+        GROUP BY order_id
+      ) item_stats ON o.order_id = item_stats.order_id
+      WHERE o.status = 'pending'
+      ORDER BY o.created_at DESC
+    `);
+    
+    // Получаем ожидающие покупки юаней
+    const [pendingYuanPurchases] = await dbConnection.execute(`
+      SELECT 
+        yp.id,
+        yp.telegram_id,
+        yp.amount_cny,
+        yp.amount_rub,
+        yp.savings,
+        yp.created_at,
+        yp.status,
+        u.username,
+        u.full_name
+      FROM yuan_purchases yp
+      LEFT JOIN users u ON yp.telegram_id = u.telegram_id
+      WHERE yp.status = 'pending'
+      ORDER BY yp.created_at DESC
+    `);
+    
+    res.json({ 
+      orders: pendingOrders, 
+      yuanPurchases: pendingYuanPurchases 
+    });
+    
+  } catch (error) {
+    console.error('Ошибка получения ожидающих заказов:', error);
+    res.status(500).json({ error: 'Ошибка получения ожидающих заказов' });
   }
 });
 

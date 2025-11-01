@@ -704,7 +704,8 @@ interface Review {
   full_name: string;
   rating: number;
   review_text: string;
-  photo_url?: string;
+  photo_url?: string; // Для обратной совместимости
+  photos?: string[]; // Массив фото (новый формат)
   created_at: string;
 }
 
@@ -1010,19 +1011,21 @@ const Reviews: React.FC<ReviewsProps> = ({ onNavigate, toggleTheme, isDarkTheme,
                         <ReviewText>{review.review_text}</ReviewText>
                       </ReviewTextContainer>
                       
-                      {review.photo_url && (
+                      {/* Отображаем фото: сначала массив photos, потом старое photo_url для совместимости */}
+                      {(review.photos && review.photos.length > 0 ? review.photos : (review.photo_url ? [review.photo_url] : [])).map((photo, idx) => (
                         <ReviewPhoto 
-                          src={getImageUrl(review.photo_url)}
-                          alt="Фото отзыва"
+                          key={idx}
+                          src={getImageUrl(photo)}
+                          alt={`Фото отзыва ${idx + 1}`}
                           onError={(e) => {
-                            console.error('Ошибка загрузки изображения в списке:', review.photo_url);
+                            console.error('Ошибка загрузки изображения в списке:', photo);
                             e.currentTarget.style.display = 'none';
                           }}
                           onLoad={() => {
-                            console.log('Изображение в списке загружено:', review.photo_url);
+                            console.log('Изображение в списке загружено:', photo);
                           }}
                         />
-                      )}
+                      ))}
                     </ReviewContent>
                   </ReviewItem>
                 </ReviewItemClickable>
@@ -1141,11 +1144,12 @@ const Reviews: React.FC<ReviewsProps> = ({ onNavigate, toggleTheme, isDarkTheme,
               {selectedReview.review_text}
             </ReviewModalContent>
             
-            {selectedReview.photo_url && (
-              <div style={{ marginTop: '15px', textAlign: 'center' }}>
+            {/* Отображаем все фото в модальном окне */}
+            {(selectedReview.photos && selectedReview.photos.length > 0 ? selectedReview.photos : (selectedReview.photo_url ? [selectedReview.photo_url] : [])).map((photo, idx) => (
+              <div key={idx} style={{ marginTop: '15px', textAlign: 'center' }}>
                 <img 
-                  src={getImageUrl(selectedReview.photo_url)}
-                  alt="Фото отзыва"
+                  src={getImageUrl(photo)}
+                  alt={`Фото отзыва ${idx + 1}`}
                   style={{
                     width: '100%',
                     maxWidth: '300px',
@@ -1156,15 +1160,15 @@ const Reviews: React.FC<ReviewsProps> = ({ onNavigate, toggleTheme, isDarkTheme,
                     margin: '0 auto'
                   }}
                   onError={(e) => {
-                    console.error('Ошибка загрузки изображения:', selectedReview.photo_url);
+                    console.error('Ошибка загрузки изображения:', photo);
                     e.currentTarget.style.display = 'none';
                   }}
                   onLoad={() => {
-                    console.log('Изображение загружено успешно:', selectedReview.photo_url);
+                    console.log('Изображение загружено успешно:', photo);
                   }}
                 />
               </div>
-            )}
+            ))}
           </ReviewModal>
         </ReviewModalOverlay>
       )}

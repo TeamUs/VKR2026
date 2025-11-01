@@ -369,8 +369,8 @@ interface WriteReviewModalProps {
 const WriteReviewModal: React.FC<WriteReviewModalProps> = ({ isOpen, onClose, onSuccess, scrollPosition }) => {
   const [rating, setRating] = useState(0);
   const [reviewText, setReviewText] = useState('');
-  const [photo, setPhoto] = useState<File | null>(null);
-  const [photoPreview, setPhotoPreview] = useState<string | null>(null);
+  const [photos, setPhotos] = useState<File[]>([]);
+  const [photoPreviews, setPhotoPreviews] = useState<string[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
@@ -379,21 +379,51 @@ const WriteReviewModal: React.FC<WriteReviewModalProps> = ({ isOpen, onClose, on
 
 
   const handlePhotoChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (file) {
+    const files = event.target.files;
+    if (!files || files.length === 0) return;
+    
+    const newPhotos: File[] = [];
+    const newPreviews: string[] = [];
+    
+    // Добавляем новые фото к существующим (максимум 10 фото)
+    const totalPhotos = photos.length + files.length;
+    if (totalPhotos > 10) {
+      setError('Можно загрузить максимум 10 фото');
+      return;
+    }
+    
+    Array.from(files).forEach((file, fileIndex) => {
       if (file.size > 5 * 1024 * 1024) { // 5MB limit
-        setError('Размер файла не должен превышать 5MB');
+        setError('Размер каждого файла не должен превышать 5MB');
         return;
       }
       
-      setPhoto(file);
+      newPhotos.push(file);
       const reader = new FileReader();
       reader.onload = (e) => {
-        setPhotoPreview(e.target?.result as string);
+        if (e.target?.result) {
+          newPreviews.push(e.target.result as string);
+          // Обновляем только когда все файлы прочитаны
+          if (newPreviews.length === files.length) {
+            setPhotoPreviews([...photoPreviews, ...newPreviews]);
+          }
+        }
       };
       reader.readAsDataURL(file);
-      setError(null);
+    });
+    
+    setPhotos([...photos, ...newPhotos]);
+    setError(null);
+    
+    // Сбрасываем input чтобы можно было выбрать те же файлы снова
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
     }
+  };
+  
+  const handleRemovePhoto = (index: number) => {
+    setPhotos(photos.filter((_, i) => i !== index));
+    setPhotoPreviews(photoPreviews.filter((_, i) => i !== index));
   };
 
   const handleSubmit = async () => {
@@ -430,9 +460,10 @@ const WriteReviewModal: React.FC<WriteReviewModalProps> = ({ isOpen, onClose, on
       formData.append('rating', rating.toString());
       formData.append('review_text', reviewText);
       
-      if (photo) {
-        formData.append('photo', photo);
-      }
+      // Добавляем все фото
+      photos.forEach(photo => {
+        formData.append('photos', photo);
+      });
 
       const response = await fetch('/api/reviews', {
         method: 'POST',
@@ -446,8 +477,8 @@ const WriteReviewModal: React.FC<WriteReviewModalProps> = ({ isOpen, onClose, on
         // Сбрасываем все поля формы
         setRating(0);
         setReviewText('');
-        setPhoto(null);
-        setPhotoPreview(null);
+        setPhotos([]);
+        setPhotoPreviews([]);
         setError(null);
         setSuccess(null);
         
@@ -474,8 +505,8 @@ const WriteReviewModal: React.FC<WriteReviewModalProps> = ({ isOpen, onClose, on
       // Сбрасываем все поля формы
       setRating(0);
       setReviewText('');
-      setPhoto(null);
-      setPhotoPreview(null);
+      setPhotos([]);
+      setPhotoPreviews([]);
       setError(null);
       setSuccess(null);
       setSuccessMessage(null);
@@ -492,8 +523,8 @@ const WriteReviewModal: React.FC<WriteReviewModalProps> = ({ isOpen, onClose, on
       // Сбрасываем форму при закрытии модального окна
       setRating(0);
       setReviewText('');
-      setPhoto(null);
-      setPhotoPreview(null);
+      setPhotos([]);
+      setPhotoPreviews([]);
       setError(null);
       setSuccess(null);
       setSuccessMessage(null);
@@ -551,27 +582,59 @@ const WriteReviewModal: React.FC<WriteReviewModalProps> = ({ isOpen, onClose, on
         </FormGroup>
 
         <FormGroup>
-          <Label>Фото (необязательно)</Label>
-          <PhotoUpload onClick={() => fileInputRef.current?.click()}>
-            <PhotoInput
-              ref={fileInputRef}
-              type="file"
-              accept="image/*"
-              onChange={handlePhotoChange}
-              disabled={isSubmitting}
-            />
-            {photoPreview ? (
-              <PhotoPreview src={photoPreview} alt="Предпросмотр фото" />
-            ) : (
+          <Label>Фото (необязательно, до {10 - photos.length} фото)</Label>
+          {photos.length > 0 && (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(80px, 1fr))', gap: '10px', marginBottom: '10px' }}>
+              {photoPreviews.map((preview, index) => (
+                <div key={index} style={{ position: 'relative' }}>
+                  <PhotoPreview src={preview} alt={`Предпросмотр ${index + 1}`} style={{ width: '100%', height: '80px' }} />
+                  <button
+                    type="button"
+                    onClick={() => handleRemovePhoto(index)}
+                    disabled={isSubmitting}
+                    style={{
+                      position: 'absolute',
+                      top: '2px',
+                      right: '2px',
+                      background: 'rgba(255, 0, 0, 0.8)',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: '50%',
+                      width: '24px',
+                      height: '24px',
+                      cursor: 'pointer',
+                      fontSize: '16px',
+                      lineHeight: '1',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center'
+                    }}
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+          {photos.length < 10 && (
+            <PhotoUpload onClick={() => fileInputRef.current?.click()} style={{ borderColor: photos.length > 0 ? 'var(--border-color)' : undefined }}>
+              <PhotoInput
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                multiple
+                onChange={handlePhotoChange}
+                disabled={isSubmitting}
+              />
               <div>
                 <div style={{ fontSize: '2rem', marginBottom: '10px' }}>📷</div>
                 <div>Нажмите, чтобы добавить фото</div>
                 <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: '5px' }}>
-                  Максимум 5MB
+                  До {10 - photos.length} фото, каждое до 5MB {photos.length > 0 && `(${photos.length} уже загружено)`}
                 </div>
               </div>
-            )}
-          </PhotoUpload>
+            </PhotoUpload>
+          )}
         </FormGroup>
 
         {error && <ErrorMessage>{error}</ErrorMessage>}

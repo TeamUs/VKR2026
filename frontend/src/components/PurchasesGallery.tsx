@@ -363,32 +363,19 @@ const PurchasesGallery: React.FC<PurchasesGalleryProps> = ({ isDarkTheme, onModa
     height: 0
   });
 
-  // Функция для загрузки изображений по именам файлов
+  // Функция для загрузки изображений через API
   const loadPurchaseImages = async () => {
     try {
       console.log('Загружаем изображения выкупов...');
       
-      // Список имен файлов для поиска
-      const possibleNames = [
-        'purchase1.jpg', 'purchase2.jpg', 'purchase3.jpg', 'purchase4.jpg', 'purchase5.jpg', 'purchase6.jpg', 'purchase7.jpg',
-        'purchase1.png', 'purchase2.png', 'purchase3.png', 'purchase4.png', 'purchase5.png', 'purchase6.png', 'purchase7.png',
-      ];
-      
-      const loadedImages: string[] = [];
-      
-      for (const filename of possibleNames) {
-        try {
-          const imagePath = `/images/purchases/${filename}`;
-          // Проверяем, существует ли изображение
-          const response = await fetch(imagePath, { method: 'HEAD' });
-          if (response.ok) {
-            loadedImages.push(imagePath);
-            console.log('Найдено изображение:', imagePath);
-          }
-        } catch (error) {
-          // Игнорируем ошибки загрузки отдельных файлов
-        }
+      // Загружаем список всех изображений через API
+      const response = await fetch('/api/purchases/images');
+      if (!response.ok) {
+        throw new Error('Ошибка получения списка изображений');
       }
+      
+      const data = await response.json();
+      const loadedImages: string[] = data.images || [];
       
       console.log(`Загружено ${loadedImages.length} изображений выкупов`);
       setPurchaseImages(loadedImages);
