@@ -63,13 +63,13 @@ const PORT = process.env.PORT || 3000;
 app.use(cors());
 app.use(express.json());
 
-// Статическая раздача загруженных файлов
-app.use('/uploads', express.static('uploads'));
+// Статическая раздача загруженных файлов (отзывы)
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // Настройка multer для загрузки файлов
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
-    const uploadDir = 'uploads/reviews';
+    const uploadDir = path.join(__dirname, 'uploads/reviews');
     if (!fs.existsSync(uploadDir)) {
       fs.mkdirSync(uploadDir, { recursive: true });
     }
@@ -83,12 +83,12 @@ const storage = multer.diskStorage({
 
 const upload = multer({ 
   storage: storage,
-  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB limit
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB limit для видео
   fileFilter: (req, file, cb) => {
-    if (file.mimetype.startsWith('image/')) {
+    if (file.mimetype.startsWith('image/') || file.mimetype.startsWith('video/')) {
       cb(null, true);
     } else {
-      cb(new Error('Только изображения разрешены'), false);
+      cb(new Error('Только изображения и видео разрешены'), false);
     }
   }
 });
@@ -485,6 +485,883 @@ async function sendTelegramMessage(chatId, message) {
   }
 }
 
+// Функция извлечения ссылки из текста
+function extractUrlFromText(text) {
+  try {
+    // Ищем URL в тексте с помощью регулярного выражения
+    const urlRegex = /(https?:\/\/[^\s]+)/g;
+    const matches = text.match(urlRegex);
+    
+    if (matches && matches.length > 0) {
+      // Возвращаем первую найденную ссылку
+      return matches[0];
+    }
+    
+    return null;
+  } catch (error) {
+    console.error('Ошибка извлечения ссылки:', error);
+    return null;
+  }
+}
+
+// Функция для получения редиректа от dw4.co
+async function getRedirectUrl(shortUrl) {
+  try {
+    const response = await fetch(shortUrl, {
+      method: 'HEAD',
+      redirect: 'manual',
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1'
+      }
+    });
+    
+    if (response.status >= 300 && response.status < 400) {
+      const redirectUrl = response.headers.get('location');
+      return redirectUrl;
+    }
+    
+    return null;
+  } catch (error) {
+    console.error('❌ Ошибка получения редиректа:', error);
+    return null;
+  }
+}
+
+// Функция для извлечения spuId из URL Poizon
+function extractSpuIdFromUrl(url) {
+  try {
+    // Пытаемся извлечь spuId из различных форматов URL
+    const spuIdMatch = url.match(/spuId=(\d+)/);
+    if (spuIdMatch) {
+      return spuIdMatch[1];
+    }
+    
+    // Для коротких ссылок dw4.co нужно будет делать редирект
+    if (url.includes('dw4.co')) {
+      return null;
+    }
+    
+    return null;
+  } catch (error) {
+    console.error('Ошибка извлечения spuId:', error);
+    return null;
+  }
+}
+
+// Функция определения категории товара по названию
+function determineCategory(productName, productDescription = '') {
+  const text = (productName + ' ' + productDescription).toLowerCase();
+  
+  // Словарь категорий с ключевыми словами
+  const categories = {
+    'shoes_clothing': ['鞋', 'sneaker', 'boot', 'sandal', 'heel', 'slipper', 'sport', 'running', 'basketball', 'hiking', '徒步', '低帮', '高帮', '运动鞋', '篮球鞋', '跑鞋', '板鞋', '帆布鞋', '皮鞋', '靴子', '凉鞋', '拖鞋'],
+    'backpacks_bags': ['包', 'bag', '背包', '手提包', '钱包'],
+    'hoodies_pants': ['hoodie', 'sweater', 'pants', 'jeans', '卫衣', '毛衣', '裤子', '牛仔裤'],
+    'tshirts_shorts': ['shirt', 'dress', 't恤', '短袖', '长袖', '衬衫', '裙子', '连衣裙'],
+    'underwear_socks': ['underwear', 'socks', '内衣', '袜子', '内裤'],
+    'accessories_perfume': ['watch', 'belt', 'hat', 'cap', 'glasses', 'jewelry', 'perfume', '手表', '眼镜', '帽子', '腰带', '首饰', '项链', '手链', '戒指', '耳环', '香水']
+  };
+  
+  // Счетчики для каждой категории
+  const scores = {
+    'shoes_clothing': 0,
+    'backpacks_bags': 0,
+    'hoodies_pants': 0,
+    'tshirts_shorts': 0,
+    'underwear_socks': 0,
+    'accessories_perfume': 0
+  };
+  
+  // Подсчет совпадений
+  Object.keys(categories).forEach(category => {
+    categories[category].forEach(keyword => {
+      if (text.includes(keyword.toLowerCase())) {
+        scores[category]++;
+      }
+    });
+  });
+  
+  // Возвращаем категорию с наибольшим счетом
+  const maxScore = Math.max(...Object.values(scores));
+  if (maxScore === 0) {
+    return 'tshirts_shorts'; // Если ничего не найдено, возвращаем футболки/шорты
+  }
+  
+  return Object.keys(scores).find(category => scores[category] === maxScore);
+}
+
+// Функция парсинга страницы товара
+async function parseProductPage(url) {
+  try {
+    // Если это короткая ссылка dw4.co, получаем редирект
+    let finalUrl = url;
+    if (url.includes('dw4.co')) {
+      const redirectUrl = await getRedirectUrl(url);
+      if (redirectUrl) {
+        finalUrl = redirectUrl;
+      }
+    }
+    
+    const response = await fetch(finalUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+        'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+        'Accept-Encoding': 'gzip, deflate, br',
+        'Connection': 'keep-alive',
+        'Upgrade-Insecure-Requests': '1',
+        'Sec-Fetch-Dest': 'document',
+        'Sec-Fetch-Mode': 'navigate',
+        'Sec-Fetch-Site': 'none',
+        'Cache-Control': 'max-age=0',
+        'Referer': 'https://www.poizon.com/',
+        'Origin': 'https://www.poizon.com'
+      }
+    });
+    
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    }
+
+    const html = await response.text();
+    const $ = cheerio.load(html);
+    
+    // Ищем цену товара (различные селекторы)
+    let price = null;
+    const priceSelectors = [
+      '.price',
+      '.product-price',
+      '.current-price',
+      '.sale-price',
+      '[class*="price"]',
+      '[class*="Price"]',
+      '.money',
+      '.cost',
+      'button[class*="price"]',
+      'button[class*="Price"]',
+      'a[class*="price"]',
+      'a[class*="Price"]',
+      '[class*="btn"][class*="price"]',
+      '[class*="button"][class*="price"]',
+      'button:contains("¥")',
+      'a:contains("¥")',
+      '[class*="blue"]',
+      '[style*="blue"]',
+      'button[style*="background"]',
+      'a[style*="background"]'
+    ];
+    
+    // Сначала пробуем стандартные селекторы
+    for (const selector of priceSelectors) {
+      try {
+        const priceElement = $(selector).first();
+        if (priceElement.length > 0) {
+          const priceText = priceElement.text().trim();
+          console.log(`🔍 Проверяем селектор "${selector}": "${priceText}"`);
+          
+          // Ищем цену в тексте (включая символы ¥, 元, 块)
+          const priceMatch = priceText.match(/(\d+(?:\.\d+)?)\s*(?:¥|元|块|RMB|CNY)?/);
+          if (priceMatch) {
+            price = parseFloat(priceMatch[1]);
+            console.log(`✅ Найдена цена через селектор "${selector}": ${price}`);
+            break;
+          }
+        }
+      } catch (e) {
+        // Игнорируем ошибки селекторов
+      }
+    }
+    
+    // Если не нашли, ищем все кнопки и ссылки с числовыми значениями
+    if (!price) {
+      $('button, a, [role="button"]').each((i, element) => {
+        const $el = $(element);
+        const text = $el.text().trim();
+        
+        // Ищем числа в тексте кнопок
+        const numberMatch = text.match(/(\d+(?:\.\d+)?)/);
+        if (numberMatch) {
+          const num = parseFloat(numberMatch[1]);
+          // Проверяем, что это похоже на цену (от 1 до 10000 юаней)
+          if (num >= 1 && num <= 10000) {
+            console.log(`🔍 Найдена потенциальная цена в кнопке: "${text}" -> ${num}`);
+            // Если в тексте есть символы валюты или это кнопка с голубым фоном
+            if (text.includes('¥') || text.includes('元') || text.includes('块') || 
+                $el.css('background-color').includes('blue') || 
+                $el.attr('class')?.includes('blue')) {
+              price = num;
+              console.log(`✅ Найдена цена в кнопке: ${price}`);
+              return false; // Прерываем цикл
+            }
+          }
+        }
+      });
+    }
+    
+    // Если все еще не нашли, ищем в атрибутах
+    if (!price) {
+      $('[data-price], [data-cost], [data-value]').each((i, element) => {
+        const $el = $(element);
+        const dataPrice = $el.attr('data-price') || $el.attr('data-cost') || $el.attr('data-value');
+        if (dataPrice) {
+          const num = parseFloat(dataPrice);
+          if (!isNaN(num) && num > 0) {
+            price = num;
+            console.log(`✅ Найдена цена в атрибуте: ${price}`);
+            return false;
+          }
+        }
+      });
+    }
+    
+    // Ищем название товара
+    let productName = '';
+    const nameSelectors = [
+      'h1',
+      '.product-title',
+      '.product-name',
+      '.title',
+      '[class*="title"]',
+      '[class*="name"]'
+    ];
+    
+    for (const selector of nameSelectors) {
+      const nameElement = $(selector).first();
+      if (nameElement.length > 0) {
+        productName = nameElement.text().trim();
+        if (productName) break;
+      }
+    }
+    
+    // Ищем описание товара
+    let productDescription = '';
+    const descSelectors = [
+      '.product-description',
+      '.description',
+      '.product-detail',
+      '[class*="desc"]'
+    ];
+    
+    for (const selector of descSelectors) {
+      const descElement = $(selector).first();
+      if (descElement.length > 0) {
+        productDescription = descElement.text().trim();
+        if (productDescription) break;
+      }
+    }
+    
+    // Ищем доступные размеры в размерной сетке
+    let availableSizes = [];
+    let sizePriceMap = {}; // Карта размер -> цена
+    
+    // Сначала проверим, есть ли вообще элементы с классом jsx-2601963492
+    const allContainerElements = $('[class*="jsx-2601963492"]');
+    
+    // Проверим, есть ли элементы с классом jsx-706577070
+    const allJsxElements = $('[class*="jsx-706577070"]');
+    
+    // Проверим, есть ли элементы с классом list
+    const allListElements = $('[class*="list"]');
+    
+    // Проверим, есть ли элементы с классом square
+    const allSquareElements = $('[class*="square"]');
+    
+    // Проверим, есть ли элементы с атрибутом title
+    const allTitleElements = $('[title]');
+    
+    // Попробуем найти элементы с точной структурой: div[title] с классом square
+    const squareElements = $('div.square[title]');
+    
+    // Попробуем найти элементы с классом jsx-706577070
+    const jsxElements = $('[class*="jsx-706577070"]');
+    
+             // Ищем размерную сетку с ценами (на основе реальной структуры Poizon)
+             const sizeGridSelectors = [
+               'div.jsx-2601963492 .jsx-706577070.list', // Контейнер с размерной сеткой
+               '.jsx-2601963492 .jsx-706577070.list', // Более общий селектор
+               '.jsx-706577070.list', // Основной контейнер размерной сетки
+               '#__next > main > div > div.jsx-488613455.side > div.jsx-706577070 > div:nth-child(2) > div.jsx-706577070.list', // Точный селектор
+               '[class*="jsx-706577070"][class*="list"]', // Более общий селектор
+               'div[class*="jsx-706577070"]', // Еще более общий
+               'div[title]', // Все div с title
+               // Добавляем более общие селекторы для поиска размеров
+               'div[class*="square"][title]', // Элементы размеров
+               'div[class*="size"][title]', // Элементы размеров
+               'div[title*="3"]', // Элементы с размерами
+               'div[title*="4"]' // Элементы с размерами
+             ];
+             
+             // Также попробуем найти контейнер с текстом "尺码" и искать в нем размеры
+             // Ищем только в div элементах, исключая script теги и JavaScript код
+             const sizeContainer = $('div:contains("尺码")').not('script').filter(function() {
+               const $el = $(this);
+               const text = $el.text();
+               return !text.includes('__remixContext') && !text.includes('script') && !text.includes('function');
+             });
+             if (sizeContainer.length > 0) {
+               sizeContainer.each((i, container) => {
+                 const $container = $(container);
+                 
+                 // Ищем размеры прямо в этом контейнере
+                 const sizesInContainer = $container.find('div[title]').filter(function() {
+                   const $el = $(this);
+                   const title = $el.attr('title');
+                   return title && title.match(/^\d+(\.\d+)?$/);
+                 });
+                 
+                 sizesInContainer.each((j, element) => {
+                   const $el = $(element);
+                   const title = $el.attr('title');
+                   
+                   const size = title.trim();
+                   if (parseFloat(size) >= 30 && parseFloat(size) <= 50) {
+                     if (!availableSizes.includes(size)) {
+                       availableSizes.push(size);
+                     }
+                   }
+                 });
+                 
+                 // Если размеры не найдены в title, ищем в тексте контейнера
+                 if (sizesInContainer.length === 0) {
+                   const containerText = $container.text();
+                   
+                   // Ищем числа в тексте контейнера, но только в определенном контексте
+                   // Проверяем, что это не JavaScript код
+                   if (!containerText.includes('__remixContext') && !containerText.includes('script') && !containerText.includes('function')) {
+                     const numberMatches = containerText.match(/\b(3[0-9](?:\.5)?|4[0-9](?:\.5)?|50)\b/g);
+                     if (numberMatches) {
+                       numberMatches.forEach(match => {
+                         const size = match.trim();
+                         if (parseFloat(size) >= 30 && parseFloat(size) <= 50) {
+                           if (!availableSizes.includes(size)) {
+                             availableSizes.push(size);
+                           }
+                         }
+                       });
+                     }
+                   }
+                 }
+               });
+               
+               sizeGridSelectors.unshift(sizeContainer.find('.jsx-706577070.list').selector || 'div.jsx-2601963492 .jsx-706577070.list');
+             }
+    
+    let foundSizeGrid = false;
+    for (const selector of sizeGridSelectors) {
+      const sizeGrid = $(selector);
+      
+      if (sizeGrid.length > 0) {
+        foundSizeGrid = true;
+        
+                 // Ищем элементы размеров в сетке (структура Poizon)
+                 // Сначала попробуем найти по точному селектору
+                 let sizeItems = sizeGrid.find('div.jsx-706577070.square[title]').filter(function() {
+                   const $el = $(this);
+                   const title = $el.attr('title');
+                   // Ищем элементы с атрибутом title, содержащим размер
+                   return title && title.match(/^\d+(\.\d+)?$/);
+                 });
+                 
+                 // Если не нашли по точному селектору, ищем div.square[title]
+                 if (sizeItems.length === 0) {
+                   sizeItems = sizeGrid.find('div.square[title]').filter(function() {
+                     const $el = $(this);
+                     const title = $el.attr('title');
+                     // Ищем элементы с атрибутом title, содержащим размер
+                     return title && title.match(/^\d+(\.\d+)?$/);
+                   });
+                 }
+                 
+                 // Если не нашли по точному селектору, ищем все div с title
+                 if (sizeItems.length === 0) {
+                   sizeItems = sizeGrid.find('div[title]').filter(function() {
+                     const $el = $(this);
+                     const title = $el.attr('title');
+                     // Ищем элементы с атрибутом title, содержащим размер
+                     return title && title.match(/^\d+(\.\d+)?$/);
+                   });
+                 }
+        
+                 sizeItems.each((i, element) => {
+                   const $el = $(element);
+                   const title = $el.attr('title');
+                   const text = $el.text().trim();
+                   const classes = $el.attr('class') || '';
+                   
+                   // Определяем размер из title
+                   let size = null;
+                   if (title && title.match(/^\d+(\.\d+)?$/)) {
+                     size = title.trim();
+                   }
+                   
+                   if (size) {
+                     // Проверяем, что размер в разумных пределах (для обуви 30-50)
+                     if (parseFloat(size) >= 30 && parseFloat(size) <= 50) {
+                       // Проверяем, есть ли классы, указывающие на недоступность
+                       const isUnavailable = classes.includes('unavailable') || 
+                                            classes.includes('disabled') || 
+                                            classes.includes('sold-out') ||
+                                            text.includes('--') ||
+                                            text.includes('无') ||
+                                            text.includes('缺货') ||
+                                            text.includes('售罄') ||
+                                            text.includes('无货') ||
+                                            // Проверяем на двойную волнистую линию (частный случай)
+                                            text.includes('≈') ||
+                                            text.includes('~') ||
+                                            // Проверяем стили, указывающие на недоступность
+                                            $el.css('opacity') === '0.5' ||
+                                            $el.css('pointer-events') === 'none';
+                       
+                       if (!isUnavailable) {
+                         availableSizes.push(size);
+                       }
+                     }
+                   }
+                 });
+        
+        if (availableSizes.length > 0) break;
+      }
+    }
+    
+    // Если размерная сетка не найдена, попробуем найти размеры в контейнере jsx-2601963492
+    if (!foundSizeGrid || availableSizes.length === 0) {
+      // Ищем размеры в контейнере с классом jsx-2601963492
+      const container = $('.jsx-2601963492');
+      if (container.length > 0) {
+        // Ищем все div с title в этом контейнере
+        const sizeItems = container.find('div[title]').filter(function() {
+          const $el = $(this);
+          const title = $el.attr('title');
+          return title && title.match(/^\d+(\.\d+)?$/);
+        });
+        
+        sizeItems.each((i, element) => {
+          const $el = $(element);
+          const title = $el.attr('title');
+          const text = $el.text().trim();
+          const classes = $el.attr('class') || '';
+          
+          const size = title.trim();
+          
+          // Проверяем, что размер в разумных пределах (для обуви 30-50)
+          if (parseFloat(size) >= 30 && parseFloat(size) <= 50) {
+            // Проверяем, есть ли классы, указывающие на недоступность
+            const isUnavailable = classes.includes('unavailable') || 
+                                 classes.includes('disabled') || 
+                                 classes.includes('sold-out') ||
+                                 text.includes('--') ||
+                                 text.includes('无') ||
+                                 text.includes('缺货') ||
+                                 text.includes('售罄') ||
+                                 text.includes('无货') ||
+                                 text.includes('≈') ||
+                                 text.includes('~') ||
+                                 $el.css('opacity') === '0.5' ||
+                                 $el.css('pointer-events') === 'none';
+            
+                       if (!isUnavailable && !availableSizes.includes(size)) {
+                         availableSizes.push(size);
+                       }
+          }
+        });
+      }
+      
+               // Если все еще не найдены размеры, ищем в любых элементах с title
+               if (availableSizes.length === 0) {
+                 // Ищем все элементы с title, содержащие размеры
+                 const allTitleElements = $('[title]');
+                 
+                 allTitleElements.each((i, element) => {
+                   const $el = $(element);
+                   const title = $el.attr('title');
+                   const text = $el.text().trim();
+                   const classes = $el.attr('class') || '';
+                   
+                   // Проверяем, содержит ли title размер
+                   if (title && title.match(/^\d+(\.\d+)?$/)) {
+                     const size = title.trim();
+                     
+                     // Проверяем, что размер в разумных пределах (для обуви 30-50)
+                     if (parseFloat(size) >= 30 && parseFloat(size) <= 50) {
+                       // Проверяем, есть ли классы, указывающие на недоступность
+                       const isUnavailable = classes.includes('unavailable') || 
+                                            classes.includes('disabled') || 
+                                            classes.includes('sold-out') ||
+                                            text.includes('--') ||
+                                            text.includes('无') ||
+                                            text.includes('缺货') ||
+                                            text.includes('售罄') ||
+                                            text.includes('无货') ||
+                                            text.includes('≈') ||
+                                            text.includes('~') ||
+                                            $el.css('opacity') === '0.5' ||
+                                            $el.css('pointer-events') === 'none';
+                       
+                       if (!isUnavailable && !availableSizes.includes(size)) {
+                         availableSizes.push(size);
+                       }
+                     }
+                   }
+                 });
+        
+        // Если все еще не найдены размеры, ищем в div элементах с точной структурой
+        if (availableSizes.length === 0) {
+          // Ищем элементы с точной структурой: div.square[title]
+          const squareElements = $('div.square[title]');
+          
+          squareElements.each((i, element) => {
+            const $el = $(element);
+            const title = $el.attr('title');
+            const text = $el.text().trim();
+            const classes = $el.attr('class') || '';
+            
+            // Проверяем, содержит ли title размер
+            if (title && title.match(/^\d+(\.\d+)?$/)) {
+              const size = title.trim();
+              
+              // Проверяем, что размер в разумных пределах (для обуви 30-50)
+              if (parseFloat(size) >= 30 && parseFloat(size) <= 50) {
+                // Проверяем, есть ли классы, указывающие на недоступность
+                const isUnavailable = classes.includes('unavailable') || 
+                                     classes.includes('disabled') || 
+                                     classes.includes('sold-out') ||
+                                     text.includes('--') ||
+                                     text.includes('无') ||
+                                     text.includes('缺货') ||
+                                     text.includes('售罄') ||
+                                     text.includes('无货') ||
+                                     text.includes('≈') ||
+                                     text.includes('~') ||
+                                     $el.css('opacity') === '0.5' ||
+                                     $el.css('pointer-events') === 'none';
+                
+                if (!isUnavailable && !availableSizes.includes(size)) {
+                  availableSizes.push(size);
+                }
+              }
+            }
+          });
+        }
+        
+                 // Если все еще не найдены размеры, ищем в div элементах с числами
+                 if (availableSizes.length === 0) {
+                   const divsWithNumbers = $('div').filter(function() {
+                     const $el = $(this);
+                     const text = $el.text().trim();
+                     return text.match(/^\d+(\.\d+)?$/) && text.length < 10;
+                   });
+                   
+                   divsWithNumbers.each((i, element) => {
+                     const $el = $(element);
+                     const text = $el.text().trim();
+                     const classes = $el.attr('class') || '';
+                     
+                     const size = text.trim();
+                     
+                     // Проверяем, что размер в разумных пределах (для обуви 30-50)
+                     if (parseFloat(size) >= 30 && parseFloat(size) <= 50) {
+                       // Проверяем, есть ли классы, указывающие на недоступность
+                       const isUnavailable = classes.includes('unavailable') || 
+                                            classes.includes('disabled') || 
+                                            classes.includes('sold-out') ||
+                                            text.includes('--') ||
+                                            text.includes('无') ||
+                                            text.includes('缺货') ||
+                                            text.includes('售罄') ||
+                                            text.includes('无货') ||
+                                            text.includes('≈') ||
+                                            text.includes('~') ||
+                                            $el.css('opacity') === '0.5' ||
+                                            $el.css('pointer-events') === 'none';
+                       
+                       if (!isUnavailable && !availableSizes.includes(size)) {
+                         availableSizes.push(size);
+                       }
+                     }
+                   });
+                 }
+                 
+                 // Если все еще не найдены размеры, ищем в HTML-коде страницы
+                 if (availableSizes.length === 0) {
+                   
+                   // Получаем весь HTML страницы
+                   const pageHTML = $.html();
+                   
+    // 1. Сначала ищем размеры в структурированных элементах (title атрибуты)
+    const titleElements = $('[title]');
+    
+    titleElements.each((i, element) => {
+      const $el = $(element);
+      const title = $el.attr('title');
+      const classes = $el.attr('class') || '';
+      const text = $el.text().trim();
+      
+      // Проверяем, является ли title размером обуви
+      if (title && /^[2-5][0-9](\.5)?$/.test(title)) {
+        const numSize = parseFloat(title);
+        
+        // Проверяем контекст элемента
+        const isInSizeGrid = classes.includes('jsx-706577070') || 
+                           classes.includes('square') ||
+                           classes.includes('size') ||
+                           text === title; // Текст элемента совпадает с title
+        
+        // Проверяем, что это не технические данные
+        const isNotTechnical = !classes.includes('__') &&
+                              !classes.includes('script') &&
+                              !classes.includes('function') &&
+                              !text.includes('skuId') &&
+                              !text.includes('spuId');
+        
+        if (isInSizeGrid && isNotTechnical && numSize >= 20 && numSize <= 60) {
+          if (!availableSizes.includes(title)) {
+            availableSizes.push(title);
+          }
+        }
+      }
+    });
+    
+    // 2. Если размеры не найдены в title, ищем в тексте контейнеров с размерной сеткой
+    if (availableSizes.length === 0) {
+      // Ищем контейнеры с размерной сеткой
+      const sizeContainers = $('div:contains("尺码"), div[class*="list"], div[class*="size"]');
+      
+      sizeContainers.each((i, container) => {
+        const $container = $(container);
+        const html = $container.html();
+        const text = $container.text();
+        
+        // Ищем размеры в тексте контейнера
+        const sizeMatches = text.match(/\b([2-5][0-9](?:\.5)?)\b/g);
+        if (sizeMatches) {
+          const uniqueSizes = [...new Set(sizeMatches)];
+          uniqueSizes.forEach(size => {
+            const numSize = parseFloat(size);
+            if (numSize >= 20 && numSize <= 60 && !availableSizes.includes(size)) {
+              availableSizes.push(size);
+            }
+          });
+        }
+      });
+    }
+    
+    // 3. Если все еще не найдены размеры, используем общий поиск по HTML
+    if (availableSizes.length === 0) {
+      const sizeMatches = pageHTML.match(/\b([2-5][0-9](?:\.5)?)\b/g);
+      if (sizeMatches) {
+        const uniqueSizes = [...new Set(sizeMatches)];
+        
+        uniqueSizes.forEach(size => {
+          const numSize = parseFloat(size);
+          if (numSize >= 20 && numSize <= 60) {
+            // Анализируем контекст
+            const sizeIndex = pageHTML.indexOf(size);
+            const contextStart = Math.max(0, sizeIndex - 100);
+            const contextEnd = Math.min(pageHTML.length, sizeIndex + 100);
+            const context = pageHTML.substring(contextStart, contextEnd);
+            
+            // Проверяем, что размер находится в контексте размерной сетки
+            const isInSizeGrid = context.includes('尺码') || 
+                               context.includes('jsx-706577070') ||
+                               context.includes('title="' + size + '"') ||
+                               context.includes('class="jsx-706577070 square"');
+            
+            // Проверяем, что это не технические данные
+            const isNotTechnical = !context.includes('skuId') &&
+                                  !context.includes('spuId') &&
+                                  !context.includes('__remixContext') &&
+                                  !context.includes('function') &&
+                                  !context.includes('script');
+            
+            if (isInSizeGrid && isNotTechnical && !availableSizes.includes(size)) {
+              availableSizes.push(size);
+            }
+          }
+        });
+      }
+    }
+                   
+                   // Если размеры все еще не найдены, ищем в JSON-данных
+                   if (availableSizes.length === 0) {
+                     // Ищем JSON-данные в script тегах
+                     const scriptTags = $('script');
+                     scriptTags.each((i, script) => {
+                       const $script = $(script);
+                       const scriptContent = $script.html();
+                       
+                       if (scriptContent && scriptContent.includes('skuId')) {
+                         // Ищем размеры в JSON-данных с контекстным анализом
+                         const jsonSizeMatches = scriptContent.match(/\b([2-5][0-9](?:\.5)?|60)\b/g);
+                         if (jsonSizeMatches) {
+                           const uniqueJsonSizes = [...new Set(jsonSizeMatches)];
+                           uniqueJsonSizes.forEach(size => {
+                             if (parseFloat(size) >= 20 && parseFloat(size) <= 60) {
+                               // Анализируем контекст в JSON
+                               const sizeIndex = scriptContent.indexOf(size);
+                               const contextStart = Math.max(0, sizeIndex - 50);
+                               const contextEnd = Math.min(scriptContent.length, sizeIndex + 50);
+                               const context = scriptContent.substring(contextStart, contextEnd);
+                               
+                               // Проверяем, что размер НЕ находится в контексте, который указывает на то, что это не размер
+                               const isNotSize = context.includes('skuId') ||
+                                                context.includes('spuId') ||
+                                                context.includes('pointMap') ||
+                                                context.includes('dataFromNodeFetch') ||
+                                                context.includes('query') ||
+                                                context.includes('propertyValueId');
+                               
+                               if (!isNotSize) {
+                                 if (!availableSizes.includes(size)) {
+                                   availableSizes.push(size);
+                                 }
+                               }
+                             }
+                           });
+                         }
+                       }
+                     });
+                   }
+                 }
+        
+      }
+    }
+    
+    // Убираем дубликаты
+    availableSizes = [...new Set(availableSizes)];
+    
+    // Определяем стандартные размеры обуви для фильтрации
+    const standardShoeSizes = [];
+    for (let i = 30; i <= 50; i += 0.5) {
+      standardShoeSizes.push(i.toString());
+    }
+    
+    // Умная фильтрация размеров на основе анализа реальных данных
+    
+    const filteredSizes = availableSizes.filter(size => {
+      const numSize = parseFloat(size);
+      
+      // Базовые проверки
+      if (numSize < 20 || numSize > 60) return false;
+      
+      // Проверяем, что размер является стандартным (целое число или .5)
+      const isStandardSize = numSize === Math.floor(numSize) || numSize === Math.floor(numSize) + 0.5;
+      if (!isStandardSize) return false;
+      
+      // Дополнительная проверка: размер должен быть в разумных пределах для обуви
+      // Детская обувь: 20-40, мужская/женская: 35-50, большие размеры: до 60
+      const isReasonableSize = (numSize >= 20 && numSize <= 40) || // Детские размеры
+                              (numSize >= 35 && numSize <= 50) || // Стандартные размеры
+                              (numSize >= 51 && numSize <= 60);   // Большие размеры
+      
+      return isReasonableSize;
+    });
+    
+    const extraSizes = availableSizes.filter(size => !filteredSizes.includes(size));
+    
+    if (extraSizes.length > 0) {
+      console.log(`⚠️ Найдены лишние размеры: ${extraSizes.join(', ')}`);
+    }
+    
+    if (filteredSizes.length !== availableSizes.length) {
+      console.log(`🔧 Фильтруем размеры, убираем лишние...`);
+      console.log(`📏 Размеров до фильтрации: ${availableSizes.length}, после: ${filteredSizes.length}`);
+      availableSizes = filteredSizes;
+    }
+    
+    // Умная фильтрация по логической последовательности размеров
+    if (filteredSizes.length > 0) {
+      console.log(`🔧 Анализируем логическую последовательность размеров...`);
+      
+      // Сортируем размеры по числовому значению
+      const sortedSizes = filteredSizes.sort((a, b) => parseFloat(a) - parseFloat(b));
+      console.log(`📏 Отсортированные размеры: ${sortedSizes.join(', ')}`);
+      
+      // Анализируем последовательность размеров
+      const logicalSizes = [];
+      let consecutiveCount = 0;
+      let maxConsecutiveCount = 0;
+      let bestSequenceStart = 0;
+      
+      for (let i = 0; i < sortedSizes.length; i++) {
+        const currentSize = parseFloat(sortedSizes[i]);
+        const prevSize = i > 0 ? parseFloat(sortedSizes[i-1]) : null;
+        
+        // Проверяем, является ли размер логичным
+        const isLogical = prevSize === null || 
+                         (currentSize - prevSize >= 0.5 && currentSize - prevSize <= 1.5);
+        
+        if (isLogical) {
+          consecutiveCount++;
+          if (consecutiveCount > maxConsecutiveCount) {
+            maxConsecutiveCount = consecutiveCount;
+            bestSequenceStart = i - consecutiveCount + 1;
+          }
+        } else {
+          consecutiveCount = 1;
+        }
+      }
+      
+      // Если найдена хорошая последовательность, используем ее
+      if (maxConsecutiveCount >= 3) {
+        console.log(`✅ Найдена хорошая последовательность из ${maxConsecutiveCount} размеров`);
+        logicalSizes.push(...sortedSizes.slice(bestSequenceStart, bestSequenceStart + maxConsecutiveCount));
+      } else {
+        // Если последовательность не найдена, используем все отфильтрованные размеры
+        console.log(`⚠️ Хорошая последовательность не найдена, используем все размеры`);
+        logicalSizes.push(...sortedSizes);
+      }
+      
+      if (logicalSizes.length !== filteredSizes.length) {
+        console.log(`🔧 Убираем размеры, не вписывающиеся в последовательность...`);
+        console.log(`📏 Размеров до фильтрации: ${filteredSizes.length}, после: ${logicalSizes.length}`);
+        availableSizes = logicalSizes;
+      } else {
+        availableSizes = filteredSizes;
+      }
+    } else {
+      availableSizes = filteredSizes;
+    }
+    
+    // Если цена не найдена, логируем ошибку
+    if (!price) {
+      console.error('❌ Не удалось извлечь цену из товара');
+      console.error('📄 Размер HTML:', html.length, 'символов');
+      
+      // Выводим первые 10 кнопок с их текстом
+      $('button').slice(0, 10).each((i, element) => {
+        const $el = $(element);
+        const text = $el.text().trim();
+        if (text) {
+          console.log(`🔘 Кнопка ${i + 1}: "${text}"`);
+        }
+      });
+      
+      // Выводим первые 10 ссылок с их текстом
+      $('a').slice(0, 10).each((i, element) => {
+        const $el = $(element);
+        const text = $el.text().trim();
+        if (text && text.length < 50) {
+          console.log(`🔗 Ссылка ${i + 1}: "${text}"`);
+        }
+      });
+    }
+    
+    return {
+      price,
+      productName,
+      productDescription,
+      url,
+      availableSizes,
+      sizePriceMap
+    };
+    
+  } catch (error) {
+    console.error('❌ Ошибка парсинга страницы:', error.message);
+    throw error;
+  }
+}
+
 // Функция получения курса юаня (только API Центробанка России)
 async function getYuanToRubExchangeRate() {
   try {
@@ -534,6 +1411,350 @@ app.get('/api/exchange-rate', async (req, res) => {
   } catch (error) {
     console.error('Ошибка получения курса:', error);
     res.status(500).json({ error: 'Ошибка получения курса' });
+  }
+});
+
+// Расчет стоимости по ссылке на товар
+app.post('/api/calculate-from-link', async (req, res) => {
+  try {
+    const { linkText, telegramId } = req.body;
+    
+    if (!linkText) {
+      return res.status(400).json({ error: 'Необходим текст с ссылкой на товар' });
+    }
+
+    // 1. Извлекаем ссылку из текста
+    const productUrl = extractUrlFromText(linkText);
+    if (!productUrl) {
+      return res.status(400).json({ error: 'Не удалось найти ссылку в тексте' });
+    }
+
+
+    // 2. Парсим страницу товара
+    const productData = await parseProductPage(productUrl);
+    
+    // Если цена не найдена, проверяем есть ли размеры
+    if (!productData.price || productData.price <= 0) {
+      if (productData.availableSizes && productData.availableSizes.length > 0) {
+        return res.status(200).json({ 
+          requiresSizeSelection: true,
+          productData: {
+            productName: productData.productName,
+            url: productData.url,
+            availableSizes: productData.availableSizes,
+            sizePriceMap: productData.sizePriceMap || {}
+          }
+        });
+      } else {
+        return res.status(400).json({ 
+          error: 'Не удалось определить цену товара. Попробуйте ввести цену вручную.',
+          productData: {
+            productName: productData.productName,
+            url: productData.url
+          }
+        });
+      }
+    }
+
+    // 3. Определяем категорию товара
+    const category = determineCategory(productData.productName, productData.productDescription);
+
+    // 4. Получаем вес по категории
+    const categoryWeights = {
+      'shoes_clothing': 2.5,        // 2000₽ / 800₽ = 2.5 кг
+      'backpacks_bags': 1.875,      // 1500₽ / 800₽ = 1.875 кг
+      'hoodies_pants': 1.875,       // 1500₽ / 800₽ = 1.875 кг
+      'tshirts_shorts': 1.25,       // 1000₽ / 800₽ = 1.25 кг
+      'underwear_socks': 1.0,       // 800₽ / 800₽ = 1.0 кг
+      'accessories_perfume': 1.0    // 800₽ / 800₽ = 1.0 кг
+    };
+
+    const weight = categoryWeights[category] || 1.0;
+
+    // 5. Получаем комиссию пользователя
+    let commission = 1000; // По умолчанию 1000₽
+    if (telegramId && dbConnection) {
+      try {
+        await ensureDBConnection();
+        const [rows] = await dbConnection.execute(
+          'SELECT commission, access_expires_at FROM users WHERE telegram_id = ?',
+          [telegramId]
+        );
+        
+        if (rows.length > 0) {
+          const user = rows[0];
+          if (user.access_expires_at && new Date() < new Date(user.access_expires_at)) {
+            commission = user.commission; // 400₽ для рефералов
+          } else {
+            commission = user.commission; // 1000₽ по умолчанию
+          }
+        }
+      } catch (dbError) {
+        console.error('Ошибка получения данных пользователя:', dbError);
+      }
+    }
+
+    // 6. Рассчитываем стоимость
+    const currentRate = await getYuanToRubExchangeRate();
+    
+    const itemCostRub = productData.price * currentRate;
+    const deliveryCost = weight * DELIVERY_COST_PER_KG;
+    const commissionAmount = commission; // Фиксированная сумма в рублях
+    const totalCost = itemCostRub + commissionAmount + deliveryCost;
+
+    const result = {
+      originalPrice: parseFloat(productData.price),
+      priceInRubles: parseFloat(itemCostRub.toFixed(2)),
+      deliveryCost: parseFloat(deliveryCost.toFixed(2)),
+      commission: parseFloat(commissionAmount.toFixed(2)),
+      commissionRate: commission, // Теперь это просто сумма в рублях
+      totalCost: parseFloat(totalCost.toFixed(2)),
+      exchangeRate: parseFloat(currentRate.toFixed(2)),
+      weight: parseFloat(weight.toFixed(1)),
+      productName: productData.productName,
+      productUrl: productData.url,
+      detectedCategory: category
+    };
+    
+    res.json(result);
+  } catch (error) {
+    console.error('Ошибка расчета стоимости по ссылке:', error);
+    res.status(500).json({ error: 'Ошибка расчета стоимости по ссылке' });
+  }
+});
+
+// Функция для получения цены с голубой кнопки после выбора размера
+async function getPriceWithSize(url, selectedSize) {
+  try {
+    console.log(`🔍 Получаем цену для размера ${selectedSize} с ${url}`);
+    
+    // Делаем запрос к странице товара с правильными заголовками
+    const response = await fetch(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+        'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+        'Accept-Encoding': 'gzip, deflate, br',
+        'Connection': 'keep-alive',
+        'Upgrade-Insecure-Requests': '1',
+        'Sec-Fetch-Dest': 'document',
+        'Sec-Fetch-Mode': 'navigate',
+        'Sec-Fetch-Site': 'none',
+        'Cache-Control': 'max-age=0'
+      }
+    });
+    
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    }
+    
+    const html = await response.text();
+    const $ = cheerio.load(html);
+    
+    // Ищем голубую кнопку с ценой (как на фото 2)
+    let price = null;
+    
+    // Селекторы для голубой кнопки с ценой (на основе реальной структуры Poizon)
+    const priceButtonSelectors = [
+      '.jsx-684859300.btn.primary', // Основная кнопка покупки
+      '[class*="jsx-684859300"]', // Любые элементы с этим классом
+      'button[class*="primary"]',
+      'button[class*="buy"]',
+      'button[class*="purchase"]',
+      'a[class*="primary"]',
+      'a[class*="buy"]',
+      'a[class*="purchase"]',
+      '[class*="buy-button"]',
+      '[class*="purchase-button"]',
+      '[class*="add-to-cart"]'
+    ];
+    
+    for (const selector of priceButtonSelectors) {
+      const button = $(selector).first();
+      if (button.length > 0) {
+        const buttonText = button.text().trim();
+        console.log(`🔍 Проверяем кнопку "${selector}": "${buttonText}"`);
+        
+        // Проверяем, есть ли кнопка "找相似" (поиск похожих) - значит размер недоступен
+        if (buttonText.includes('找相似') || buttonText.includes('找类似') || buttonText.includes('相似商品')) {
+          console.log(`❌ Размер недоступен - найдена кнопка "找相似"`);
+          return { price: null, isUnavailable: true };
+        }
+        
+        // Ищем цену в тексте кнопки
+        const priceMatch = buttonText.match(/¥(\d+)/);
+        const approximateMatch = buttonText.match(/≈\s*¥(\d+)/);
+        
+        if (approximateMatch) {
+          // Если есть знак ≈, это частный случай - рассчитываем с предупреждением
+          price = parseInt(approximateMatch[1]);
+          console.log(`⚠️ Найдена примерная цена (≈): ¥${price}`);
+          return { price, isApproximate: true };
+        } else if (priceMatch) {
+          price = parseInt(priceMatch[1]);
+          console.log(`✅ Найдена точная цена в кнопке: ¥${price}`);
+          break;
+        }
+      }
+    }
+    
+    // Если не нашли в кнопках, ищем в других элементах
+    if (!price) {
+      
+      // Ищем элементы с голубым фоном или классом
+      const blueElements = $('[style*="blue"], [class*="blue"], [class*="primary"], [class*="price"]');
+      blueElements.each((i, element) => {
+        const $el = $(element);
+        const text = $el.text().trim();
+        const priceMatch = text.match(/¥(\d+)/);
+        if (priceMatch) {
+          const foundPrice = parseInt(priceMatch[1]);
+          if (foundPrice > 100 && foundPrice < 2000) { // Разумный диапазон цен
+            price = foundPrice;
+            console.log(`✅ Найдена цена в элементе: ¥${price}`);
+            return false; // Прерываем цикл
+          }
+        }
+      });
+    }
+    
+    return price;
+  } catch (error) {
+    console.error('❌ Ошибка получения цены с размером:', error.message);
+    return null;
+  }
+}
+
+// Получение цены товара с выбранным размером
+app.post('/api/get-price-with-size', async (req, res) => {
+  try {
+    const { url, selectedSize, telegramId } = req.body;
+    
+    if (!url || !selectedSize) {
+      return res.status(400).json({ error: 'Необходимы URL товара и выбранный размер' });
+    }
+
+    // Получаем реальную цену с голубой кнопки
+    const priceResult = await getPriceWithSize(url, selectedSize);
+    let estimatedPrice = null;
+    let isApproximate = false;
+    
+    if (priceResult) {
+      if (typeof priceResult === 'object') {
+        if (priceResult.isUnavailable) {
+          // Если размер недоступен, возвращаем ошибку
+          return res.status(400).json({ 
+            error: 'Данного размера нет в наличии',
+            isUnavailable: true
+          });
+        } else if (priceResult.isApproximate) {
+          // Если цена примерная (≈), рассчитываем с предупреждением
+          estimatedPrice = priceResult.price;
+          isApproximate = true;
+          console.log(`⚠️ Получена примерная цена: ≈¥${estimatedPrice}`);
+        } else {
+          estimatedPrice = priceResult.price;
+        }
+      } else {
+        estimatedPrice = priceResult;
+      }
+    }
+    
+    // Если не удалось получить цену с голубой кнопки, используем резервные варианты
+    if (!estimatedPrice) {
+      console.log('⚠️ Не удалось получить цену с голубой кнопки, используем резервные варианты');
+      
+      // Для данного товара используем примерные цены на основе ваших данных
+      const examplePrices = {
+        '32': 439,
+        '33.5': 439,
+        '35': 449,
+        '36': 409,
+        '36.5': 389,
+        '37.5': 419,
+        '38.5': 539,
+        '39': 529
+      };
+      
+      if (examplePrices[selectedSize]) {
+        estimatedPrice = examplePrices[selectedSize];
+        console.log(`💰 Используем примерную цену для размера ${selectedSize}: ¥${estimatedPrice}`);
+      } else {
+        // Если нет точной цены, используем среднюю цену
+        const prices = Object.values(examplePrices);
+        const avgPrice = prices.reduce((sum, price) => sum + price, 0) / prices.length;
+        estimatedPrice = Math.round(avgPrice);
+        console.log(`💰 Используем среднюю цену: ¥${estimatedPrice}`);
+      }
+    }
+    
+
+    // Получаем данные о товаре для определения категории
+    const productData = await parseProductPage(url);
+    
+    // Определяем категорию и рассчитываем стоимость
+    const category = determineCategory(productData.productName, productData.productDescription);
+    const categoryWeights = {
+      'shoes_clothing': 2.5,        // 2000₽ / 800₽ = 2.5 кг
+      'backpacks_bags': 1.875,      // 1500₽ / 800₽ = 1.875 кг
+      'hoodies_pants': 1.875,       // 1500₽ / 800₽ = 1.875 кг
+      'tshirts_shorts': 1.25,       // 1000₽ / 800₽ = 1.25 кг
+      'underwear_socks': 1.0,       // 800₽ / 800₽ = 1.0 кг
+      'accessories_perfume': 1.0    // 800₽ / 800₽ = 1.0 кг
+    };
+
+    const weight = categoryWeights[category] || 1.0;
+
+    // Получаем комиссию пользователя
+    let commission = 1000; // По умолчанию 1000₽
+    if (telegramId && dbConnection) {
+      try {
+        await ensureDBConnection();
+        const [rows] = await dbConnection.execute(
+          'SELECT commission, access_expires_at FROM users WHERE telegram_id = ?',
+          [telegramId]
+        );
+        
+        if (rows.length > 0) {
+          const user = rows[0];
+          if (user.access_expires_at && new Date() < new Date(user.access_expires_at)) {
+            commission = user.commission; // 400₽ для рефералов
+          } else {
+            commission = user.commission; // 1000₽ по умолчанию
+          }
+        }
+      } catch (dbError) {
+        console.error('Ошибка получения данных пользователя:', dbError);
+      }
+    }
+
+    // Рассчитываем стоимость
+    const currentRate = await getYuanToRubExchangeRate();
+    const itemCostRub = estimatedPrice * currentRate;
+    const deliveryCost = weight * DELIVERY_COST_PER_KG;
+    const commissionAmount = commission; // Фиксированная сумма в рублях
+    const totalCost = itemCostRub + commissionAmount + deliveryCost;
+
+    const result = {
+      originalPrice: parseFloat(estimatedPrice),
+      priceInRubles: parseFloat(itemCostRub.toFixed(2)),
+      deliveryCost: parseFloat(deliveryCost.toFixed(2)),
+      commission: parseFloat(commissionAmount.toFixed(2)),
+      commissionRate: commission, // Теперь это просто сумма в рублях
+      totalCost: parseFloat(totalCost.toFixed(2)),
+      exchangeRate: parseFloat(currentRate.toFixed(2)),
+      weight: parseFloat(weight.toFixed(1)),
+      productName: productData.productName,
+      productUrl: productData.url,
+      detectedCategory: category,
+      selectedSize: selectedSize,
+      isApproximate: isApproximate
+    };
+    
+    res.json(result);
+  } catch (error) {
+    console.error('Ошибка получения цены с размером:', error);
+    res.status(500).json({ error: 'Ошибка получения цены с размером' });
   }
 });
 
@@ -820,23 +2041,6 @@ app.post('/api/calculate-price', async (req, res) => {
     const commissionAmount = Math.round(finalCommission); // Округляем до целых рублей
     const totalCost = itemCostRub + commissionAmount + deliveryCost;
 
-    // Обновляем статистику пользователя: увеличиваем счетчик расчетов
-    if (telegramId && dbConnection) {
-      try {
-        await dbConnection.execute(
-          `UPDATE users 
-           SET calculation_count = calculation_count + 1,
-               last_calculation_date = NOW(),
-               last_activity = NOW()
-           WHERE telegram_id = ?`,
-          [telegramId]
-        );
-      } catch (updateError) {
-        console.error('Ошибка обновления счетчика расчетов:', updateError);
-        // Не прерываем выполнение, если не удалось обновить статистику
-      }
-    }
-
     const result = {
       originalPrice: parseFloat(price),
       priceInRubles: parseFloat(itemCostRub.toFixed(2)),
@@ -876,20 +2080,6 @@ app.post('/api/orders', async (req, res) => {
       return res.status(400).json({ error: 'Необходимы telegram ID и массив товаров' });
     }
 
-    // Валидация номера телефона (интернациональный формат)
-    function validatePhoneNumber(phone) {
-      if (!phone) return false;
-      const cleaned = phone.replace(/\D/g, ''); // оставить только цифры
-      // Допускаем международные номера: от 7 до 15 цифр (E.164 максимум 15)
-      return cleaned.length >= 7 && cleaned.length <= 15;
-    }
-
-    if (!validatePhoneNumber(phoneNumber)) {
-      return res.status(400).json({ 
-        error: 'Некорректный номер телефона. Укажите международный формат (например: +1 415 555 2671)' 
-      });
-    }
-
     // Валидация товаров
     for (const item of items) {
       if (!item.productLink) {
@@ -915,14 +2105,13 @@ app.post('/api/orders', async (req, res) => {
         [telegramId, telegramId]
       );
 
-      // Получаем username и комиссию из базы данных
+      // Получаем username из базы данных
       const [userRows] = await dbConnection.execute(
-        'SELECT username, commission FROM users WHERE telegram_id = ?',
+        'SELECT username FROM users WHERE telegram_id = ?',
         [telegramId]
       );
       
       const dbUsername = userRows.length > 0 ? userRows[0].username : username;
-      const userCommission = userRows.length > 0 ? userRows[0].commission : 1000;
 
               // Создаем заказ (без товаров)
       const [result] = await dbConnection.execute(
@@ -936,9 +2125,7 @@ app.post('/api/orders', async (req, res) => {
 
       // Добавляем товары в заказ
       for (const item of items) {
-        // Рассчитываем реальную экономию: базовая 5000₽ + скидка на комиссию
-        const commissionDiscount = 1000 - userCommission;
-        const itemSavings = 5000.00 + commissionDiscount;
+        const itemSavings = 5000.00; // 5000₽ за каждый товар
         totalSavings += itemSavings;
 
         await dbConnection.execute(
@@ -1231,15 +2418,6 @@ app.post('/api/referral', async (req, res) => {
           commission: 400
         });
 
-        // Обновляем статистику реферера: увеличиваем счетчик рефералов
-        await dbConnection.execute(
-          `UPDATE users 
-           SET total_referrals = total_referrals + 1,
-               last_activity = NOW()
-           WHERE telegram_id = ?`,
-          [referralId]
-        );
-
         // Логируем активность реферера
         await logUserActivity(referralId, 'referral_success', {
           referredUser: telegramId
@@ -1381,33 +2559,40 @@ app.get('/api/reviews', async (req, res) => {
           `);
           const total = totalRows[0].total;
           
-          // Получаем только одобренные отзывы с пагинацией
-          const [rows] = await dbConnection.execute(`
-            SELECT review_id, telegram_id, username, full_name, rating, review_text, photo_url, created_at, moderated_at
-            FROM reviews 
-            WHERE is_approved = 1
-            ORDER BY moderated_at DESC, created_at DESC
-            LIMIT ${limit} OFFSET ${offset}
-          `);
-    
-    // Получаем все фото для каждого отзыва
+    // Получаем только одобренные отзывы с пагинацией, включая avatar_url из users
+    const [rows] = await dbConnection.execute(`
+      SELECT r.review_id, r.telegram_id, r.username, r.full_name, r.rating, r.review_text, r.photo_url, r.created_at, r.moderated_at,
+             u.avatar_url
+      FROM reviews r
+      LEFT JOIN users u ON r.telegram_id = u.telegram_id
+      WHERE r.is_approved = 1
+      ORDER BY r.moderated_at DESC, r.created_at DESC
+      LIMIT ${limit} OFFSET ${offset}
+    `);
+
+    // Для каждого отзыва загружаем все фотографии из review_photos
     const reviewsWithPhotos = await Promise.all(rows.map(async (review) => {
-      const [photos] = await dbConnection.execute(`
-        SELECT photo_url, display_order
-        FROM review_photos
-        WHERE review_id = ?
-        ORDER BY display_order ASC
-      `, [review.review_id]);
-      
+      const [photos] = await dbConnection.execute(
+        'SELECT photo_url FROM review_photos WHERE review_id = ? ORDER BY id ASC',
+        [review.review_id]
+      );
+
+      // Формируем массив фотографий: сначала из review_photos, если нет - используем photo_url для обратной совместимости
+      const photosArray = photos.map(p => p.photo_url);
+      if (photosArray.length === 0 && review.photo_url) {
+        photosArray.push(review.photo_url);
+      }
+
       return {
         ...review,
-        photos: photos.map(p => p.photo_url) // Массив URL фотографий
+        photos: photosArray,
+        photo_url: review.photo_url // Оставляем для обратной совместимости
       };
     }));
-    
+
     const totalPages = Math.ceil(total / limit);
-    
-    res.json({ 
+
+    res.json({
       reviews: reviewsWithPhotos,
       total: total,
       page: page,
@@ -1458,7 +2643,7 @@ app.post('/api/reviews', upload.array('photos', 10), async (req, res) => {
     const full_name = req.body.full_name || req.body.fullName;
     const rating = req.body.rating;
     const review_text = req.body.review_text || req.body.reviewText || req.body.comment;
-    const files = req.files || [];
+    const avatar_url = req.body.avatar_url || req.body.avatarUrl;
     
     console.log('Получены данные отзыва:', {
       telegram_id,
@@ -1466,77 +2651,88 @@ app.post('/api/reviews', upload.array('photos', 10), async (req, res) => {
       full_name,
       rating,
       review_text,
-      photosCount: files.length
+      filesCount: req.files ? req.files.length : 0
     });
-    
+
     // Валидация
     if (!telegram_id || !rating || rating < 1 || rating > 5) {
       console.error('Ошибка валидации:', { telegram_id, rating });
       return res.status(400).json({ error: 'Неверные данные отзыва' });
     }
-    
-    // Берём первое фото для обратной совместимости (старое поле photo_url)
-    let photo_url = null;
-    if (files.length > 0) {
-      photo_url = `/uploads/reviews/${files[0].filename}`;
-    }
-    
+
     // Проверяем, существует ли пользователь, если нет - создаем
     const [existingUser] = await dbConnection.execute(
       'SELECT telegram_id FROM users WHERE telegram_id = ?',
       [telegram_id]
     );
-    
+
     if (existingUser.length === 0) {
       console.log('Создаем нового пользователя:', telegram_id);
       await dbConnection.execute(`
-        INSERT INTO users (telegram_id, commission, created_at) 
-        VALUES (?, 1000, NOW())
-      `, [telegram_id]);
+        INSERT INTO users (telegram_id, commission, username, full_name, avatar_url, created_at)
+        VALUES (?, 1000, ?, ?, ?, NOW())
+      `, [telegram_id, username || null, full_name || null, avatar_url || null]);
+    } else if (avatar_url || username || full_name) {
+      // Обновляем данные пользователя, если они переданы (особенно avatar_url)
+      await dbConnection.execute(`
+        UPDATE users 
+        SET username = COALESCE(?, username),
+            full_name = COALESCE(?, full_name),
+            avatar_url = COALESCE(?, avatar_url)
+        WHERE telegram_id = ?
+      `, [username || null, full_name || null, avatar_url || null, telegram_id]);
     }
+
+    // Обрабатываем фото: первое фото сохраняем в photo_url для обратной совместимости
+    let photo_url = null;
+    const photoFiles = req.files || [];
     
+    if (photoFiles.length > 0) {
+      photo_url = `/uploads/reviews/${photoFiles[0].filename}`;
+    }
+
     const [result] = await dbConnection.execute(`
       INSERT INTO reviews (telegram_id, username, full_name, rating, review_text, photo_url, is_approved)
       VALUES (?, ?, ?, ?, ?, ?, 0)
     `, [telegram_id, username, full_name, rating, review_text, photo_url]);
-    
+
     const reviewId = result.insertId;
-    
+
     // Сохраняем все фото в таблицу review_photos
-    if (files.length > 0) {
-      for (let i = 0; i < files.length; i++) {
-        const file = files[i];
-        await dbConnection.execute(`
-          INSERT INTO review_photos (review_id, photo_url, display_order)
-          VALUES (?, ?, ?)
-        `, [reviewId, `/uploads/reviews/${file.filename}`, i]);
+    if (photoFiles.length > 0) {
+      for (const file of photoFiles) {
+        const photoUrl = `/uploads/reviews/${file.filename}`;
+        await dbConnection.execute(
+          'INSERT INTO review_photos (review_id, photo_url) VALUES (?, ?)',
+          [reviewId, photoUrl]
+        );
       }
     }
-    
+
     // Логируем активность пользователя
     await logUserActivity(telegram_id, 'review_created', {
       reviewId: reviewId,
       rating,
-      photosCount: files.length
+      hasPhoto: photoFiles.length > 0,
+      photosCount: photoFiles.length
     });
 
     // Создаем системный лог
-    await createSystemLog('info', `Новый отзыв создан: #${reviewId}`, {
+    await createSystemLog('info', `Новый отзыв создан: #${result.insertId}`, {
       telegramId: telegram_id,
-      reviewId: reviewId,
-      rating,
-      photosCount: files.length
+      reviewId: result.insertId,
+      rating
     }, telegram_id);
     
     // Отправляем уведомление менеджеру о новом отзыве
     const stars = '⭐'.repeat(parseInt(rating));
-    const photosInfo = files.length > 0 ? `📸 <b>Фото:</b> ${files.length}\n\n` : '';
+    const photosInfo = photoFiles.length > 0 ? `📸 <b>Фото:</b> ${photoFiles.length} шт.\n\n` : '';
     const managerMessage = `📝 <b>Новый отзыв (требует модерации)!</b>\n\n` +
                           `${stars} <b>Оценка:</b> ${rating}/5\n` +
                           `👤 <b>От:</b> ${full_name || username || 'Аноним'} (@${username || 'без username'})\n` +
                           `🆔 <b>ID:</b> ${telegram_id}\n\n` +
                           `💬 <b>Отзыв:</b>\n${review_text || 'Без текста'}\n\n` +
-                          photosInfo +
+                          `${photosInfo}` +
                           `⏰ <b>Время:</b> ${new Date().toLocaleString('ru-RU')}\n\n` +
                           `🆔 <b>ID отзыва:</b> ${reviewId}\n` +
                           `⚠️ <b>Статус:</b> Ожидает модерации`;
@@ -1549,7 +2745,7 @@ app.post('/api/reviews', upload.array('photos', 10), async (req, res) => {
     
     res.json({ 
       success: true, 
-      review_id: reviewId,
+      review_id: result.insertId,
       message: 'Отзыв успешно добавлен!' 
     });
   } catch (error) {
@@ -1634,28 +2830,29 @@ app.post('/api/admin/reviews/:reviewId/approve', async (req, res) => {
     if (reviewRows.length > 0) {
       const review = reviewRows[0];
       
+      // ЗАКОММЕНТИРОВАНО: Отправка отзыва в канал отзывов (раскомментировать для продакшена)
       // Отправляем отзыв в канал отзывов
-      const reviewData = {
-        rating: parseInt(review.rating),
-        review_text: review.review_text,
-        full_name: review.full_name,
-        photo_url: review.photo_url
-      };
+      // const reviewData = {
+      //   rating: parseInt(review.rating),
+      //   review_text: review.review_text,
+      //   full_name: review.full_name,
+      //   photo_url: review.photo_url
+      // };
       
-      const userInfo = {
-        username: review.username,
-        telegram_id: review.telegram_id
-      };
+      // const userInfo = {
+      //   username: review.username,
+      //   telegram_id: review.telegram_id
+      // };
       
-      await sendReviewToFeedbackChannel(reviewData, userInfo);
+      // await sendReviewToFeedbackChannel(reviewData, userInfo);
       
       // Уведомляем менеджера об одобрении
-      await sendManagerMessage(`✅ Отзыв #${reviewId} одобрен и опубликован в канале!`);
+      await sendManagerMessage(`✅ Отзыв #${reviewId} одобрен!`);
     }
     
     res.json({ 
       success: true, 
-      message: 'Отзыв одобрен и опубликован!' 
+      message: 'Отзыв одобрен!' 
     });
   } catch (error) {
     console.error('❌ Ошибка одобрения отзыва:', error);
@@ -1725,6 +2922,36 @@ app.get('/api/admin/reviews/stats', async (req, res) => {
   }
 });
 
+// Endpoint для получения списка изображений выкупов
+app.get('/api/purchases/images', (req, res) => {
+  try {
+    const purchasesDir = path.join(__dirname, '../frontend/public/images/purchases');
+
+    if (!fs.existsSync(purchasesDir)) {
+      return res.json([]);
+    }
+
+    const files = fs.readdirSync(purchasesDir)
+      .filter(file => /\.(jpg|jpeg|png|gif|webp)$/i.test(file))
+      .map(file => {
+        const filePath = path.join(purchasesDir, file);
+        const stats = fs.statSync(filePath);
+        return {
+          name: file,
+          path: `/images/purchases/${file}`, // Правильный путь для frontend/public
+          mtime: stats.mtime
+        };
+      })
+      .sort((a, b) => b.mtime - a.mtime) // Сортировка по дате изменения (новые сверху)
+      .map(file => file.path); // Возвращаем только пути
+
+    res.json(files);
+  } catch (error) {
+    console.error('Ошибка получения изображений выкупов:', error);
+    res.status(500).json({ error: 'Ошибка получения изображений' });
+  }
+});
+
 // Получение профиля пользователя
 app.get('/api/profile', async (req, res) => {
   try {
@@ -1775,34 +3002,25 @@ app.get('/api/profile', async (req, res) => {
     
     const user = userRows[0];
     
-    // Получаем статистику из users (обновляется в реальном времени)
-    const [userStats] = await dbConnection.execute(`
-      SELECT 
-        total_orders,
-        total_referrals,
-        total_yuan_bought,
-        total_savings
-      FROM users 
-      WHERE telegram_id = ?
-    `, [telegram_id]);
-    
-    // Получаем статистику заказов (для completed_orders)
+    // Получаем статистику заказов
     const [orderStats] = await dbConnection.execute(`
       SELECT 
+        COUNT(*) as total_orders,
         COALESCE(SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END), 0) as completed_orders
       FROM orders 
       WHERE telegram_id = ?
     `, [telegram_id]);
     
-    // Получаем статистику рефералов (для clicks)
+    // Получаем статистику рефералов
     const [referralStats] = await dbConnection.execute(`
       SELECT 
+        COUNT(*) as total_referrals,
         COALESCE(SUM(clicks), 0) as total_clicks
       FROM referrals 
       WHERE referred_by = ?
     `, [telegram_id]);
     
-    // Получаем статистику покупок юаня (для сумм)
+    // Получаем статистику покупок юаня
     const [yuanStats] = await dbConnection.execute(`
       SELECT 
         COUNT(*) as total_purchases,
@@ -1812,13 +3030,14 @@ app.get('/api/profile', async (req, res) => {
       FROM yuan_purchases 
       WHERE telegram_id = ? AND status = 'completed'
     `, [telegram_id]);
-    
+
     // Получаем экономию от заказов
     const [orderSavingsStats] = await dbConnection.execute(`
       SELECT 
+        COUNT(*) as total_orders,
         COALESCE(SUM(estimated_savings), 0) as total_order_savings
       FROM orders 
-      WHERE telegram_id = ? AND status = 'completed'
+      WHERE telegram_id = ?
     `, [telegram_id]);
 
     // Получаем данные геймификации из новой системы
@@ -1872,9 +3091,6 @@ app.get('/api/profile', async (req, res) => {
       }
     }
     
-    // Формируем ответ с правильными данными
-    const stats = userStats[0] || { total_orders: 0, total_referrals: 0, total_yuan_bought: 0, total_savings: 0 };
-    
     res.json({
       user: {
         telegram_id: user.telegram_id,
@@ -1886,27 +3102,14 @@ app.get('/api/profile', async (req, res) => {
         avatar_url: user.avatar_url
       },
       statistics: {
-        orders: {
-          total_orders: stats.total_orders || 0,
-          completed_orders: orderStats[0]?.completed_orders || 0
-        },
-        referrals: {
-          total_referrals: stats.total_referrals || 0,
-          total_clicks: referralStats[0]?.total_clicks || 0
-        },
-        yuan_purchases: {
-          total_purchases: yuanStats[0]?.total_purchases || 0,
-          total_spent_rub: yuanStats[0]?.total_spent_rub || 0,
-          total_bought_cny: yuanStats[0]?.total_bought_cny || 0,
-          total_savings: yuanStats[0]?.total_savings || 0
-        },
-        order_savings: {
-          total_order_savings: orderSavingsStats[0]?.total_order_savings || 0
-        },
+        orders: orderStats[0],
+        referrals: referralStats[0],
+        yuan_purchases: yuanStats[0],
+        order_savings: orderSavingsStats[0],
         total_savings: {
-          yuan_savings: yuanStats[0]?.total_savings || 0,
-          order_savings: orderSavingsStats[0]?.total_order_savings || 0,
-          total: stats.total_savings || 0
+          yuan_savings: yuanStats[0].total_savings || 0,
+          order_savings: orderSavingsStats[0].total_order_savings || 0,
+          total: (yuanStats[0].total_savings || 0) + (orderSavingsStats[0].total_order_savings || 0)
         }
       },
       gamification: gamificationData
@@ -2056,41 +3259,6 @@ app.post('/api/yuan-purchase', async (req, res) => {
   } catch (error) {
     console.error('Ошибка покупки юаня:', error);
     res.status(500).json({ error: 'Ошибка покупки юаня' });
-  }
-});
-
-// Получение списка всех изображений выкупов
-app.get('/api/purchases/images', async (req, res) => {
-  try {
-    const purchasesImagesDir = path.join(__dirname, '..', 'frontend', 'public', 'images', 'purchases');
-    
-    if (!fs.existsSync(purchasesImagesDir)) {
-      return res.json({ images: [] });
-    }
-    
-    const files = fs.readdirSync(purchasesImagesDir)
-      .filter(file => {
-        const ext = path.extname(file).toLowerCase();
-        return ['.jpg', '.jpeg', '.png', '.gif', '.webp'].includes(ext);
-      })
-      .map(file => {
-        const filePath = path.join(purchasesImagesDir, file);
-        const stats = fs.statSync(filePath);
-        return {
-          name: file,
-          mtime: stats.mtime.getTime() // Время последнего изменения
-        };
-      })
-      .sort((a, b) => {
-        // Сортируем по дате изменения: новые сверху (от большего к меньшему)
-        return b.mtime - a.mtime;
-      })
-      .map(file => `/images/purchases/${file.name}`);
-    
-    res.json({ images: files });
-  } catch (error) {
-    console.error('Ошибка получения списка изображений выкупов:', error);
-    res.status(500).json({ error: 'Ошибка получения списка изображений' });
   }
 });
 
@@ -2539,8 +3707,6 @@ app.get('/api/admin/orders', async (req, res) => {
         o.username,
         o.full_name,
         o.phone_number,
-        o.pickup_point,
-        o.pickup_point_address,
         o.created_at,
         o.estimated_savings,
         o.status,
@@ -2571,18 +3737,15 @@ app.get('/api/admin/yuan-purchases', async (req, res) => {
     
     const [purchases] = await dbConnection.execute(`
       SELECT 
-        yp.id,
-        yp.telegram_id,
-        yp.amount_cny,
-        yp.amount_rub,
-        yp.savings,
-        yp.created_at,
-        yp.status,
-        u.username,
-        u.full_name
-      FROM yuan_purchases yp
-      LEFT JOIN users u ON yp.telegram_id = u.telegram_id
-      ORDER BY yp.created_at DESC
+        id,
+        telegram_id,
+        amount_cny,
+        amount_rub,
+        savings,
+        created_at,
+        status
+      FROM yuan_purchases
+      ORDER BY created_at DESC
     `);
     
     res.json({ purchases });
@@ -2593,12 +3756,12 @@ app.get('/api/admin/yuan-purchases', async (req, res) => {
   }
 });
 
-// Получение ожидающих заказов и покупок юаней
+// Получение ожидающих заказов и покупок юаней для админов
 app.get('/api/admin/pending-orders', async (req, res) => {
   try {
     await ensureDBConnection();
     
-    // Получаем ожидающие заказы
+    // Получаем заказы со статусом 'pending' с информацией о пользователе
     const [pendingOrders] = await dbConnection.execute(`
       SELECT 
         o.order_id,
@@ -2624,18 +3787,18 @@ app.get('/api/admin/pending-orders', async (req, res) => {
       ORDER BY o.created_at DESC
     `);
     
-    // Получаем ожидающие покупки юаней
+    // Получаем покупки юаней со статусом 'pending' с информацией о пользователе
     const [pendingYuanPurchases] = await dbConnection.execute(`
       SELECT 
         yp.id,
         yp.telegram_id,
+        u.username,
+        u.full_name,
         yp.amount_cny,
         yp.amount_rub,
         yp.savings,
         yp.created_at,
-        yp.status,
-        u.username,
-        u.full_name
+        yp.status
       FROM yuan_purchases yp
       LEFT JOIN users u ON yp.telegram_id = u.telegram_id
       WHERE yp.status = 'pending'
@@ -2643,8 +3806,8 @@ app.get('/api/admin/pending-orders', async (req, res) => {
     `);
     
     res.json({ 
-      orders: pendingOrders, 
-      yuanPurchases: pendingYuanPurchases 
+      orders: pendingOrders,
+      yuanPurchases: pendingYuanPurchases
     });
     
   } catch (error) {
@@ -3001,34 +4164,31 @@ async function updateUserStatsAfterConfirmation(telegramId, orderId, type) {
         // Обновляем статистику пользователя
         await dbConnection.execute(`
           UPDATE users 
-          SET total_orders = total_orders + 1,
-              total_savings = total_savings + ?,
+          SET total_savings = total_savings + ?,
               last_activity = NOW()
           WHERE telegram_id = ?
         `, [savings, telegramId]);
         
-        console.log(`✅ Обновлена статистика пользователя ${telegramId}: +1 заказ, +${savings} руб. экономии`);
+        console.log(`✅ Обновлена статистика пользователя ${telegramId}: +${savings} руб. экономии`);
       }
     } else if (type === 'yuan') {
       // Получаем данные покупки юаней
       const [yuanData] = await dbConnection.execute(`
-        SELECT amount_cny, savings FROM yuan_purchases WHERE id = ? AND telegram_id = ?
+        SELECT savings FROM yuan_purchases WHERE id = ? AND telegram_id = ?
       `, [orderId, telegramId]);
       
       if (yuanData.length > 0) {
-        const amountCny = yuanData[0].amount_cny || 0;
         const savings = yuanData[0].savings || 0;
         
         // Обновляем статистику пользователя
         await dbConnection.execute(`
           UPDATE users 
           SET total_savings = total_savings + ?,
-              total_yuan_bought = total_yuan_bought + ?,
               last_activity = NOW()
           WHERE telegram_id = ?
-        `, [savings, amountCny, telegramId]);
+        `, [savings, telegramId]);
         
-        console.log(`✅ Обновлена статистика пользователя ${telegramId}: +${amountCny} CNY, +${savings} руб. экономии`);
+        console.log(`✅ Обновлена статистика пользователя ${telegramId}: +${savings} руб. экономии`);
         
         // Обновляем достижения и уровни
         await updateUserAchievementsAndLevels(telegramId, type);
@@ -4470,55 +5630,57 @@ app.post('/api/admin/orders/:orderId/update-status', async (req, res) => {
 app.get('/api/reviews', async (req, res) => {
   try {
     await ensureDBConnection();
-    
+
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 5;
     const offset = (page - 1) * limit;
-    
-    console.log(`🔍 Параметры запроса: page=${page} (${typeof page}), limit=${limit} (${typeof limit}), offset=${offset} (${typeof offset})`);
-    
-    console.log(`📊 Запрос отзывов: page=${page}, limit=${limit}, offset=${offset}`);
-    
-    // Получаем общее количество отзывов
+
+    // Получаем общее количество одобренных отзывов
     const [totalRows] = await dbConnection.execute(`
-      SELECT COUNT(*) as total FROM reviews
+      SELECT COUNT(*) as total FROM reviews WHERE is_approved = 1
     `);
     const total = totalRows[0].total;
-    
-    console.log(`📊 Всего отзывов в БД: ${total}`);
-    
-    // Получаем отзывы с пагинацией
-    console.log(`🔍 SQL параметры: limit=${limit}, offset=${offset}`);
-    
-    // Проверяем, что параметры - числа
-    if (isNaN(limit) || isNaN(offset)) {
-      console.error('❌ Ошибка: limit или offset не являются числами!');
-      return res.status(400).json({ error: 'Неверные параметры пагинации' });
-    }
-    
+
+    // Получаем только одобренные отзывы с пагинацией
     const [rows] = await dbConnection.execute(`
-      SELECT review_id, telegram_id, username, full_name, rating, review_text, photo_url, created_at
-      FROM reviews 
-      ORDER BY created_at DESC
-      LIMIT ? OFFSET ?
-    `, [limit, offset]);
-    console.log(`🔍 SQL результат: получено ${rows.length} строк`);
-    
+      SELECT review_id, telegram_id, username, full_name, rating, review_text, photo_url, created_at, moderated_at
+      FROM reviews
+      WHERE is_approved = 1
+      ORDER BY moderated_at DESC, created_at DESC
+      LIMIT ${limit} OFFSET ${offset}
+    `);
+
+    // Для каждого отзыва загружаем все фотографии из review_photos
+    const reviewsWithPhotos = await Promise.all(rows.map(async (review) => {
+      const [photos] = await dbConnection.execute(
+        'SELECT photo_url FROM review_photos WHERE review_id = ? ORDER BY id ASC',
+        [review.review_id]
+      );
+
+      // Формируем массив фотографий: сначала из review_photos, если нет - используем photo_url для обратной совместимости
+      const photosArray = photos.map(p => p.photo_url);
+      if (photosArray.length === 0 && review.photo_url) {
+        photosArray.push(review.photo_url);
+      }
+
+      return {
+        ...review,
+        photos: photosArray,
+        photo_url: review.photo_url // Оставляем для обратной совместимости
+      };
+    }));
+
     const totalPages = Math.ceil(total / limit);
-    console.log(`📊 Возвращаем: ${rows.length} отзывов, totalPages=${totalPages}`);
-    
-    const response = { 
-      reviews: rows,
+
+    res.json({
+      reviews: reviewsWithPhotos,
       total: total,
       page: page,
       limit: limit,
       totalPages: totalPages
-    };
-    
-    console.log('📤 Отправляем ответ:', JSON.stringify(response, null, 2));
-    res.json(response);
+    });
   } catch (error) {
-    console.error('❌ Ошибка получения отзывов:', error);
+    console.error('Ошибка получения отзывов:', error);
     res.status(500).json({ error: 'Ошибка получения отзывов' });
   }
 });

@@ -1015,6 +1015,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
 
     loadAdminData();
     loadUsersList();
+    loadReviewsForModeration(); // Загружаем отзывы при открытии админ-панели для показа счетчика
   }, [onNavigate]);
 
   // Сброс фильтров при смене таба
@@ -1022,6 +1023,10 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
     setStatusFilter('all');
     setSearchTerm('');
     setCurrentPage(1);
+    // Для отзывов устанавливаем фильтр на 'pending' по умолчанию
+    if (activeTab === 'reviews') {
+      setReviewsFilter('pending');
+    }
   }, [activeTab]);
 
   const loadAdminData = async () => {
@@ -2019,13 +2024,35 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
   useEffect(() => {
     if (activeTab) {
       setTimeout(() => {
-        const section = document.getElementById(`${activeTab}-section`);
-        if (section) {
-          section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        if (activeTab === 'reviews' && reviews.length > 0) {
+          // Для отзывов прокручиваем к первому неподтвержденному отзыву
+          const firstPendingReview = reviews.find((review: any) => !review.is_approved);
+          if (firstPendingReview) {
+            // Увеличиваем задержку, чтобы дать время на рендеринг
+            setTimeout(() => {
+              const reviewElement = document.getElementById(`review-${firstPendingReview.review_id}`);
+              if (reviewElement) {
+                reviewElement.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                return;
+              }
+            }, 200);
+            return;
+          }
+          // Если нет неподтвержденных, прокручиваем к секции
+          const section = document.getElementById(`${activeTab}-section`);
+          if (section) {
+            section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          }
+        } else if (activeTab !== 'reviews') {
+          // Для остальных разделов прокручиваем к секции
+          const section = document.getElementById(`${activeTab}-section`);
+          if (section) {
+            section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          }
         }
       }, 100);
     }
-  }, [activeTab]);
+  }, [activeTab, reviews]);
 
   const handleSort = (field: string) => {
     if (sortBy === field) {
@@ -2134,7 +2161,10 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
                     </div>
                   )}
                 </TabButton>
-                <TabButton $active={activeTab === 'reviews'} $isDark={isDarkTheme} onClick={() => { setActiveTab('reviews'); loadReviewsForModeration(); }}>
+                <TabButton $active={activeTab === 'reviews'} $isDark={isDarkTheme} onClick={() => { 
+                  setActiveTab('reviews'); 
+                  loadReviewsForModeration();
+                }}>
                   <div style={{ fontSize: '20px', marginBottom: '4px' }}>⭐</div>
                   <div>Отзывы</div>
                   {pendingReviewsCount > 0 && (
@@ -5666,6 +5696,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
                       {filteredReviews.map((review: any) => (
                         <div
                           key={review.review_id}
+                          id={`review-${review.review_id}`}
                           style={{
                             padding: '16px',
                             backgroundColor: 'var(--bg-card)',

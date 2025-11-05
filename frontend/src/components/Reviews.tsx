@@ -270,17 +270,26 @@ const ReviewAuthor = styled.div`
   gap: 10px;
 `;
 
-const AuthorAvatar = styled.div`
+const AuthorAvatar = styled.div<{ $hasImage?: boolean }>`
   width: 40px;
   height: 40px;
   border-radius: 50%;
-  background: var(--matte-red);
+  background: ${props => props.$hasImage ? 'transparent' : 'var(--matte-red)'};
   display: flex;
   align-items: center;
   justify-content: center;
   color: var(--bg-primary);
   font-weight: 600;
   font-size: 1.1rem;
+  overflow: hidden;
+  flex-shrink: 0;
+  
+  img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    border-radius: 50%;
+  }
 `;
 
 const AuthorInfo = styled.div`
@@ -339,33 +348,75 @@ const ReviewText = styled.div`
   font-size: 0.95rem;
 `;
 
+const ReviewPhotoContainer = styled.div`
+  position: relative;
+  width: 100%;
+  display: flex;
+  justify-content: center;
+  margin-top: 5px;
+`;
+
 const ReviewPhoto = styled.img`
-  max-width: 120px;
-  max-height: 80px;
+  max-width: 100%;
+  max-height: 250px;
   width: auto;
   height: auto;
-  border-radius: 8px;
+  border-radius: 12px;
   object-fit: contain;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
   transition: all 0.3s ease;
   cursor: pointer;
-  border: 2px solid var(--matte-red);
-  flex-shrink: 0;
+  border: 2px solid var(--border-color);
+  background: var(--bg-secondary);
   
   &:hover {
-    transform: scale(1.05);
-    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.15);
+    transform: scale(1.02);
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.2);
+    border-color: var(--matte-red);
   }
+`;
+
+const ReviewVideo = styled.video`
+  max-width: 100%;
+  max-height: 250px;
+  width: auto;
+  height: auto;
+  border-radius: 12px;
+  object-fit: contain;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+  transition: all 0.3s ease;
+  cursor: pointer;
+  border: 2px solid var(--border-color);
+  background: var(--bg-secondary);
+  
+  &:hover {
+    transform: scale(1.02);
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.2);
+    border-color: var(--matte-red);
+  }
+`;
+
+const PhotoCountBadge = styled.div`
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  background: rgba(0, 0, 0, 0.7);
+  color: white;
+  padding: 4px 10px;
+  border-radius: 12px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  backdrop-filter: blur(10px);
 `;
 
 const ReviewContent = styled.div`
   display: flex;
+  flex-direction: column;
   gap: 15px;
-  align-items: flex-start;
 `;
 
 const ReviewTextContainer = styled.div`
-  flex: 1;
+  width: 100%;
   min-width: 0;
 `;
 
@@ -706,6 +757,7 @@ interface Review {
   review_text: string;
   photo_url?: string; // Для обратной совместимости
   photos?: string[]; // Массив фото (новый формат)
+  avatar_url?: string | null; // URL аватарки пользователя из Telegram
   created_at: string;
 }
 
@@ -730,7 +782,7 @@ const Reviews: React.FC<ReviewsProps> = ({ onNavigate, toggleTheme, isDarkTheme,
   const [hasLoadedFirstPage, setHasLoadedFirstPage] = useState(false);
   const reviewsPerPage = 5;
 
-  // Функция для получения правильного URL изображения
+  // Функция для получения правильного URL изображения/видео
   const getImageUrl = (photoUrl: string) => {
     if (photoUrl.startsWith('http')) {
       return photoUrl;
@@ -742,6 +794,13 @@ const Reviews: React.FC<ReviewsProps> = ({ onNavigate, toggleTheme, isDarkTheme,
     const backendPort = isDevelopment ? '3000' : window.location.port;
     
     return `${window.location.protocol}//${window.location.hostname}:${backendPort}${photoUrl}`;
+  };
+
+  // Функция для определения типа файла (изображение или видео)
+  const isVideoFile = (fileUrl: string): boolean => {
+    const videoExtensions = ['.mp4', '.webm', '.ogg', '.mov', '.avi', '.mkv', '.flv', '.wmv'];
+    const lowerUrl = fileUrl.toLowerCase();
+    return videoExtensions.some(ext => lowerUrl.endsWith(ext));
   };
 
   const handleBackClick = () => {
@@ -877,8 +936,23 @@ const Reviews: React.FC<ReviewsProps> = ({ onNavigate, toggleTheme, isDarkTheme,
     ));
   };
 
-  const getInitials = (name: string) => {
-    return name.split(' ').map(word => word[0]).join('').toUpperCase();
+  const getInitials = (username: string | null | undefined, fullName: string | null | undefined): string => {
+    const name = username || fullName || 'Аноним';
+    if (!name || typeof name !== 'string' || name.trim() === '') {
+      return 'А';
+    }
+    const cleanName = (name.replace('@', '').trim() || 'Аноним');
+    if (!cleanName || cleanName.length === 0) {
+      return 'А';
+    }
+    const parts = cleanName.split(' ').filter(part => part.length > 0);
+    if (parts.length === 0) {
+      return 'А';
+    }
+    if (parts.length > 1) {
+      return parts.map(part => part[0] || '').join('').substring(0, 2).toUpperCase() || 'А';
+    }
+    return (cleanName[0] || 'А').toUpperCase();
   };
 
   return (
@@ -991,11 +1065,26 @@ const Reviews: React.FC<ReviewsProps> = ({ onNavigate, toggleTheme, isDarkTheme,
                   <ReviewItem>
                     <ReviewHeader>
                       <ReviewAuthor>
-                        <AuthorAvatar>
-                          {getInitials(review.full_name)}
+                        <AuthorAvatar $hasImage={!!review.avatar_url}>
+                          {review.avatar_url ? (
+                            <img 
+                              src={review.avatar_url} 
+                              alt={review.full_name || review.username || 'Аватар'}
+                              onError={(e) => {
+                                // Если аватарка не загрузилась, показываем инициалы
+                                e.currentTarget.style.display = 'none';
+                                const parent = e.currentTarget.parentElement;
+                                if (parent) {
+                                  parent.textContent = getInitials(review.username, review.full_name);
+                                }
+                              }}
+                            />
+                          ) : (
+                            getInitials(review.username, review.full_name)
+                          )}
                         </AuthorAvatar>
                         <AuthorInfo>
-                          <AuthorName>{review.full_name}</AuthorName>
+                          <AuthorName>{review.full_name || review.username || 'Аноним'}</AuthorName>
                           <ReviewDate>
                             {new Date(review.created_at).toLocaleDateString('ru-RU')}
                           </ReviewDate>
@@ -1011,21 +1100,50 @@ const Reviews: React.FC<ReviewsProps> = ({ onNavigate, toggleTheme, isDarkTheme,
                         <ReviewText>{review.review_text}</ReviewText>
                       </ReviewTextContainer>
                       
-                      {/* Отображаем фото: сначала массив photos, потом старое photo_url для совместимости */}
-                      {(review.photos && review.photos.length > 0 ? review.photos : (review.photo_url ? [review.photo_url] : [])).map((photo, idx) => (
-                        <ReviewPhoto 
-                          key={idx}
-                          src={getImageUrl(photo)}
-                          alt={`Фото отзыва ${idx + 1}`}
-                          onError={(e) => {
-                            console.error('Ошибка загрузки изображения в списке:', photo);
-                            e.currentTarget.style.display = 'none';
-                          }}
-                          onLoad={() => {
-                            console.log('Изображение в списке загружено:', photo);
-                          }}
-                        />
-                      ))}
+                      {/* Отображаем только первую фотографию в карточке */}
+                      {(() => {
+                        const allPhotos = review.photos && review.photos.length > 0 
+                          ? review.photos 
+                          : (review.photo_url ? [review.photo_url] : []);
+                        
+                        if (allPhotos.length > 0) {
+                          const firstPhoto = allPhotos[0];
+                          const remainingCount = allPhotos.length - 1;
+                          
+                          return (
+                            <ReviewPhotoContainer>
+                              {isVideoFile(firstPhoto) ? (
+                                <ReviewVideo 
+                                  src={getImageUrl(firstPhoto)}
+                                  controls
+                                  muted
+                                  playsInline
+                                  onError={(e) => {
+                                    console.error('Ошибка загрузки видео в списке:', firstPhoto);
+                                    e.currentTarget.style.display = 'none';
+                                  }}
+                                />
+                              ) : (
+                                <ReviewPhoto 
+                                  src={getImageUrl(firstPhoto)}
+                                  alt={`Фото отзыва 1`}
+                                  onError={(e) => {
+                                    console.error('Ошибка загрузки изображения в списке:', firstPhoto);
+                                    e.currentTarget.style.display = 'none';
+                                  }}
+                                  onLoad={() => {
+                                    console.log('Изображение в списке загружено:', firstPhoto);
+                                  }}
+                                />
+                              )}
+                              {remainingCount > 0 && (
+                                <PhotoCountBadge>+{remainingCount}</PhotoCountBadge>
+                              )}
+                            </ReviewPhotoContainer>
+                          );
+                        }
+                        return null;
+                      })()}
                     </ReviewContent>
                   </ReviewItem>
                 </ReviewItemClickable>
@@ -1122,12 +1240,27 @@ const Reviews: React.FC<ReviewsProps> = ({ onNavigate, toggleTheme, isDarkTheme,
             
             <div style={{ marginBottom: '20px' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '15px', marginBottom: '15px' }}>
-                <AuthorAvatar style={{ width: '50px', height: '50px' }}>
-                  {getInitials(selectedReview.full_name)}
+                <AuthorAvatar $hasImage={!!selectedReview.avatar_url} style={{ width: '50px', height: '50px' }}>
+                  {selectedReview.avatar_url ? (
+                    <img 
+                      src={selectedReview.avatar_url} 
+                      alt={selectedReview.full_name || selectedReview.username || 'Аватар'}
+                      onError={(e) => {
+                        // Если аватарка не загрузилась, показываем инициалы
+                        e.currentTarget.style.display = 'none';
+                        const parent = e.currentTarget.parentElement;
+                        if (parent) {
+                          parent.textContent = getInitials(selectedReview.username, selectedReview.full_name);
+                        }
+                      }}
+                    />
+                  ) : (
+                    getInitials(selectedReview.username, selectedReview.full_name)
+                  )}
                 </AuthorAvatar>
                 <div>
                   <AuthorName style={{ fontSize: '1.1rem', marginBottom: '5px' }}>
-                    {selectedReview.full_name}
+                    {selectedReview.full_name || selectedReview.username || 'Аноним'}
                   </AuthorName>
                   <ReviewDate style={{ fontSize: '0.9rem' }}>
                     {new Date(selectedReview.created_at).toLocaleDateString('ru-RU')}
@@ -1144,29 +1277,50 @@ const Reviews: React.FC<ReviewsProps> = ({ onNavigate, toggleTheme, isDarkTheme,
               {selectedReview.review_text}
             </ReviewModalContent>
             
-            {/* Отображаем все фото в модальном окне */}
+            {/* Отображаем все фото/видео в модальном окне */}
             {(selectedReview.photos && selectedReview.photos.length > 0 ? selectedReview.photos : (selectedReview.photo_url ? [selectedReview.photo_url] : [])).map((photo, idx) => (
               <div key={idx} style={{ marginTop: '15px', textAlign: 'center' }}>
-                <img 
-                  src={getImageUrl(photo)}
-                  alt={`Фото отзыва ${idx + 1}`}
-                  style={{
-                    width: '100%',
-                    maxWidth: '300px',
-                    borderRadius: '12px',
-                    objectFit: 'cover',
-                    boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)',
-                    display: 'block',
-                    margin: '0 auto'
-                  }}
-                  onError={(e) => {
-                    console.error('Ошибка загрузки изображения:', photo);
-                    e.currentTarget.style.display = 'none';
-                  }}
-                  onLoad={() => {
-                    console.log('Изображение загружено успешно:', photo);
-                  }}
-                />
+                {isVideoFile(photo) ? (
+                  <video 
+                    src={getImageUrl(photo)}
+                    controls
+                    style={{
+                      width: '100%',
+                      maxWidth: '300px',
+                      maxHeight: '400px',
+                      borderRadius: '12px',
+                      objectFit: 'contain',
+                      boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)',
+                      display: 'block',
+                      margin: '0 auto'
+                    }}
+                    onError={(e) => {
+                      console.error('Ошибка загрузки видео:', photo);
+                      e.currentTarget.style.display = 'none';
+                    }}
+                  />
+                ) : (
+                  <img 
+                    src={getImageUrl(photo)}
+                    alt={`Фото отзыва ${idx + 1}`}
+                    style={{
+                      width: '100%',
+                      maxWidth: '300px',
+                      borderRadius: '12px',
+                      objectFit: 'cover',
+                      boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)',
+                      display: 'block',
+                      margin: '0 auto'
+                    }}
+                    onError={(e) => {
+                      console.error('Ошибка загрузки изображения:', photo);
+                      e.currentTarget.style.display = 'none';
+                    }}
+                    onLoad={() => {
+                      console.log('Изображение загружено успешно:', photo);
+                    }}
+                  />
+                )}
               </div>
             ))}
           </ReviewModal>
