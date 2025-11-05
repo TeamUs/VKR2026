@@ -258,12 +258,65 @@ const PhotoInput = styled.input`
   display: none;
 `;
 
-const PhotoPreview = styled.img`
-  max-width: 100%;
-  max-height: 200px;
+const PhotoPreviewGrid = styled.div`
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(80px, 1fr));
+  gap: 10px;
+  margin-bottom: 12px;
+`;
+
+const PhotoPreviewContainer = styled.div`
+  position: relative;
+  width: 100%;
+  aspect-ratio: 1;
   border-radius: 8px;
-  margin-top: 10px;
+  overflow: hidden;
+  border: 2px solid var(--border-color);
+  background: var(--bg-secondary);
+`;
+
+const PhotoPreview = styled.img`
+  width: 100%;
+  height: 100%;
   object-fit: cover;
+  display: block;
+`;
+
+const VideoPreview = styled.video`
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+`;
+
+const RemovePhotoButton = styled.button`
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  background: rgba(220, 53, 69, 0.9);
+  color: white;
+  border: none;
+  border-radius: 50%;
+  width: 24px;
+  height: 24px;
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+  z-index: 10;
+  
+  &:hover {
+    background: rgba(220, 53, 69, 1);
+    transform: scale(1.1);
+  }
+  
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
 `;
 
 const SubmitButton = styled.button<{ $disabled: boolean }>`
@@ -371,6 +424,7 @@ const WriteReviewModal: React.FC<WriteReviewModalProps> = ({ isOpen, onClose, on
   const [reviewText, setReviewText] = useState('');
   const [photos, setPhotos] = useState<File[]>([]);
   const [photoPreviews, setPhotoPreviews] = useState<string[]>([]);
+  const [fileTypes, setFileTypes] = useState<string[]>([]); // 'image' или 'video'
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
@@ -382,37 +436,63 @@ const WriteReviewModal: React.FC<WriteReviewModalProps> = ({ isOpen, onClose, on
     const files = event.target.files;
     if (!files || files.length === 0) return;
     
+    const fileArray = Array.from(files);
     const newPhotos: File[] = [];
-    const newPreviews: string[] = [];
     
     // Добавляем новые фото к существующим (максимум 10 фото)
-    const totalPhotos = photos.length + files.length;
+    const totalPhotos = photos.length + fileArray.length;
     if (totalPhotos > 10) {
       setError('Можно загрузить максимум 10 фото');
       return;
     }
     
-    Array.from(files).forEach((file, fileIndex) => {
-      if (file.size > 5 * 1024 * 1024) { // 5MB limit
-        setError('Размер каждого файла не должен превышать 5MB');
+    // Сначала проверяем размер и тип всех файлов
+    const newFileTypes: string[] = [];
+    for (const file of fileArray) {
+      if (file.size > 10 * 1024 * 1024) { // 10MB limit для видео
+        setError('Размер каждого файла не должен превышать 10MB');
         return;
       }
-      
+      // Проверяем тип файла
+      if (!file.type.startsWith('image/') && !file.type.startsWith('video/')) {
+        setError('Разрешены только изображения и видео');
+        return;
+      }
       newPhotos.push(file);
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        if (e.target?.result) {
-          newPreviews.push(e.target.result as string);
-          // Обновляем только когда все файлы прочитаны
-          if (newPreviews.length === files.length) {
-            setPhotoPreviews([...photoPreviews, ...newPreviews]);
+      newFileTypes.push(file.type.startsWith('video/') ? 'video' : 'image');
+    }
+    
+    // Обновляем массив файлов и типов
+    const updatedPhotos = [...photos, ...newPhotos];
+    setPhotos(updatedPhotos);
+    setFileTypes((prev) => [...prev, ...newFileTypes]);
+    
+    // Создаем превью для всех новых файлов асинхронно
+    const previewPromises = newPhotos.map((file) => {
+      return new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          if (e.target?.result) {
+            resolve(e.target.result as string);
+          } else {
+            reject(new Error('Failed to read file'));
           }
-        }
-      };
-      reader.readAsDataURL(file);
+        };
+        reader.onerror = () => reject(new Error('Failed to read file'));
+        reader.readAsDataURL(file);
+      });
     });
     
-    setPhotos([...photos, ...newPhotos]);
+    // Ждем, пока все превью будут готовы, и обновляем состояние
+    Promise.all(previewPromises)
+      .then((newPreviews) => {
+        setPhotoPreviews((prev) => [...prev, ...newPreviews]);
+      })
+      .catch((error) => {
+        console.error('Ошибка создания превью:', error);
+        setError('Ошибка обработки файлов');
+      });
+    
     setError(null);
     
     // Сбрасываем input чтобы можно было выбрать те же файлы снова
@@ -424,6 +504,7 @@ const WriteReviewModal: React.FC<WriteReviewModalProps> = ({ isOpen, onClose, on
   const handleRemovePhoto = (index: number) => {
     setPhotos(photos.filter((_, i) => i !== index));
     setPhotoPreviews(photoPreviews.filter((_, i) => i !== index));
+    setFileTypes(fileTypes.filter((_, i) => i !== index));
   };
 
   const handleSubmit = async () => {
@@ -441,9 +522,15 @@ const WriteReviewModal: React.FC<WriteReviewModalProps> = ({ isOpen, onClose, on
     setError(null);
 
     try {
-      const telegramId = window.Telegram?.WebApp?.initDataUnsafe?.user?.id?.toString() || '123456789';
-      const username = window.Telegram?.WebApp?.initDataUnsafe?.user?.username || 'test_user';
-      const fullName = window.Telegram?.WebApp?.initDataUnsafe?.user?.first_name || 'Test User';
+      const telegramWebApp = (window as any).Telegram?.WebApp;
+      const telegramUser = telegramWebApp?.initDataUnsafe?.user;
+      const telegramId = telegramUser?.id?.toString() || '123456789';
+      const username = telegramUser?.username || 'test_user';
+      const fullName = telegramUser?.first_name || 'Test User';
+      // Получаем avatar_url из Telegram WebApp (если доступен)
+      // В Telegram WebApp аватарка может быть доступна через photo_url
+      // Если нет, нужно получить через Telegram Bot API
+      const avatarUrl = telegramUser?.photo_url || null;
       
       console.log('Отправляемые данные:', {
         telegram_id: telegramId,
@@ -459,6 +546,9 @@ const WriteReviewModal: React.FC<WriteReviewModalProps> = ({ isOpen, onClose, on
       formData.append('full_name', fullName);
       formData.append('rating', rating.toString());
       formData.append('review_text', reviewText);
+      if (avatarUrl) {
+        formData.append('avatar_url', avatarUrl);
+      }
       
       // Добавляем все фото
       photos.forEach(photo => {
@@ -479,6 +569,7 @@ const WriteReviewModal: React.FC<WriteReviewModalProps> = ({ isOpen, onClose, on
         setReviewText('');
         setPhotos([]);
         setPhotoPreviews([]);
+        setFileTypes([]);
         setError(null);
         setSuccess(null);
         
@@ -507,6 +598,7 @@ const WriteReviewModal: React.FC<WriteReviewModalProps> = ({ isOpen, onClose, on
       setReviewText('');
       setPhotos([]);
       setPhotoPreviews([]);
+      setFileTypes([]);
       setError(null);
       setSuccess(null);
       setSuccessMessage(null);
@@ -525,6 +617,7 @@ const WriteReviewModal: React.FC<WriteReviewModalProps> = ({ isOpen, onClose, on
       setReviewText('');
       setPhotos([]);
       setPhotoPreviews([]);
+      setFileTypes([]);
       setError(null);
       setSuccess(null);
       setSuccessMessage(null);
@@ -582,55 +675,43 @@ const WriteReviewModal: React.FC<WriteReviewModalProps> = ({ isOpen, onClose, on
         </FormGroup>
 
         <FormGroup>
-          <Label>Фото (необязательно, до {10 - photos.length} фото)</Label>
-          {photos.length > 0 && (
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(80px, 1fr))', gap: '10px', marginBottom: '10px' }}>
+          <Label>Фото/Видео (необязательно, до 10 файлов)</Label>
+          {photoPreviews.length > 0 && (
+            <PhotoPreviewGrid>
               {photoPreviews.map((preview, index) => (
-                <div key={index} style={{ position: 'relative' }}>
-                  <PhotoPreview src={preview} alt={`Предпросмотр ${index + 1}`} style={{ width: '100%', height: '80px' }} />
-                  <button
+                <PhotoPreviewContainer key={index}>
+                  {fileTypes[index] === 'video' ? (
+                    <VideoPreview src={preview} controls={false} muted playsInline />
+                  ) : (
+                    <PhotoPreview src={preview} alt={`Предпросмотр ${index + 1}`} />
+                  )}
+                  <RemovePhotoButton
                     type="button"
                     onClick={() => handleRemovePhoto(index)}
                     disabled={isSubmitting}
-                    style={{
-                      position: 'absolute',
-                      top: '2px',
-                      right: '2px',
-                      background: 'rgba(255, 0, 0, 0.8)',
-                      color: 'white',
-                      border: 'none',
-                      borderRadius: '50%',
-                      width: '24px',
-                      height: '24px',
-                      cursor: 'pointer',
-                      fontSize: '16px',
-                      lineHeight: '1',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center'
-                    }}
+                    title="Удалить файл"
                   >
                     ×
-                  </button>
-                </div>
+                  </RemovePhotoButton>
+                </PhotoPreviewContainer>
               ))}
-            </div>
+            </PhotoPreviewGrid>
           )}
           {photos.length < 10 && (
             <PhotoUpload onClick={() => fileInputRef.current?.click()} style={{ borderColor: photos.length > 0 ? 'var(--border-color)' : undefined }}>
               <PhotoInput
                 ref={fileInputRef}
                 type="file"
-                accept="image/*"
+                accept="image/*,video/*"
                 multiple
                 onChange={handlePhotoChange}
                 disabled={isSubmitting}
               />
               <div>
                 <div style={{ fontSize: '2rem', marginBottom: '10px' }}>📷</div>
-                <div>Нажмите, чтобы добавить фото</div>
+                <div>Нажмите, чтобы добавить фото/видео</div>
                 <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: '5px' }}>
-                  До {10 - photos.length} фото, каждое до 5MB {photos.length > 0 && `(${photos.length} уже загружено)`}
+                  До {10 - photos.length} файлов, каждый до 10MB {photoPreviews.length > 0 && `(${photoPreviews.length} ${photoPreviews.length === 1 ? 'загружено' : 'загружено'})`}
                 </div>
               </div>
             </PhotoUpload>
