@@ -539,7 +539,7 @@ const AboutUs: React.FC<AboutUsProps> = ({ onNavigate, isDark = true, onToggleTh
         <Section>
           <SectionTitle>Poizonic</SectionTitle>
           <SectionDescription>
-            Добро пожаловать в мир качественных оригинальных товаров с Poizon! Мы — ваш надежный посредник для заказа товаров с китайского маркетплейса Poizon, специализирующийся на оригинальных брендовых товарах.
+            Добро пожаловать в мир качественных оригинальных товаров с Poizonic! Мы — ваш надежный посредник для заказа товаров с китайских маркетплейсов Poizon и 95, специализирующихся на оригинальных брендовых товарах.
           </SectionDescription>
         </Section>
 

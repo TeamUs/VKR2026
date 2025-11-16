@@ -475,7 +475,7 @@ const ActionText = styled.span<{ $isDark?: boolean }>`
 `;
 
 const QuickActionButton = styled.button`
-  width: 100%;
+  width: calc(100% - 32px);
   background: var(--matte-red);
   border: none;
   border-radius: 8px;
@@ -485,7 +485,7 @@ const QuickActionButton = styled.button`
   font-weight: 600;
   cursor: pointer;
   transition: all 0.3s ease;
-  margin-top: 12px;
+  margin: 12px 16px 25px 16px;
   
   &:hover {
     transform: translateY(-2px);
@@ -651,8 +651,7 @@ const VideoModalOverlay = styled.div<{ $modalPosition: { top: string; transform:
   justify-content: center;
   z-index: 1000;
   animation: ${fadeIn} 0.3s ease-out;
-  padding: 20px;
-  padding-top: 0;
+  padding: 12px 20px 12px 20px;
   box-sizing: border-box;
   overflow-y: auto;
   overflow-x: hidden;
@@ -663,7 +662,7 @@ const VideoModal = styled.div<{ $modalPosition: { top: string; transform: string
   border-radius: 20px;
   padding: 0;
   max-width: 95vw;
-  max-height: 90vh;
+  max-height: calc(100vh - 40px);
   width: 95vw;
   text-align: center;
   border: 1px solid var(--border-color);
@@ -756,13 +755,108 @@ const VideoText = styled.p`
 `;
 
 const VideoPlayer = styled.video`
-    width: 100%;
+  width: 100%;
   max-width: 350px;
   height: auto;
   border-radius: 12px;
   box-shadow: 0 4px 12px var(--shadow-soft);
-  margin: 0 auto;
+  margin: 20px auto 0;
   display: block;
+`;
+
+const VideoGuideHint = styled.div`
+  margin-top: 18px;
+  padding: 12px 16px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px dashed var(--border-color);
+  text-align: center;
+  font-size: 0.9rem;
+  color: var(--text-secondary);
+
+  strong {
+    color: var(--text-primary);
+    font-weight: 600;
+  }
+`;
+
+const VideoHintActions = styled.div`
+  margin-top: 12px;
+  display: flex;
+  justify-content: center;
+`;
+
+const VideoHintButton = styled.button`
+  background: var(--matte-red);
+  border: none;
+  border-radius: 999px;
+  padding: 10px 20px;
+  color: var(--bg-primary);
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  box-shadow: 0 4px 12px var(--shadow-soft);
+
+  &:hover {
+    background: var(--terracotta);
+    transform: translateY(-1px);
+  }
+`;
+
+const VideoGuideFallback = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  text-align: left;
+`;
+
+const VideoGuideList = styled.ol`
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  counter-reset: video-guide-step;
+`;
+
+const VideoGuideItem = styled.li`
+  counter-increment: video-guide-step;
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  padding: 14px 16px;
+  border-radius: 14px;
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.12);
+
+  &::before {
+    content: counter(video-guide-step);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: var(--matte-red);
+    color: var(--bg-primary);
+    font-weight: 600;
+    font-size: 1rem;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+    flex-shrink: 0;
+  }
+`;
+
+const VideoGuideItemContent = styled.div`
+  font-size: 0.95rem;
+  line-height: 1.6;
+  color: var(--text-secondary);
+
+  strong {
+    color: var(--text-primary);
+  }
 `;
 
 const CloseButton = styled.button`
@@ -886,6 +980,7 @@ const Instructions: React.FC<InstructionsProps> = ({ onNavigate, toggleTheme, is
     
     setShowVideoModal(true);
     onModalStateChange?.(true);
+    document.body.style.overflow = 'hidden';
   };
 
   const handleOrderClick = () => {
@@ -975,23 +1070,17 @@ const Instructions: React.FC<InstructionsProps> = ({ onNavigate, toggleTheme, is
               </ActionItem>
               <ActionItem $isDark={isDarkTheme}>
                 <ActionIcon $isDark={isDarkTheme}>2</ActionIcon>
-                <ActionText $isDark={isDarkTheme}>Найдите поисковую строку</ActionText>
+                <ActionText $isDark={isDarkTheme}>
+                  Введите то, что ищите, или воспользуйтесь поиском по картинке
+                </ActionText>
               </ActionItem>
               <ActionItem $isDark={isDarkTheme}>
                 <ActionIcon $isDark={isDarkTheme}>3</ActionIcon>
-                <ActionText $isDark={isDarkTheme}>Введите название бренда или модели</ActionText>
-              </ActionItem>
-              <ActionItem $isDark={isDarkTheme}>
-                <ActionIcon $isDark={isDarkTheme}>4</ActionIcon>
                 <ActionText $isDark={isDarkTheme}>Выберите нужный товар</ActionText>
               </ActionItem>
               <ActionItem $isDark={isDarkTheme}>
-                <ActionIcon $isDark={isDarkTheme}>5</ActionIcon>
-                <ActionText $isDark={isDarkTheme}>Проверьте размер и цвет</ActionText>
-              </ActionItem>
-              <ActionItem $isDark={isDarkTheme}>
-                <ActionIcon $isDark={isDarkTheme}>6</ActionIcon>
-                <ActionText $isDark={isDarkTheme}>Скопируйте ссылку на товар</ActionText>
+                <ActionIcon $isDark={isDarkTheme}>4</ActionIcon>
+                <ActionText $isDark={isDarkTheme}>Выберите размер и цвет товара</ActionText>
               </ActionItem>
             </StepCardActions>
           </StepCardBody>
@@ -1003,7 +1092,7 @@ const Instructions: React.FC<InstructionsProps> = ({ onNavigate, toggleTheme, is
               <StepCardIcon>3</StepCardIcon>
               <StepCardText>
                 <StepCardTitle>Рассчитайте стоимость</StepCardTitle>
-                <StepCardSubtitle>Узнайте примерную стоимость доставки</StepCardSubtitle>
+                <StepCardSubtitle>Узнайте стоимость вашего заказа</StepCardSubtitle>
               </StepCardText>
             </StepCardContent>
             <StepCardToggle $isExpanded={expandedSteps[3]}>▼</StepCardToggle>
@@ -1024,7 +1113,9 @@ const Instructions: React.FC<InstructionsProps> = ({ onNavigate, toggleTheme, is
               </ActionItem>
               <ActionItem $isDark={isDarkTheme}>
                 <ActionIcon $isDark={isDarkTheme}>4</ActionIcon>
-                <ActionText $isDark={isDarkTheme}>Получите итоговую стоимость</ActionText>
+                <ActionText $isDark={isDarkTheme}>
+                  Получите итоговую стоимость без учета доставки внутри РФ
+                </ActionText>
               </ActionItem>
               <QuickActionButton onClick={() => onNavigate('calculator')}>
                 Открыть калькулятор
@@ -1056,7 +1147,7 @@ const Instructions: React.FC<InstructionsProps> = ({ onNavigate, toggleTheme, is
               </ActionItem>
               <ActionItem $isDark={isDarkTheme}>
                 <ActionIcon $isDark={isDarkTheme}>3</ActionIcon>
-                <ActionText $isDark={isDarkTheme}>Выберите категорию и размер</ActionText>
+                <ActionText $isDark={isDarkTheme}>Укажите размер и количество</ActionText>
               </ActionItem>
               <ActionItem $isDark={isDarkTheme}>
                 <ActionIcon $isDark={isDarkTheme}>4</ActionIcon>
@@ -1065,6 +1156,10 @@ const Instructions: React.FC<InstructionsProps> = ({ onNavigate, toggleTheme, is
               <ActionItem $isDark={isDarkTheme}>
                 <ActionIcon $isDark={isDarkTheme}>5</ActionIcon>
                 <ActionText $isDark={isDarkTheme}>Выберите пункт выдачи</ActionText>
+              </ActionItem>
+              <ActionItem $isDark={isDarkTheme}>
+                <ActionIcon $isDark={isDarkTheme}>6</ActionIcon>
+                <ActionText $isDark={isDarkTheme}>Проверьте данные и оформите заказ</ActionText>
               </ActionItem>
               <QuickActionButton onClick={handleOrderClick}>
                 Сделать заказ
@@ -1088,55 +1183,36 @@ const Instructions: React.FC<InstructionsProps> = ({ onNavigate, toggleTheme, is
             <StepCardActions>
               <ActionItem $isDark={isDarkTheme}>
                 <ActionIcon $isDark={isDarkTheme}>📞</ActionIcon>
-                <ActionText $isDark={isDarkTheme}>Дождитесь звонка от менеджера</ActionText>
+                <ActionText $isDark={isDarkTheme}>Дождитесь сообщения от менеджера</ActionText>
               </ActionItem>
               <ActionItem $isDark={isDarkTheme}>
                 <ActionIcon $isDark={isDarkTheme}>💳</ActionIcon>
-                <ActionText $isDark={isDarkTheme}>Получите реквизиты для оплаты</ActionText>
+                <ActionText $isDark={isDarkTheme}>Менеджер отправит вам реквизиты для оплаты</ActionText>
+              </ActionItem>
+              <ActionItem $isDark={isDarkTheme}>
+                <ActionIcon $isDark={isDarkTheme}>💰</ActionIcon>
+                <ActionText $isDark={isDarkTheme}>Оплатите заказ</ActionText>
               </ActionItem>
               <ActionItem $isDark={isDarkTheme}>
                 <ActionIcon $isDark={isDarkTheme}>🛍️</ActionIcon>
-                <ActionText $isDark={isDarkTheme}>Товар заказывается у поставщика</ActionText>
+                <ActionText $isDark={isDarkTheme}>Мы выкупаем ваш заказ</ActionText>
               </ActionItem>
               <ActionItem $isDark={isDarkTheme}>
                 <ActionIcon $isDark={isDarkTheme}>📦</ActionIcon>
-                <ActionText $isDark={isDarkTheme}>Получите уведомление о готовности</ActionText>
+                <ActionText $isDark={isDarkTheme}>Мы будем оповещать вас обо всех движениях вашего заказа</ActionText>
               </ActionItem>
               <ActionItem $isDark={isDarkTheme}>
                 <ActionIcon $isDark={isDarkTheme}>🚚</ActionIcon>
-                <ActionText $isDark={isDarkTheme}>Заберите товар в пункте выдачи</ActionText>
+                <ActionText $isDark={isDarkTheme}>Ваш товар доставляется в указанный пункт выдачи</ActionText>
               </ActionItem>
             </StepCardActions>
           </StepCardBody>
         </StepCard>
 
-        <StepCard>
-          <StepCardHeader onClick={() => toggleStep(6)}>
-            <StepCardContent>
-              <StepCardIcon>6</StepCardIcon>
-              <StepCardText>
-                <StepCardTitle>Видео-инструкция</StepCardTitle>
-                <StepCardSubtitle>Подробная видео-инструкция по оформлению заказа</StepCardSubtitle>
-              </StepCardText>
-            </StepCardContent>
-            <StepCardToggle $isExpanded={expandedSteps[6]}>▼</StepCardToggle>
-          </StepCardHeader>
-          <StepCardBody $isExpanded={expandedSteps[6]}>
-            <StepCardActions>
-              <ActionItem $isDark={isDarkTheme}>
-                <ActionIcon $isDark={isDarkTheme}>🎥</ActionIcon>
-                <ActionText $isDark={isDarkTheme}>Посмотрите пошаговую видео-инструкцию</ActionText>
-              </ActionItem>
-              <ActionItem $isDark={isDarkTheme}>
-                <ActionIcon $isDark={isDarkTheme}>📖</ActionIcon>
-                <ActionText $isDark={isDarkTheme}>Или прочитайте текстовую инструкцию</ActionText>
-              </ActionItem>
-              <QuickActionButton onClick={handleVideoClick}>
-                Смотреть видео-инструкцию
-              </QuickActionButton>
-            </StepCardActions>
-          </StepCardBody>
-        </StepCard>
+        {/* Отдельная кнопка для видео-инструкции без дополнительного контейнера */}
+        <QuickActionButton onClick={handleVideoClick}>
+          🎥 Видео-инструкция по оформлению заказа
+        </QuickActionButton>
 
         {/* Кнопка связи с менеджером */}
         <ContactSection $isDark={isDarkTheme}>
@@ -1157,6 +1233,7 @@ const Instructions: React.FC<InstructionsProps> = ({ onNavigate, toggleTheme, is
             HapticFeedback.light();
             setShowVideoModal(false);
             onModalStateChange?.(false);
+            document.body.style.overflow = '';
           }}
         >
           <VideoModal 
@@ -1172,6 +1249,7 @@ const Instructions: React.FC<InstructionsProps> = ({ onNavigate, toggleTheme, is
                 HapticFeedback.light();
                 setShowVideoModal(false);
                 onModalStateChange?.(false);
+                document.body.style.overflow = '';
               }}>
                 ×
               </VideoCloseIcon>
@@ -1180,74 +1258,40 @@ const Instructions: React.FC<InstructionsProps> = ({ onNavigate, toggleTheme, is
               <VideoText>
                 Смотрите пошаговую инструкцию по оформлению заказа
               </VideoText>
-            {!videoError && (
-              <VideoText style={{ fontSize: '1rem', margin: '0 0 20px 0' }}>
-                Если видео не загружается, нажмите "Показать текстовую инструкцию"
-              </VideoText>
-            )}
-            {!videoError ? (
-              <VideoPlayer 
-                controls 
-                preload="metadata"
-                onError={(e) => {
-                  console.log('Видео не загрузилось, показываем текстовую инструкцию');
-                  setVideoError(true);
-                }}
-                onLoadStart={() => {
-                  console.log('Начинаем загрузку видео...');
-                }}
-                onCanPlay={() => {
-                  console.log('Видео готово к воспроизведению');
-                }}
-              >
-                <source src="/images/tutorial.mp4" type="video/mp4" />
-                <source src="/images/tutorial.MOV" type="video/quicktime" />
-                Ваш браузер не поддерживает воспроизведение видео.
-              </VideoPlayer>
-            ) : (
-              <VideoText style={{ 
-                background: 'var(--bg-card)', 
-                padding: '20px', 
-                borderRadius: '12px',
-                border: '1px solid var(--border-color)',
-                color: 'var(--text-secondary)'
-              }}>
-                📹 Видео-инструкция временно недоступна
-                <br />
-                <br />
-                💡 <strong>Как оформить заказ:</strong>
-                <br />
-                1. Скопируйте ссылку на товар с сайта Poizon
-                <br />
-                2. Укажите размер и количество
-                <br />
-                3. Заполните контактные данные
-                <br />
-                4. Выберите пункт выдачи
-                <br />
-                5. Подтвердите заказ
-                <br />
-                <br />
-                📞 <strong>Нужна помощь?</strong>
-                <br />
-                Свяжитесь с нашим менеджером в Telegram
-              </VideoText>
-            )}
-            {!videoError && (
-              <CloseButton 
-                onClick={() => {
-                  HapticFeedback.light();
-                  setVideoError(true);
-                }}
-                style={{ 
-                  background: 'var(--sand)', 
-                  color: 'var(--text-primary)',
-                  marginRight: '10px'
-                }}
-              >
-                Показать текстовую инструкцию
-              </CloseButton>
-            )}
+            <VideoPlayer 
+              controls 
+              preload="metadata"
+              onError={() => {
+                console.log('Видео не загрузилось');
+              }}
+              onLoadStart={() => {
+                console.log('Начинаем загрузку видео...');
+              }}
+              onCanPlay={() => {
+                console.log('Видео готово к воспроизведению');
+              }}
+            >
+              <source src="/images/tutorial.mp4" type="video/mp4" />
+              <source src="/images/tutorial.MOV" type="video/quicktime" />
+              Ваш браузер не поддерживает воспроизведение видео.
+            </VideoPlayer>
+            <VideoGuideHint style={{ marginTop: '24px' }}>
+              📞 Нужна помощь? Свяжитесь с нашим менеджером в Telegram.
+              <VideoHintActions>
+                <VideoHintButton
+                  onClick={() => {
+                    HapticFeedback.selection();
+                    if ((window as any).Telegram?.WebApp?.openTelegramLink) {
+                      (window as any).Telegram.WebApp.openTelegramLink('https://t.me/poizonic_manager');
+                    } else {
+                      window.open('https://t.me/poizonic_manager', '_blank');
+                    }
+                  }}
+                >
+                  Связаться
+                </VideoHintButton>
+              </VideoHintActions>
+            </VideoGuideHint>
             </VideoBody>
           </VideoModal>
         </VideoModalOverlay>

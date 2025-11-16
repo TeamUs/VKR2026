@@ -470,7 +470,7 @@ const ExchangeRate: React.FC<ExchangeRateProps> = ({ onNavigate, isDarkTheme, to
         <InfoSection $isDark={isDarkTheme}>
           <InfoTitle>О курсе</InfoTitle>
           <InfoText>
-            Курс юаня к рублю рассчитывается специально для покупки валюты и может отличаться от курса на сайте ЦБРФ.
+            Курс юаня к рублю рассчитывается специально для покупки валюты и расчета стоимости.
           </InfoText>
           <InfoText>
             Курс берется напрямую с ЦБРФ и обновляется в режиме реального времени.
@@ -478,7 +478,7 @@ const ExchangeRate: React.FC<ExchangeRateProps> = ({ onNavigate, isDarkTheme, to
           
           <UpdateInfo $isDark={isDarkTheme}>
             <UpdateText>
-              Курс автоматически обновляется каждые 30 минут с ЦБРФ
+              Курс автоматически обновляется каждые 30 минут с сайта ЦБРФ
             </UpdateText>
           </UpdateInfo>
       </InfoSection>

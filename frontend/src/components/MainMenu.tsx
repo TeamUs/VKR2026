@@ -279,13 +279,13 @@ const MenuGrid = styled.div`
   gap: 20px;
   max-width: 360px;
   margin: 0 auto;
-  padding: 40px 20px 0 20px;
+  padding: 20px 20px 0 20px;
   justify-items: center;
   
   @media (max-width: 480px) {
     gap: 16px;
     max-width: 320px;
-    padding: 40px 15px 0 15px;
+    padding: 20px 15px 0 15px;
   }
 `;
 

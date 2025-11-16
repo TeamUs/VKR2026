@@ -212,14 +212,15 @@ const ProgressText = styled.div`
 `;
 
 const StepIndicator = styled.div`
-  display: flex;
-  justify-content: space-between;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  align-items: start;
   margin-top: 15px;
-  gap: 4px;
+  gap: 12px;
   padding: 0 8px;
   
   @media (max-width: 480px) {
-    gap: 2px;
+    gap: 8px;
     padding: 0 4px;
   }
 `;
@@ -231,6 +232,7 @@ const Step = styled.div<{ $active: boolean; $completed: boolean }>`
   flex: 1;
   min-width: 0;
   padding: 0 4px;
+  justify-self: center;
   
   .step-number {
     width: 32px;
@@ -266,10 +268,11 @@ const Step = styled.div<{ $active: boolean; $completed: boolean }>`
     text-align: center;
     font-weight: 500;
     line-height: 1.2;
-    word-wrap: break-word;
-    hyphens: auto;
-    max-width: 100%;
-    overflow: hidden;
+    white-space: normal;
+    word-break: keep-all;
+    overflow: visible;
+    max-width: 110px;
+    min-height: 1.2em;
     
     ${props => (props.$active || props.$completed) && css`
       color: var(--text-primary);
@@ -546,8 +549,7 @@ const ModalOverlay = styled.div<{ $modalPosition: { top: string; transform: stri
   justify-content: center;
   z-index: 1000;
   animation: ${fadeIn} 0.3s ease-out;
-  padding: 20px;
-  padding-top: 0;
+  padding: 80px 0 0 0;
   box-sizing: border-box;
   overflow-y: auto;
   overflow-x: hidden;
@@ -569,9 +571,9 @@ const SuccessModal = styled.div<{ $modalPosition: { top: string; transform: stri
   display: flex;
   flex-direction: column;
   position: absolute;
-  top: 20px;
+  top: ${props => props.$modalPosition.top};
   left: 50%;
-  transform: translateY(var(--scroll-position, 0px)) translateX(-50%);
+  transform: ${props => props.$modalPosition.transform} translateX(-50%);
   
   /* Плавная анимация появления */
   animation: successModalSlideIn 0.4s ease-out;
@@ -579,11 +581,11 @@ const SuccessModal = styled.div<{ $modalPosition: { top: string; transform: stri
   @keyframes successModalSlideIn {
     from {
       opacity: 0;
-      transform: translateY(var(--scroll-position, 0px)) translateX(-50%) scale(0.95);
+      transform: ${props => props.$modalPosition.transform} translateX(-50%) scale(0.97);
     }
     to {
       opacity: 1;
-      transform: translateY(var(--scroll-position, 0px)) translateX(-50%) scale(1);
+      transform: ${props => props.$modalPosition.transform} translateX(-50%) scale(1);
     }
   }
 `;
@@ -736,8 +738,7 @@ const VideoModalOverlay = styled.div<{ $modalPosition: { top: string; transform:
   justify-content: center;
   z-index: 1000;
   animation: ${fadeIn} 0.3s ease-out;
-  padding: 20px;
-  padding-top: 0;
+  padding: 12px;
   box-sizing: border-box;
   overflow-y: auto;
   overflow-x: hidden;
@@ -747,9 +748,9 @@ const VideoModal = styled.div<{ $modalPosition: { top: string; transform: string
   background: var(--bg-card);
   border-radius: 20px;
   padding: 0;
-  max-width: 95vw;
-  max-height: 90vh;
-  width: 95vw;
+  max-width: 94vw;
+  max-height: calc(100vh - 48px);
+  width: 94vw;
   text-align: center;
   border: 1px solid var(--border-color);
   box-shadow: 
@@ -757,7 +758,7 @@ const VideoModal = styled.div<{ $modalPosition: { top: string; transform: string
     0 10px 20px var(--shadow-card);
   overflow: hidden;
   position: absolute;
-  top: 20px;
+  top: 16px;
   left: 50%;
   transform: translateY(var(--scroll-position, 0px)) translateX(-50%);
   display: flex;
@@ -800,7 +801,7 @@ const VideoTitle = styled.h3`
 const VideoBody = styled.div`
   flex: 1;
   overflow-y: auto;
-  padding: 24px;
+  padding: 24px 24px 28px 24px;
 `;
 
 const VideoPlayer = styled.video`
@@ -810,15 +811,8 @@ const VideoPlayer = styled.video`
   border-radius: 12px;
   box-shadow: 0 4px 12px var(--shadow-soft);
   margin: 0 auto;
+  margin-top: 20px;
   display: block;
-`;
-
-const VideoText = styled.p`
-  font-family: 'Inter', Arial, sans-serif;
-  font-size: 1rem;
-  color: var(--text-secondary);
-  line-height: 1.6;
-  margin: 0 0 20px 0;
 `;
 
 const VideoCloseButton = styled.button`
@@ -926,12 +920,60 @@ const LinkHelpBody = styled.div`
   padding: 24px;
 `;
 
-const LinkHelpText = styled.p`
+const LinkHelpText = styled.div`
   font-family: 'Inter', Arial, sans-serif;
   font-size: 1rem;
   color: var(--text-secondary);
   line-height: 1.6;
   margin: 0 0 20px 0;
+`;
+
+const LinkHelpList = styled.ol`
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  counter-reset: link-step;
+`;
+
+const LinkHelpItem = styled.li`
+  counter-increment: link-step;
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  padding: 14px 16px;
+  border-radius: 14px;
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.12);
+
+  &::before {
+    content: counter(link-step);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: var(--matte-red);
+    color: var(--bg-primary);
+    font-weight: 600;
+    font-size: 1rem;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+    flex-shrink: 0;
+  }
+`;
+
+const LinkHelpItemContent = styled.div`
+  font-size: 0.95rem;
+  line-height: 1.6;
+  color: var(--text-secondary);
+
+  strong {
+    color: var(--text-primary);
+  }
 `;
 
 const LinkHelpImage = styled.img`
@@ -980,14 +1022,15 @@ const ItemTitle = styled.h4`
   margin: 0;
 `;
 
-const RemoveButton = styled.button`
+const RemoveButton = styled.button<{ $isDark?: boolean }>`
   background: var(--matte-red);
   border: none;
   border-radius: 50%;
   width: 32px;
   height: 32px;
-  color: white;
+  color: ${props => props.$isDark ? '#000000' : '#FFFFFF'};
   font-size: 16px;
+  font-weight: 700;
   cursor: pointer;
   transition: all 0.3s ease;
   display: flex;
@@ -1103,6 +1146,290 @@ const QuantityDisplay = styled.div`
   padding: 0 16px;
 `;
 
+const VideoText = styled.p`
+  font-family: 'Inter', Arial, sans-serif;
+  font-size: 1rem;
+  color: var(--text-secondary);
+  line-height: 1.6;
+  margin: 0 0 20px 0;
+`;
+
+const VideoIntro = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 0 0 22px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+`;
+
+const VideoBadge = styled.span`
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.73rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  background: rgba(218, 162, 148, 0.16);
+  color: var(--matte-red);
+  padding: 4px 10px;
+  border-radius: 999px;
+  width: fit-content;
+  font-weight: 600;
+  opacity: 0.85;
+`;
+
+const VideoIntroTitle = styled.h4`
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 0;
+  line-height: 1.45;
+`;
+
+const VideoIntroSubtitle = styled.p`
+  font-size: 0.94rem;
+  color: rgba(255, 255, 255, 0.72);
+  margin: 0;
+  line-height: 1.6;
+`;
+
+const VideoHintNote = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.9rem;
+  color: rgba(255, 255, 255, 0.75);
+
+  &::before {
+    content: '💡';
+    font-size: 1.15rem;
+  }
+
+  strong {
+    color: rgba(255, 255, 255, 0.92);
+    font-weight: 600;
+  }
+`;
+
+const VideoFallbackCard = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  background: rgba(0, 0, 0, 0.25);
+  border-radius: 16px;
+  padding: 18px 20px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.78);
+`;
+
+const VideoFallbackTitle = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.96rem;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.9);
+
+  &::before {
+    content: '📹';
+    font-size: 1.15rem;
+  }
+`;
+
+const VideoFallbackSteps = styled.ol`
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  counter-reset: video-step;
+`;
+
+const VideoFallbackStep = styled.li`
+  display: grid;
+  grid-template-columns: 26px 1fr;
+  gap: 10px;
+  align-items: flex-start;
+  counter-increment: video-step;
+  line-height: 1.5;
+
+  &::before {
+    content: counter(video-step);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    background: rgba(218, 162, 148, 0.2);
+    color: var(--matte-red);
+    font-weight: 600;
+    font-size: 0.85rem;
+  }
+`;
+
+const VideoFallbackText = styled.div`
+  font-size: 0.92rem;
+  color: rgba(255, 255, 255, 0.78);
+
+  strong {
+    color: rgba(255, 255, 255, 0.92);
+    font-weight: 600;
+  }
+`;
+
+const VideoGuideWrapper = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-bottom: 20px;
+`;
+
+const VideoGuideHeader = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  text-align: left;
+`;
+
+const VideoGuideTag = styled.span`
+  font-family: 'Inter', Arial, sans-serif;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  font-size: 0.75rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  background: rgba(118, 61, 62, 0.16);
+  color: var(--matte-red);
+  padding: 5px 12px;
+  border-radius: 999px;
+  font-weight: 600;
+  width: fit-content;
+`;
+
+const VideoGuideTitle = styled.h4`
+  font-family: 'Noto Sans SC', 'Inter', Arial, sans-serif;
+  font-size: 1.02rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0;
+  line-height: 1.45;
+`;
+
+const VideoGuideSubtitle = styled.p`
+  font-family: 'Inter', Arial, sans-serif;
+  font-size: 0.93rem;
+  color: rgba(255, 255, 255, 0.7);
+  margin: 0;
+  line-height: 1.55;
+`;
+
+const VideoGuideHint = styled.div`
+  margin-top: 18px;
+  padding: 12px 16px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px dashed var(--border-color);
+  text-align: center;
+  font-size: 0.9rem;
+  color: var(--text-secondary);
+
+  strong {
+    color: var(--text-primary);
+    font-weight: 600;
+  }
+`;
+
+const VideoGuideFallback = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  text-align: left;
+`;
+
+const VideoGuideFallbackTitle = styled.h5`
+  font-family: 'Noto Sans SC', 'Inter', Arial, sans-serif;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0;
+`;
+
+const VideoGuideList = styled.ol`
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  counter-reset: video-guide-step;
+`;
+
+const VideoGuideItem = styled.li`
+  counter-increment: video-guide-step;
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  padding: 14px 16px;
+  border-radius: 14px;
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.12);
+
+  &::before {
+    content: counter(video-guide-step);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: var(--matte-red);
+    color: var(--bg-primary);
+    font-weight: 600;
+    font-size: 1rem;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+    flex-shrink: 0;
+  }
+`;
+
+const VideoGuideItemContent = styled.div`
+  font-size: 0.95rem;
+  line-height: 1.6;
+  color: var(--text-secondary);
+
+  strong {
+    color: var(--text-primary);
+  }
+`;
+
+const VideoHintActions = styled.div`
+  margin-top: 12px;
+  display: flex;
+  justify-content: center;
+`;
+
+const VideoHintButton = styled.button`
+  background: var(--matte-red);
+  border: none;
+  border-radius: 999px;
+  padding: 10px 20px;
+  color: var(--bg-primary);
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  box-shadow: 0 4px 12px var(--shadow-soft);
+
+  &:hover {
+    background: var(--terracotta);
+    transform: translateY(-1px);
+  }
+`;
+
 interface OrderFormProps {
   onNavigate: (page: string) => void;
   toggleTheme: () => void;
@@ -1184,6 +1511,7 @@ const OrderForm: React.FC<OrderFormProps> = ({ onNavigate, toggleTheme, isDarkTh
   useEffect(() => {
     if (currentStep === 4) {
       setShowSuccessModal(false);
+      document.body.style.overflow = '';
     }
   }, [currentStep]);
 
@@ -1216,8 +1544,12 @@ const OrderForm: React.FC<OrderFormProps> = ({ onNavigate, toggleTheme, isDarkTh
         }
         if (!formData.phone.trim()) {
           newErrors.phone = 'Введите номер телефона';
-        } else if (!/^[\+]?[0-9\s\-\(\)]{10,}$/.test(formData.phone)) {
-          newErrors.phone = 'Введите корректный номер телефона';
+        } else {
+          // Проверяем, что введено 11 цифр (российский номер) с корректной маской
+          const digits = formData.phone.replace(/\D/g, '');
+          if (digits.length !== 11 || !digits.startsWith('7')) {
+            newErrors.phone = 'Введите корректный номер телефона';
+          }
         }
         break;
       case 3:
@@ -1328,6 +1660,8 @@ const OrderForm: React.FC<OrderFormProps> = ({ onNavigate, toggleTheme, isDarkTh
         // Показываем модальное окно только после успешной отправки
         setShowSuccessModal(true);
         onModalStateChange?.(true);
+        // Блокируем скролл страницы при открытии модального окна
+        document.body.style.overflow = 'hidden';
       } else {
         throw new Error('Ошибка при отправке заказа');
       }
@@ -1458,6 +1792,7 @@ const OrderForm: React.FC<OrderFormProps> = ({ onNavigate, toggleTheme, isDarkTh
     });
     setShowVideoModal(true);
     onModalStateChange?.(true);
+    document.body.style.overflow = 'hidden';
   };
 
   const handleCloseSuccessModal = () => {
@@ -1465,6 +1800,8 @@ const OrderForm: React.FC<OrderFormProps> = ({ onNavigate, toggleTheme, isDarkTh
     setShowSuccessModal(false);
     onModalStateChange?.(false);
     onNavigate('main');
+    // Возвращаем скролл страницы
+    document.body.style.overflow = '';
   };
 
   const handleCopyTrackingNumber = async () => {
@@ -1482,6 +1819,7 @@ const OrderForm: React.FC<OrderFormProps> = ({ onNavigate, toggleTheme, isDarkTh
     HapticFeedback.selection();
     setShowVideoModal(false);
     onModalStateChange?.(false);
+    document.body.style.overflow = '';
   };
 
   const handleLinkHelpClick = () => {
@@ -1493,12 +1831,14 @@ const OrderForm: React.FC<OrderFormProps> = ({ onNavigate, toggleTheme, isDarkTh
     });
     setShowLinkHelpModal(true);
     onModalStateChange?.(true);
+    document.body.style.overflow = 'hidden';
   };
 
   const handleCloseLinkHelpModal = () => {
     HapticFeedback.selection();
     setShowLinkHelpModal(false);
     onModalStateChange?.(false);
+    document.body.style.overflow = '';
   };
 
   const pickupPoints = [
@@ -1514,7 +1854,7 @@ const OrderForm: React.FC<OrderFormProps> = ({ onNavigate, toggleTheme, isDarkTh
         <BackButton onClick={() => onNavigate('main')}>
           ‹
         </BackButton>
-        <Title>Оформление заказа</Title>
+        <Title>Сделать заказ</Title>
         <ThemeToggle onClick={toggleTheme}>
           <ToggleIcon $isDark={isDarkTheme}>🌙</ToggleIcon>
           <ToggleIconDark $isDark={isDarkTheme}>☀️</ToggleIconDark>
@@ -1554,7 +1894,7 @@ const OrderForm: React.FC<OrderFormProps> = ({ onNavigate, toggleTheme, isDarkTh
               <ItemHeader>
                 <ItemTitle>Товар {index + 1}</ItemTitle>
                 {formData.items.length > 1 && (
-                  <RemoveButton type="button" onClick={() => removeItem(index)}>
+                  <RemoveButton $isDark={isDarkTheme} type="button" onClick={() => removeItem(index)}>
                     ✕
                   </RemoveButton>
                 )}
@@ -1686,7 +2026,7 @@ const OrderForm: React.FC<OrderFormProps> = ({ onNavigate, toggleTheme, isDarkTh
             >
               <option value="">Выберите пункт выдачи</option>
               <option value="СДЭК">СДЭК</option>
-              <option value="Boxberry">Boxberry</option>
+              <option value="Яндекс доставка">Яндекс доставка</option>
               <option value="Почта России">Почта России</option>
             </Select>
             {errors.pickupPoint && <ErrorMessage>{errors.pickupPoint}</ErrorMessage>}
@@ -1866,6 +2206,7 @@ const OrderForm: React.FC<OrderFormProps> = ({ onNavigate, toggleTheme, isDarkTh
         <ModalOverlay $modalPosition={successModalPosition} onClick={() => {
           setShowSuccessModal(false);
           onModalStateChange?.(false);
+          document.body.style.overflow = '';
         }}>
           <SuccessModal 
             $modalPosition={successModalPosition} 
@@ -1974,9 +2315,9 @@ const OrderForm: React.FC<OrderFormProps> = ({ onNavigate, toggleTheme, isDarkTh
                 Смотрите пошаговую инструкцию по оформлению заказа
               </VideoText>
             {!videoError && (
-              <VideoText style={{ fontSize: '1rem', margin: '0 0 20px 0' }}>
-                Если видео не загружается, нажмите "Показать текстовую инструкцию"
-              </VideoText>
+              <VideoGuideHint>
+                Если видео не загружается, нажмите <strong>«Показать текстовую инструкцию»</strong>
+              </VideoGuideHint>
             )}
             {!videoError ? (
               <VideoPlayer 
@@ -1998,32 +2339,59 @@ const OrderForm: React.FC<OrderFormProps> = ({ onNavigate, toggleTheme, isDarkTh
                 Ваш браузер не поддерживает воспроизведение видео.
               </VideoPlayer>
             ) : (
-              <VideoText style={{ 
-                background: 'var(--bg-card)', 
-                padding: '20px', 
-                borderRadius: '12px',
-                border: '1px solid var(--border-color)',
-                color: 'var(--text-secondary)'
-              }}>
-                📹 Видео-инструкция временно недоступна
-                <br />
-                <br />
-                💡 <strong>Как оформить заказ:</strong>
-                <br />
-                1. Скопируйте ссылку на товар с сайта Poizon
-                <br />
-                2. Укажите размер и количество
-                <br />
-                3. Заполните контактные данные
-                <br />
-                4. Выберите адрес доставки
-                <br />
-                5. Подтвердите заказ
-              </VideoText>
+              <VideoGuideFallback>
+                <VideoGuideList>
+                  <VideoGuideItem>
+                    <VideoGuideItemContent>
+                      Выберите интересующий товар в <strong>Poizon / Dewu</strong> и откройте карточку.
+                    </VideoGuideItemContent>
+                  </VideoGuideItem>
+                  <VideoGuideItem>
+                    <VideoGuideItemContent>
+                      Скопируйте ссылку на товар из приложения.
+                    </VideoGuideItemContent>
+                  </VideoGuideItem>
+                  <VideoGuideItem>
+                    <VideoGuideItemContent>
+                      Выберите подходящий размер и количество позиций.
+                    </VideoGuideItemContent>
+                  </VideoGuideItem>
+                  <VideoGuideItem>
+                    <VideoGuideItemContent>
+                      Заполните контактные данные, чтобы менеджер смог связаться с вами.
+                    </VideoGuideItemContent>
+                  </VideoGuideItem>
+                  <VideoGuideItem>
+                    <VideoGuideItemContent>
+                      Укажите адрес доставки или пункт выдачи и подтвердите заказ.
+                    </VideoGuideItemContent>
+                  </VideoGuideItem>
+                </VideoGuideList>
+                <VideoGuideHint>
+                  📞 Нужна помощь? Свяжитесь с нашим менеджером в Telegram.
+                  <VideoHintActions>
+                    <VideoHintButton
+                      onClick={() => {
+                        HapticFeedback.selection();
+                        if ((window as any).Telegram?.WebApp?.openTelegramLink) {
+                          (window as any).Telegram.WebApp.openTelegramLink('https://t.me/poizonic_manager');
+                        } else {
+                          window.open('https://t.me/poizonic_manager', '_blank');
+                        }
+                      }}
+                    >
+                      Связаться
+                    </VideoHintButton>
+                  </VideoHintActions>
+                </VideoGuideHint>
+              </VideoGuideFallback>
             )}
             {!videoError && (
               <VideoCloseButton 
-                onClick={() => setVideoError(true)}
+                onClick={() => {
+                  HapticFeedback.light();
+                  setVideoError(true);
+                }}
                 style={{ 
                   background: 'var(--sand)', 
                   color: 'var(--text-primary)',
@@ -2032,6 +2400,25 @@ const OrderForm: React.FC<OrderFormProps> = ({ onNavigate, toggleTheme, isDarkTh
               >
                 Показать текстовую инструкцию
               </VideoCloseButton>
+            )}
+            {!videoError && (
+              <VideoGuideHint style={{ marginTop: '24px' }}>
+                📞 Нужна помощь? Свяжитесь с нашим менеджером в Telegram.
+                <VideoHintActions>
+                  <VideoHintButton
+                    onClick={() => {
+                      HapticFeedback.selection();
+                      if ((window as any).Telegram?.WebApp?.openTelegramLink) {
+                        (window as any).Telegram.WebApp.openTelegramLink('https://t.me/poizonic_manager');
+                      } else {
+                        window.open('https://t.me/poizonic_manager', '_blank');
+                      }
+                    }}
+                  >
+                    Связаться
+                  </VideoHintButton>
+                </VideoHintActions>
+              </VideoGuideHint>
             )}
             </VideoBody>
           </VideoModal>
@@ -2056,10 +2443,21 @@ const OrderForm: React.FC<OrderFormProps> = ({ onNavigate, toggleTheme, isDarkTh
             </LinkHelpHeader>
             <LinkHelpBody>
               <LinkHelpText>
-                Надо нажать на зеленую кнопку справа сверху и затем нажать на скрепку, ссылка скопируется в ваш буфер обмена
+                <LinkHelpList>
+                  <LinkHelpItem>
+                    <LinkHelpItemContent>
+                      Нажмите на кнопку <strong>справа сверху</strong> (она отмечена на фото)
+                    </LinkHelpItemContent>
+                  </LinkHelpItem>
+                  <LinkHelpItem>
+                    <LinkHelpItemContent>
+                      Выберите <strong>вторую слева кнопку</strong> со значком скрепки — ссылка автоматически скопируется в буфер обмена
+                    </LinkHelpItemContent>
+                  </LinkHelpItem>
+                </LinkHelpList>
               </LinkHelpText>
               <LinkHelpImage 
-                src="/images/tshirts_shorts.jpg" 
+                src="/images/HelpImage.JPEG" 
                 alt="Инструкция по поиску ссылки"
                 onError={(e) => {
                   console.log('Изображение не загрузилось');

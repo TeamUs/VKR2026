@@ -259,8 +259,8 @@ const StatValue = styled.div`
 `;
 
 const StatLabel = styled.div`
-  font-size: 0.9rem;
-  color: var(--text-secondary);
+  font-size: 0.8rem;
+  color: var(--text-primary);
   font-weight: 500;
   line-height: 1.2;
   text-align: center;
@@ -270,8 +270,8 @@ const StatLabel = styled.div`
   justify-content: center;
   
   @media (max-width: 480px) {
-    font-size: 0.85rem;
-    line-height: 1.1;
+    font-size: 0.75rem;
+    line-height: 1.15;
   }
 `;
 
@@ -296,11 +296,27 @@ const ModalOverlay = styled.div`
   right: 0;
   bottom: 0;
   background: rgba(0, 0, 0, 0.7);
+  z-index: 1000;
+  animation: ${fadeIn} 0.3s ease-out;
+  padding: 20px;
+  box-sizing: border-box;
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 1000;
-  animation: ${fadeIn} 0.3s ease-out;
+`;
+
+const ModalPositioner = styled.div`
+   width: 100%;
+   height: 100%;
+   display: flex;
+   justify-content: center;
+   align-items: center;
+   position: relative;
+   top: -16vh;
+ 
+   @media (max-width: 480px) {
+     top: -14vh;
+   }
 `;
 
 const SuccessModal = styled.div`
@@ -308,7 +324,7 @@ const SuccessModal = styled.div`
   border-radius: 20px;
   padding: 20px;
   max-width: 80vw;
-  max-height: 80vh;
+  max-height: 70vh;
   width: 80%;
   text-align: center;
   border: 1px solid var(--border-color);
@@ -317,6 +333,13 @@ const SuccessModal = styled.div`
     0 10px 20px var(--shadow-card);
   animation: ${slideIn} 0.4s ease-out;
   overflow-y: auto;
+
+  @media (max-width: 480px) {
+    width: 90%;
+    max-width: 90vw;
+    padding: 18px;
+    max-height: 75vh;
+  }
 `;
 
 const SuccessIcon = styled.div`
@@ -409,12 +432,12 @@ const BackButton = styled.button`
 
 const Title = styled.h1`
   font-family: 'Noto Sans SC', 'Inter', Arial, sans-serif;
-  font-size: 1.6rem;
+  font-size: 1.4rem;
   font-weight: 700;
   color: var(--text-primary);
   
   @media (max-width: 480px) {
-    font-size: 1.4rem;
+    font-size: 1.2rem;
   }
 `;
 
@@ -483,9 +506,20 @@ interface ReferralSystemProps {
   onNavigate: (page: string) => void;
   toggleTheme: () => void;
   isDarkTheme: boolean;
+  onModalStateChange?: (isOpen: boolean) => void;
 }
 
-const ReferralSystem: React.FC<ReferralSystemProps> = ({ onNavigate, toggleTheme, isDarkTheme }) => {
+const lockPageScroll = () => {
+  document.body.style.overflow = 'hidden';
+  document.documentElement.style.overflow = 'hidden';
+};
+
+const unlockPageScroll = () => {
+  document.body.style.overflow = '';
+  document.documentElement.style.overflow = '';
+};
+
+const ReferralSystem: React.FC<ReferralSystemProps> = ({ onNavigate, toggleTheme, isDarkTheme, onModalStateChange }) => {
   const [referralCode, setReferralCode] = useState('');
   const [referralLink, setReferralLink] = useState('');
   const [stats, setStats] = useState({
@@ -553,11 +587,26 @@ const ReferralSystem: React.FC<ReferralSystemProps> = ({ onNavigate, toggleTheme
       setShowCopyModal(true);
       setError('');
       HapticFeedback.success();
+      lockPageScroll();
+      onModalStateChange?.(true);
     } catch (error) {
       setError('Не удалось скопировать ссылку');
       HapticFeedback.error();
     }
   };
+
+  const handleCloseCopyModal = () => {
+    setShowCopyModal(false);
+    unlockPageScroll();
+    onModalStateChange?.(false);
+  };
+
+  useEffect(() => {
+    return () => {
+      unlockPageScroll();
+      onModalStateChange?.(false);
+    };
+  }, []);
 
   const shareReferralLink = () => {
     HapticFeedback.medium();
@@ -637,7 +686,7 @@ const ReferralSystem: React.FC<ReferralSystemProps> = ({ onNavigate, toggleTheme
             <StatLabel>Срок действия</StatLabel>
           </StatItem>
           <StatItem $isDark={isDarkTheme}>
-            <StatValue>{stats.totalClicks}</StatValue>
+            <StatValue>{stats.totalReferrals}</StatValue>
             <StatLabel>Приглашенных пользователей</StatLabel>
           </StatItem>
         </StatsGrid>
@@ -666,18 +715,20 @@ const ReferralSystem: React.FC<ReferralSystemProps> = ({ onNavigate, toggleTheme
       </InfoCard>
 
       {showCopyModal && (
-        <ModalOverlay>
-          <SuccessModal>
-            <SuccessIcon>✅</SuccessIcon>
-            <SuccessTitle>Ссылка скопирована!</SuccessTitle>
-            <ModalSuccessMessage>
-              Реферальная ссылка успешно скопирована в буфер обмена. 
-              Делитесь этой ссылкой с друзьями и получайте скидку на комиссию!
-            </ModalSuccessMessage>
-            <CloseButton onClick={() => setShowCopyModal(false)}>
-              Закрыть
-            </CloseButton>
-          </SuccessModal>
+        <ModalOverlay onClick={handleCloseCopyModal}>
+          <ModalPositioner>
+            <SuccessModal onClick={(e) => e.stopPropagation()}>
+              <SuccessIcon>✅</SuccessIcon>
+              <SuccessTitle>Ссылка скопирована!</SuccessTitle>
+              <ModalSuccessMessage>
+                Реферальная ссылка успешно скопирована в буфер обмена. 
+                Делитесь этой ссылкой с друзьями и получайте скидку на комиссию!
+              </ModalSuccessMessage>
+              <CloseButton onClick={handleCloseCopyModal}>
+                Закрыть
+              </CloseButton>
+            </SuccessModal>
+          </ModalPositioner>
         </ModalOverlay>
       )}
     </ReferralContainer>

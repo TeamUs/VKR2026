@@ -539,17 +539,17 @@ const InstructionItem = styled.li`
     left: 16px;
     top: 50%;
     transform: translateY(-50%);
-    width: 28px;
-    height: 28px;
-    background: linear-gradient(135deg, var(--matte-red), #d32f2f);
-    color: white;
+    width: 32px;
+    height: 32px;
+    background: var(--matte-red);
+    color: var(--bg-primary);
     border-radius: 50%;
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 13px;
-    font-weight: 700;
-    box-shadow: 0 2px 6px rgba(211, 47, 47, 0.3);
+    font-size: 1rem;
+    font-weight: 600;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
   }
 `;
 
@@ -591,28 +591,39 @@ const PaymentMethod = styled.div`
   display: flex;
   align-items: center;
   margin-bottom: 12px;
-  padding: 12px 16px;
-  font-size: 14px;
-  font-weight: 500;
+  padding: 14px 18px;
+  font-size: 15px;
+  font-weight: 600;
   color: var(--text-primary);
-  background: var(--bg-secondary);
-  border-radius: 10px;
-  border: 1px solid var(--border-color);
-  transition: all 0.3s ease;
+  background: var(--bg-card);
+  border-radius: 12px;
+  border: 2px solid var(--border-color);
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  cursor: pointer;
   
   &:hover {
-    transform: translateX(4px);
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    border-color: var(--matte-red);
   }
   
   &:last-child {
     margin-bottom: 0;
   }
+  
+  &:active {
+    transform: translateY(0);
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
+  }
 `;
 
 const PaymentIcon = styled.span`
-  margin-right: 8px;
-  font-size: 16px;
+  margin-right: 12px;
+  font-size: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 `;
 
 const InstructionsButton = styled.button<{ $isDark: boolean }>`
@@ -1473,14 +1484,14 @@ const YuanPurchase: React.FC<YuanPurchaseProps> = ({ telegramId, isDarkTheme, to
           </InstructionsList>
 
           <PaymentMethods $isDark={isDarkTheme}>
-            <PaymentMethodsTitle>💳 Способы оплаты</PaymentMethodsTitle>
+            <PaymentMethodsTitle>💳 Варианты получения юаней</PaymentMethodsTitle>
             <PaymentMethod>
               <PaymentIcon>💙</PaymentIcon>
-              Alipay (Алипей)
+              Alipay
             </PaymentMethod>
             <PaymentMethod>
               <PaymentIcon>💚</PaymentIcon>
-              WeChat Pay (Вичат)
+              WeChat Pay
             </PaymentMethod>
           </PaymentMethods>
           </ModalBody>

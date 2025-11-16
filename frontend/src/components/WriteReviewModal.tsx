@@ -611,6 +611,8 @@ const WriteReviewModal: React.FC<WriteReviewModalProps> = ({ isOpen, onClose, on
   React.useEffect(() => {
     if (isOpen && HapticFeedback.light) {
       HapticFeedback.light();
+      // Блокируем скролл при открытии модального окна
+      document.body.style.overflow = 'hidden';
     } else if (!isOpen) {
       // Сбрасываем форму при закрытии модального окна
       setRating(0);
@@ -621,7 +623,14 @@ const WriteReviewModal: React.FC<WriteReviewModalProps> = ({ isOpen, onClose, on
       setError(null);
       setSuccess(null);
       setSuccessMessage(null);
+      // Разблокируем скролл при закрытии модального окна
+      document.body.style.overflow = '';
     }
+    
+    // Очистка при размонтировании компонента
+    return () => {
+      document.body.style.overflow = '';
+    };
   }, [isOpen]);
 
   if (!isOpen) return null;
