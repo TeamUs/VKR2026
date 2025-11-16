@@ -26,7 +26,7 @@ async function sendTelegramMessage(chatId, message) {
 }
 
 // Подключение к БД
-const mysql = require('mysql2/promise');
+    const mysql = require('mysql2/promise');
 
 // Connection pool для оптимизации подключений
 let dbPool = null;

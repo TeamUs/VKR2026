@@ -258,21 +258,10 @@ const TotalRow = styled.div`
   border-radius: 16px;
   box-shadow: 
     0 8px 25px var(--shadow-card),
-    0 4px 12px var(--shadow-soft),
-    inset 0 1px 0 rgba(255, 255, 255, 0.1);
+    0 4px 12px var(--shadow-soft);
   position: relative;
   overflow: hidden;
   text-align: center;
-  
-  &::before {
-    content: '';
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    height: 3px;
-    background: linear-gradient(90deg, var(--matte-red), var(--terracotta), var(--matte-red));
-  }
 `;
 
 const TotalLabel = styled.span`
@@ -861,12 +850,71 @@ const LinkHelpBody = styled.div`
   padding: 24px;
 `;
 
-const LinkHelpText = styled.p`
+const LinkHelpText = styled.div`
   font-family: 'Inter', Arial, sans-serif;
   font-size: 1rem;
   color: var(--text-secondary);
   line-height: 1.6;
   margin: 0 0 20px 0;
+`;
+
+const HelpStepsList = styled.ol`
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  counter-reset: help-step;
+`;
+
+const HelpStep = styled.li`
+  counter-increment: help-step;
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  padding: 14px 16px;
+  border-radius: 14px;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.12);
+
+  &::before {
+    content: counter(help-step);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: var(--matte-red);
+    color: var(--bg-primary);
+    font-weight: 600;
+    font-size: 1rem;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+    flex-shrink: 0;
+  }
+`;
+
+const HelpStepContent = styled.div`
+  font-size: 0.95rem;
+  line-height: 1.6;
+  color: var(--text-secondary);
+
+  strong {
+    color: var(--text-primary);
+  }
+`;
+
+const HelpNote = styled.div`
+  margin-top: 18px;
+  padding: 12px 16px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px dashed var(--border-color);
+  text-align: center;
+  font-size: 0.9rem;
+  color: var(--text-secondary);
 `;
 
 const LinkHelpImage = styled.img`
@@ -1025,6 +1073,20 @@ const PriceCalculator: React.FC<PriceCalculatorProps> = ({ onNavigate, toggleThe
     }
   };
 
+  const handleHelpModalOpen = () => {
+     HapticFeedback.selection();
+     setShowHelpModal(true);
+     onModalStateChange?.(true);
+     document.body.style.overflow = 'hidden';
+   };
+ 
+   const handleHelpModalClose = () => {
+     HapticFeedback.selection();
+     setShowHelpModal(false);
+     onModalStateChange?.(false);
+     document.body.style.overflow = '';
+   };
+
   return (
     <CalculatorContainer>
 
@@ -1053,17 +1115,7 @@ const PriceCalculator: React.FC<PriceCalculatorProps> = ({ onNavigate, toggleThe
         />
         {priceError && <ErrorMessage>{priceError}</ErrorMessage>}
         
-        <HelpButton onClick={() => {
-          HapticFeedback.selection();
-          
-          setHelpModalPosition({
-            top: '50%',
-            transform: 'translateY(-50%)'
-          });
-          
-          setShowHelpModal(true);
-          onModalStateChange?.(true);
-        }} $isDark={isDarkTheme}>
+        <HelpButton onClick={handleHelpModalOpen} $isDark={isDarkTheme}>
           Где найти цену в юанях ❓
         </HelpButton>
 
@@ -1161,7 +1213,7 @@ const PriceCalculator: React.FC<PriceCalculatorProps> = ({ onNavigate, toggleThe
         <InfoText>
           💡 <strong>Как рассчитывается стоимость:</strong><br/>
           • Цена товара переводится в рубли по текущему курсу<br/>
-          • Добавляется стоимость доставки (800₽ за кг)<br/>
+          • Добавляется стоимость доставки<br/>
           • Включается комиссия сервиса (1000₽ за товар)
         </InfoText>
       </InfoCard>
@@ -1173,6 +1225,7 @@ const PriceCalculator: React.FC<PriceCalculatorProps> = ({ onNavigate, toggleThe
             HapticFeedback.selection();
             setShowHelpModal(false);
             onModalStateChange?.(false);
+            document.body.style.overflow = '';
           }}
         >
           <LinkHelpModal 
@@ -1184,20 +1237,33 @@ const PriceCalculator: React.FC<PriceCalculatorProps> = ({ onNavigate, toggleThe
           >
             <LinkHelpHeader>
               <LinkHelpTitle>Где найти цену в юанях?</LinkHelpTitle>
-              <VideoCloseIcon onClick={() => {
-                HapticFeedback.selection();
-                setShowHelpModal(false);
-                onModalStateChange?.(false);
-              }} $isDark={isDarkTheme}>
+              <VideoCloseIcon onClick={handleHelpModalClose} $isDark={isDarkTheme}>
                 ×
               </VideoCloseIcon>
             </LinkHelpHeader>
             <LinkHelpBody>
               <LinkHelpText>
-                Цена указана на <strong>голубой кнопке</strong> - у каждого размера своя цена!
+                <HelpStepsList>
+                  <HelpStep>
+                    <HelpStepContent>
+                      Выберите нужный товар на <strong>Poizon</strong> и откройте его карточку.
+                    </HelpStepContent>
+                  </HelpStep>
+                  <HelpStep>
+                    <HelpStepContent>
+                      Нажмите на <strong>голубую кнопку</strong> под фотографией товара, чтобы открыть список размеров.
+                    </HelpStepContent>
+                  </HelpStep>
+                  <HelpStep>
+                    <HelpStepContent>
+                      Выберите подходящий размер — после выбора итоговая цена в юанях обновится прямо на голубой кнопке.
+                    </HelpStepContent>
+                  </HelpStep>
+                </HelpStepsList>
+                <HelpNote>У каждого размера своя стоимость, ориентируйтесь на цену на <strong>голубой кнопке</strong>.</HelpNote>
               </LinkHelpText>
               <LinkHelpImage 
-                src="/images/shoes_clothing.jpg" 
+                src="/images/HelpImageCalculator.JPEG" 
                 alt="Пример страницы товара с ценой в юанях"
                 onError={(e) => {
                   console.log('Изображение не загрузилось');

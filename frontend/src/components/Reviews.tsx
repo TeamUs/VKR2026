@@ -842,12 +842,16 @@ const Reviews: React.FC<ReviewsProps> = ({ onNavigate, toggleTheme, isDarkTheme,
     setSelectedReview(review);
     // Скрываем навигационное меню
     onModalStateChange?.(true);
+    // Блокируем скролл при открытии модального окна с отзывом
+    document.body.style.overflow = 'hidden';
   };
 
   const handleCloseReviewModal = () => {
     setSelectedReview(null);
     // Показываем навигационное меню
     onModalStateChange?.(false);
+    // Разблокируем скролл при закрытии модального окна с отзывом
+    document.body.style.overflow = '';
   };
 
 
@@ -923,6 +927,8 @@ const Reviews: React.FC<ReviewsProps> = ({ onNavigate, toggleTheme, isDarkTheme,
     // Очищаем стиль при размонтировании компонента
     return () => {
       document.documentElement.style.scrollBehavior = 'auto';
+      // Разблокируем скролл при размонтировании компонента на случай, если модальное окно было открыто
+      document.body.style.overflow = '';
     };
   }, []);
 

@@ -392,7 +392,7 @@ const TrackingForm: React.FC<TrackingFormProps> = ({ isDark = false, onNavigate,
         <BackButton onClick={() => onNavigate?.('main')}>
           ‹
         </BackButton>
-        <Title>Отслеживание<br/>заказа</Title>
+        <Title>Отследить заказ</Title>
         <ThemeToggle onClick={toggleTheme}>
           <ToggleIcon $isDark={isDark}>🌙</ToggleIcon>
           <ToggleIconDark $isDark={isDark}>☀️</ToggleIconDark>
