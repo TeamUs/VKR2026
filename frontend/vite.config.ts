@@ -5,21 +5,12 @@ export default defineConfig({
   plugins: [
     react({
       jsxRuntime: 'automatic',
-      babel: {
-        plugins: [
-          ['babel-plugin-styled-components', {
-            displayName: true,
-            fileName: false,
-            ssr: false,
-          }],
-        ],
-      },
     }),
   ],
   build: {
     outDir: 'dist',
     sourcemap: false,
-    minify: false, // Временно отключаем минификацию для диагностики
+    minify: 'esbuild',
     cssCodeSplit: false,
     rollupOptions: {
       output: {
