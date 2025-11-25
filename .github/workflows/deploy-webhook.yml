@@ -1,0 +1,19 @@
+name: Deploy via Webhook
+
+on:
+  repository_dispatch:
+    types: [deploy]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    name: Deploy to Server
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Trigger deployment on server
+        run: |
+          curl -X POST ${{ secrets.DEPLOY_WEBHOOK_URL }} \
+            -H "Authorization: Bearer ${{ secrets.DEPLOY_WEBHOOK_SECRET }}" \
+            -H "Content-Type: application/json"
+
