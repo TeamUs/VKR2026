@@ -1040,6 +1040,20 @@ const App: React.FC = () => {
     );
   }
 
+  // Debug: Check styled-components initialization
+  useEffect(() => {
+    console.log('App rendered, checking styled-components...');
+    const styleTag = document.querySelector('style[data-styled]');
+    console.log('Style tag found:', !!styleTag);
+    if (styleTag) {
+      console.log('Style tag content length:', styleTag.textContent?.length || 0);
+    }
+    // Force styled-components to inject styles by accessing the sheet
+    if (typeof window !== 'undefined' && (window as any).__REACT_DEVTOOLS_GLOBAL_HOOK__) {
+      console.log('React DevTools detected');
+    }
+  }, []);
+
   return (
     <>
       <GlobalStyle />
