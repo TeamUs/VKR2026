@@ -246,6 +246,22 @@ class GamificationService {
         );
       }
 
+      // Apply additional reward if exists (temporary discount 600₽ instead of 1000₽)
+      if (achievement.additional_reward) {
+        // Проверяем формат награды: "Комиссия 600₽ вместо 1000₽ на неделю" или "на 7 дней"
+        const rewardText = achievement.additional_reward.toLowerCase();
+        let durationDays = 7; // По умолчанию 7 дней
+        
+        if (rewardText.includes('на неделю')) {
+          durationDays = 7;
+        } else if (rewardText.includes('на 7 дней')) {
+          durationDays = 7;
+        }
+        
+        // Применяем временную скидку
+        await this.applyTemporaryDiscount(telegramId, durationDays);
+      }
+
       await connection.commit();
 
       return {
@@ -256,7 +272,8 @@ class GamificationService {
           name: achievement.name,
           description: achievement.description,
           icon: achievement.icon,
-          xpReward: achievement.xp_reward
+          xpReward: achievement.xp_reward,
+          additionalReward: achievement.additional_reward
         },
         xpAwarded: xpResult
       };
@@ -363,9 +380,9 @@ class GamificationService {
       await connection.commit();
 
       // Check for streak achievements
-      if (newStreak === 5) {
+      if (newStreak === 3) {
         await this.checkAndUnlockAchievement(telegramId, 'daily_ritual');
-      } else if (newStreak === 28) {
+      } else if (newStreak === 14) {
         await this.checkAndUnlockAchievement(telegramId, 'lunar_cycle');
       } else if (newStreak === 365) {
         await this.checkAndUnlockAchievement(telegramId, 'year_of_dragon');
@@ -395,15 +412,28 @@ class GamificationService {
 
     // Get order count from users table (учитываются только подтвержденные заказы)
     const [orderStats] = await this.pool.query(
-      'SELECT total_orders FROM users WHERE telegram_id = ?',
+      'SELECT total_orders, referred_by FROM users WHERE telegram_id = ?',
       [telegramId]
     );
 
     const totalOrders = orderStats[0]?.total_orders || 0;
+    const referredBy = orderStats[0]?.referred_by;
 
     // Dragon Newbie - First order
     if (totalOrders === 1) {
       const result = await this.checkAndUnlockAchievement(telegramId, 'dragon_newbie');
+      if (!result.alreadyUnlocked) unlocked.push(result);
+    }
+
+    // Lucky Start - 3 orders
+    if (totalOrders === 3) {
+      const result = await this.checkAndUnlockAchievement(telegramId, 'lucky_start');
+      if (!result.alreadyUnlocked) unlocked.push(result);
+    }
+
+    // Imperial Step - 5 orders
+    if (totalOrders === 5) {
+      const result = await this.checkAndUnlockAchievement(telegramId, 'imperial_step');
       if (!result.alreadyUnlocked) unlocked.push(result);
     }
 
@@ -413,21 +443,48 @@ class GamificationService {
       if (!result.alreadyUnlocked) unlocked.push(result);
     }
 
-    // Emperor of Purchases - 10 orders
+    // Order Marathon - 10 orders
     if (totalOrders === 10) {
-      const result = await this.checkAndUnlockAchievement(telegramId, 'emperor_purchases');
+      const result = await this.checkAndUnlockAchievement(telegramId, 'order_marathon');
+      if (!result.alreadyUnlocked) unlocked.push(result);
+      
+      // Jubilee Order - 10th order (same condition, different achievement)
+      const jubileeResult = await this.checkAndUnlockAchievement(telegramId, 'jubilee_order');
+      if (!jubileeResult.alreadyUnlocked) unlocked.push(jubileeResult);
+    }
+
+    // Delivery Master - 20 orders
+    if (totalOrders === 20) {
+      const result = await this.checkAndUnlockAchievement(telegramId, 'delivery_master');
       if (!result.alreadyUnlocked) unlocked.push(result);
     }
 
-    // Night Hunter - Order after 22:00
-    if (orderHour !== null && orderHour >= 22) {
+    // Order Legend - 50 orders
+    if (totalOrders === 50) {
+      const result = await this.checkAndUnlockAchievement(telegramId, 'order_legend');
+      if (!result.alreadyUnlocked) unlocked.push(result);
+    }
+
+    // Night Hunter - Order between 22:00-10:00 (night or morning time)
+    if (orderHour !== null && (orderHour >= 22 || orderHour < 10)) {
       const result = await this.checkAndUnlockAchievement(telegramId, 'night_hunter');
       if (!result.alreadyUnlocked) unlocked.push(result);
     }
 
-    // Check for 3 orders in a week (Chain Orders)
+    // Dragon Hunter - Orders total amount >= 10,000₽
+    // Используем estimated_savings как сумму заказов (в системе используется как стоимость заказа)
+    const [orderAmountStats] = await this.pool.query(
+      'SELECT COALESCE(SUM(estimated_savings), 0) as total FROM orders WHERE telegram_id = ? AND status = "completed"',
+      [telegramId]
+    );
+    if (orderAmountStats[0]?.total >= 10000) {
+      const result = await this.checkAndUnlockAchievement(telegramId, 'dragon_hunter');
+      if (!result.alreadyUnlocked) unlocked.push(result);
+    }
+
+    // Check for 3 orders in a week (Chain Orders) - учитываем только завершенные заказы
     const [recentOrders] = await this.pool.query(
-      'SELECT COUNT(*) as count FROM orders WHERE telegram_id = ? AND created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)',
+      'SELECT COUNT(*) as count FROM orders WHERE telegram_id = ? AND status = "completed" AND created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)',
       [telegramId]
     );
 
@@ -440,16 +497,28 @@ class GamificationService {
     const now = new Date();
     const month = now.getMonth() + 1;
 
-    // New Year Luck - 3 orders in January
+    // New Year Luck - 3 orders in January (учитываем только завершенные заказы)
     if (month === 1) {
       const [januaryOrders] = await this.pool.query(
-        'SELECT COUNT(*) as count FROM orders WHERE telegram_id = ? AND MONTH(created_at) = 1 AND YEAR(created_at) = YEAR(NOW())',
+        'SELECT COUNT(*) as count FROM orders WHERE telegram_id = ? AND status = "completed" AND MONTH(created_at) = 1 AND YEAR(created_at) = YEAR(NOW())',
         [telegramId]
       );
 
       if (januaryOrders[0].count >= 3) {
         const result = await this.checkAndUnlockAchievement(telegramId, 'new_year_luck');
         if (!result.alreadyUnlocked) unlocked.push(result);
+      }
+    }
+
+    // Dragon Summoner - Реферал сделал свой первый заказ
+    // Если это первый заказ пользователя (totalOrders === 1) и у него есть реферер
+    // Достижение разблокируется у РЕФЕРЕРА (того, кто пригласил)
+    if (totalOrders === 1 && referredBy) {
+      const result = await this.checkAndUnlockAchievement(referredBy, 'dragon_summoner');
+      if (!result.alreadyUnlocked) {
+        // Добавляем информацию о том, кому разблокировано достижение
+        result.unlockedFor = referredBy; // Реферер получает достижение
+        unlocked.push(result);
       }
     }
 
@@ -466,33 +535,49 @@ class GamificationService {
     await this.init();
     const unlocked = [];
 
-    // Get referral count from users table (updated immediately when referral registers)
-    const [referralStats] = await this.pool.query(
-      'SELECT total_referrals FROM users WHERE telegram_id = ?',
-      [referrerId]
-    );
-
-    const totalReferrals = referralStats[0]?.total_referrals || 0;
-
-    // Golden Chain - First active referral
+    // First Follower - First active referral (with order)
     const [activeReferrals] = await this.pool.query(
       'SELECT COUNT(DISTINCT u.telegram_id) as count FROM users u JOIN orders o ON u.telegram_id = o.telegram_id WHERE u.referred_by = ?',
       [referrerId]
     );
 
     if (activeReferrals[0].count >= 1) {
-      const result = await this.checkAndUnlockAchievement(referrerId, 'golden_chain');
+      const result = await this.checkAndUnlockAchievement(referrerId, 'first_follower');
       if (!result.alreadyUnlocked) unlocked.push(result);
     }
 
-    // Referral Festival - 3 referrals in a month
-    const [monthlyReferrals] = await this.pool.query(
-      'SELECT COUNT(*) as count FROM users WHERE referred_by = ? AND created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)',
+    // Lucky Chain - 3 referrals
+    // Получаем общее количество рефералов
+    const [totalReferralsResult] = await this.pool.query(
+      'SELECT COUNT(*) as count FROM users WHERE referred_by = ?',
       [referrerId]
     );
 
-    if (monthlyReferrals[0].count >= 3) {
-      const result = await this.checkAndUnlockAchievement(referrerId, 'referral_festival');
+    const totalReferrals = totalReferralsResult[0]?.count || 0;
+
+    if (totalReferrals >= 3) {
+      const result = await this.checkAndUnlockAchievement(referrerId, 'lucky_chain');
+      if (!result.alreadyUnlocked) unlocked.push(result);
+    }
+
+    // Referral Marathon - 10 referrals
+    if (totalReferrals >= 10) {
+      const result = await this.checkAndUnlockAchievement(referrerId, 'referral_marathon');
+      if (!result.alreadyUnlocked) unlocked.push(result);
+    }
+
+    // Dragon Chain - Referral of your referral (2nd level referral)
+    // Check if the referred user has referred someone
+    const [secondLevelReferrals] = await this.pool.query(
+      `SELECT COUNT(DISTINCT u2.telegram_id) as count 
+       FROM users u1 
+       JOIN users u2 ON u2.referred_by = u1.telegram_id 
+       WHERE u1.referred_by = ?`,
+      [referrerId]
+    );
+
+    if (secondLevelReferrals[0].count >= 1) {
+      const result = await this.checkAndUnlockAchievement(referrerId, 'dragon_chain');
       if (!result.alreadyUnlocked) unlocked.push(result);
     }
 
@@ -517,17 +602,43 @@ class GamificationService {
     await this.init();
     const unlocked = [];
 
-    // Get total savings
-    const [savingsStats] = await this.pool.query(
-      'SELECT COALESCE(SUM(savings), 0) as total FROM yuan_purchases WHERE telegram_id = ?',
+    // Get purchase statistics
+    const [purchaseStats] = await this.pool.query(
+      'SELECT COUNT(*) as count, COALESCE(SUM(amount_rub), 0) as total_rub, COALESCE(SUM(amount_yuan), 0) as total_yuan FROM yuan_purchases WHERE telegram_id = ? AND status = "completed"',
       [telegramId]
     );
 
-    const totalSavings = savingsStats[0].total;
+    const purchaseCount = purchaseStats[0]?.count || 0;
+    const totalRub = purchaseStats[0]?.total_rub || 0;
+    const totalYuan = purchaseStats[0]?.total_yuan || 0;
 
-    // Economy Dragon - 5000₽ total savings
-    if (totalSavings >= 5000) {
-      const result = await this.checkAndUnlockAchievement(telegramId, 'economy_dragon');
+    // First Exchange - First yuan purchase
+    if (purchaseCount === 1) {
+      const result = await this.checkAndUnlockAchievement(telegramId, 'first_exchange');
+      if (!result.alreadyUnlocked) unlocked.push(result);
+    }
+
+    // Yuan Newbie - Buy 1,000 yuan
+    if (totalYuan >= 1000) {
+      const result = await this.checkAndUnlockAchievement(telegramId, 'yuan_newbie');
+      if (!result.alreadyUnlocked) unlocked.push(result);
+    }
+
+    // Currency Dragon - Buy 5,000 yuan
+    if (totalYuan >= 5000) {
+      const result = await this.checkAndUnlockAchievement(telegramId, 'currency_dragon');
+      if (!result.alreadyUnlocked) unlocked.push(result);
+    }
+
+    // Volume Exchange - Buy yuan for 20,000₽
+    if (totalRub >= 20000) {
+      const result = await this.checkAndUnlockAchievement(telegramId, 'volume_exchange');
+      if (!result.alreadyUnlocked) unlocked.push(result);
+    }
+
+    // Yuan Master - Buy yuan for 100,000₽
+    if (totalRub >= 100000) {
+      const result = await this.checkAndUnlockAchievement(telegramId, 'yuan_master');
       if (!result.alreadyUnlocked) unlocked.push(result);
     }
 
@@ -556,20 +667,30 @@ class GamificationService {
     }
 
     // Активный расчетчик - 5 расчетов за неделю
-    const weekAgo = new Date();
-    weekAgo.setDate(weekAgo.getDate() - 7);
-    
-    const [weeklyCalculations] = await this.pool.query(
-      'SELECT COUNT(*) as count FROM users WHERE telegram_id = ? AND last_calculation_date >= ?',
-      [telegramId, weekAgo]
+    // Проверяем, что calculation_count увеличилось минимум на 5 за последние 7 дней
+    // Для этого нужно отслеживать историю, но можно проверить last_calculation_date и текущий count
+    const [userCalcData] = await this.pool.query(
+      'SELECT calculation_count, last_calculation_date FROM users WHERE telegram_id = ?',
+      [telegramId]
     );
     
-    if (weeklyCalculations[0]?.count >= 5) {
-      const result = await this.checkAndUnlockAchievement(telegramId, 'active_calculator');
-      if (!result.alreadyUnlocked) unlocked.push(result);
+    if (userCalcData[0]?.calculation_count >= 5) {
+      // Если расчетов было сегодня или в последние 7 дней, и общее количество >= 5
+      const lastCalcDate = userCalcData[0]?.last_calculation_date;
+      if (lastCalcDate) {
+        const lastCalc = new Date(lastCalcDate);
+        const weekAgo = new Date();
+        weekAgo.setDate(weekAgo.getDate() - 7);
+        
+        // Если последний расчет был в последние 7 дней и расчетов >= 5
+        if (lastCalc >= weekAgo && userCalcData[0].calculation_count >= 5) {
+          const result = await this.checkAndUnlockAchievement(telegramId, 'active_calculator');
+          if (!result.alreadyUnlocked) unlocked.push(result);
+        }
+      }
     }
 
-    // Комбо-активность - вход + расчет + заказ в один день
+    // Комбо-активность - расчет + заказ в один день (без входа)
     const today = new Date().toISOString().split('T')[0];
     
     const [todayOrders] = await this.pool.query(
@@ -578,15 +699,15 @@ class GamificationService {
     );
     
     const [userData] = await this.pool.query(
-      'SELECT last_login_date, calculation_count FROM users WHERE telegram_id = ?',
+      'SELECT last_calculation_date FROM users WHERE telegram_id = ?',
       [telegramId]
     );
     
     const hasOrder = todayOrders[0].count > 0;
-    const hasLogin = userData[0]?.last_login_date === today;
-    const hasCalculation = (userData[0]?.calculation_count || 0) > 0;
+    const hasCalculation = userData[0]?.last_calculation_date && 
+      userData[0].last_calculation_date.toISOString().split('T')[0] === today;
     
-    if (hasOrder && hasLogin && hasCalculation) {
+    if (hasOrder && hasCalculation) {
       const result = await this.checkAndUnlockAchievement(telegramId, 'combo_activity');
       if (!result.alreadyUnlocked) unlocked.push(result);
     }
@@ -636,7 +757,10 @@ class GamificationService {
     }
 
     // Расчетный комбо - 3 расчета в один день
-    // Проверяем, что пользователь делал расчеты сегодня и у него много расчетов
+    // Проверяем, что сегодня было сделано минимум 3 расчета
+    // Для точной проверки нужно отслеживать историю, но можно проверить через временные метки
+    // Упрощенная проверка: если сегодня был расчет И calculation_count >= 3
+    // В идеале нужно хранить историю расчетов, но сейчас используем упрощенную логику
     const today = new Date().toISOString().split('T')[0];
     
     const [userData] = await this.pool.query(
@@ -648,7 +772,8 @@ class GamificationService {
       userData[0].last_calculation_date.toISOString().split('T')[0] === today;
     const totalCalculations = userData[0]?.calculation_count || 0;
     
-    // Если пользователь делал расчеты сегодня и у него много расчетов (3+)
+    // Если сегодня был расчет И общее количество >= 3
+    // Это упрощенная логика - в идеале нужно отслеживать именно количество расчетов за сегодня
     if (hasCalculationsToday && totalCalculations >= 3) {
       const result = await this.checkAndUnlockAchievement(telegramId, 'calculation_combo');
       if (!result.alreadyUnlocked) unlocked.push(result);

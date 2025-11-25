@@ -40,15 +40,15 @@ const ModalOverlay = styled.div<{ $isOpen: boolean; $modalPosition: { top: strin
 
 const ModalContent = styled.div<{ $isDark: boolean; $modalPosition: { top: string; transform: string } }>`
   background: ${props => props.$isDark ? 'var(--bg-card)' : 'var(--bg-card)'};
-  border-radius: 20px;
+  border-radius: 24px;
   padding: 0;
   max-width: 95vw;
   max-height: 90vh;
   width: 95vw;
   overflow: hidden;
   box-shadow: 
-    0 20px 40px rgba(0, 0, 0, 0.3),
-    0 10px 20px var(--shadow-card);
+    0 24px 48px rgba(0, 0, 0, 0.25),
+    0 8px 16px rgba(0, 0, 0, 0.15);
   border: 1px solid var(--border-color);
   position: absolute;
   top: 50px;
@@ -60,8 +60,8 @@ const ModalContent = styled.div<{ $isDark: boolean; $modalPosition: { top: strin
 
 const ModalHeader = styled.div`
   background: var(--bg-card);
-  border-radius: 20px 20px 0 0;
-  padding: 20px 24px;
+  border-radius: 24px 24px 0 0;
+  padding: 24px 28px;
   border-bottom: 1px solid var(--border-color);
   display: flex;
   justify-content: space-between;
@@ -72,8 +72,9 @@ const ModalHeader = styled.div`
 
 const ModalTitle = styled.h2`
   font-family: 'Noto Sans SC', 'Inter', Arial, sans-serif;
-  font-size: 22px;
+  font-size: 24px;
   font-weight: 600;
+  letter-spacing: -0.3px;
   color: var(--text-primary);
   margin: 0;
 `;
@@ -104,36 +105,36 @@ const CloseButton = styled.button<{ $isDark: boolean }>`
 const ModalBody = styled.div`
   flex: 1;
   overflow-y: auto;
-  padding: 24px;
+  padding: 28px;
 `;
 
 const LevelsList = styled.div`
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 20px;
 `;
 
 const LevelCard = styled.div<{ $isDark: boolean; $isCurrent: boolean; $color: string }>`
   background: ${props => props.$isDark ? 'var(--bg-secondary)' : 'var(--bg-secondary)'};
-  border: 2px solid ${props => props.$isCurrent ? 'var(--matte-red)' : 'var(--border-color)'};
-  border-radius: 16px;
-  padding: 20px;
+  border: ${props => props.$isCurrent ? '2px solid var(--matte-red)' : '1px solid var(--border-color)'};
+  border-radius: 20px;
+  padding: 24px;
   color: ${props => props.$isCurrent ? 'var(--text-primary)' : 'var(--text-primary)'};
   position: relative;
-  transition: all 0.3s ease;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   
   ${props => props.$isCurrent && `
     box-shadow: 
-      0 0 20px rgba(220, 38, 38, 0.4),
-      0 0 40px rgba(220, 38, 38, 0.2),
-      inset 0 0 20px rgba(220, 38, 38, 0.1);
+      0 0 0 4px rgba(220, 38, 38, 0.1),
+      0 8px 24px rgba(220, 38, 38, 0.2),
+      0 4px 12px rgba(220, 38, 38, 0.15);
   `}
   
   &:hover {
-    transform: translateY(-2px);
+    transform: translateY(-3px);
     box-shadow: ${props => props.$isCurrent 
-      ? `0 8px 25px rgba(220, 38, 38, 0.5), 0 0 20px rgba(220, 38, 38, 0.4)`
-      : '0 4px 12px var(--shadow-soft)'
+      ? `0 0 0 4px rgba(220, 38, 38, 0.15), 0 12px 32px rgba(220, 38, 38, 0.3), 0 6px 16px rgba(220, 38, 38, 0.2)`
+      : '0 4px 16px rgba(0, 0, 0, 0.1), 0 2px 8px rgba(0, 0, 0, 0.08)'
     };
   }
 `;
@@ -141,14 +142,15 @@ const LevelCard = styled.div<{ $isDark: boolean; $isCurrent: boolean; $color: st
 const LevelHeader = styled.div`
   display: flex;
   align-items: center;
-  margin-bottom: 12px;
+  margin-bottom: 20px;
 `;
 
 const LevelIcon = styled.div<{ $isCurrent: boolean }>`
-  font-size: 32px;
+  font-size: 36px;
   margin-right: 16px;
-  filter: ${props => props.$isCurrent ? 'none' : 'grayscale(100%)'};
-  opacity: ${props => props.$isCurrent ? 1 : 0.6};
+  filter: ${props => props.$isCurrent ? 'none' : 'grayscale(60%)'};
+  opacity: ${props => props.$isCurrent ? 1 : 0.7};
+  transition: all 0.3s ease;
 `;
 
 const LevelInfo = styled.div`
@@ -157,62 +159,124 @@ const LevelInfo = styled.div`
 
 const LevelName = styled.h3<{ $isCurrent: boolean }>`
   font-family: 'Noto Sans SC', 'Inter', Arial, sans-serif;
-  font-size: 24px;
-  font-weight: 700;
-  margin: 0 0 4px 0;
+  font-size: 26px;
+  font-weight: 600;
+  letter-spacing: -0.5px;
+  margin: 0 0 6px 0;
   color: ${props => props.$isCurrent ? 'var(--matte-red)' : 'var(--text-primary)'};
+  transition: color 0.3s ease;
 `;
 
 const LevelDescription = styled.p<{ $isCurrent: boolean }>`
   font-family: 'Noto Sans SC', 'Inter', Arial, sans-serif;
-  font-size: 16px;
+  font-size: 15px;
+  line-height: 1.5;
   margin: 0;
-  color: ${props => props.$isCurrent ? 'var(--text-secondary)' : 'var(--text-secondary)'};
+  color: var(--text-secondary);
+  opacity: 0.85;
 `;
 
 const LevelRequirements = styled.div<{ $isCurrent: boolean }>`
-  margin-bottom: 12px;
+  margin-bottom: 20px;
+  padding-bottom: 20px;
+  border-bottom: 1px solid var(--border-color);
 `;
 
 const RequirementsTitle = styled.h4<{ $isCurrent: boolean }>`
   font-family: 'Noto Sans SC', 'Inter', Arial, sans-serif;
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 600;
-  margin: 0 0 8px 0;
-  color: ${props => props.$isCurrent ? 'var(--text-primary)' : 'var(--text-primary)'};
+  letter-spacing: 0.2px;
+  margin: 0 0 12px 0;
+  color: var(--text-primary);
+  opacity: 0.9;
 `;
 
 const RequirementItem = styled.div<{ $isCurrent: boolean }>`
-  font-family: 'JetBrains Mono', monospace;
+  font-family: 'Noto Sans SC', 'Inter', Arial, sans-serif;
   font-size: 14px;
-  margin-bottom: 4px;
-  color: ${props => props.$isCurrent ? 'var(--text-secondary)' : 'var(--text-secondary)'};
+  line-height: 1.6;
+  margin-bottom: 8px;
+  color: var(--text-secondary);
+  padding-left: 4px;
+  
+  &:last-child {
+    margin-bottom: 0;
+  }
 `;
 
 const LevelRewards = styled.div<{ $isCurrent: boolean }>`
-  margin-bottom: 12px;
+  margin-bottom: 0;
 `;
 
 const RewardsTitle = styled.h4<{ $isCurrent: boolean }>`
   font-family: 'Noto Sans SC', 'Inter', Arial, sans-serif;
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 600;
-  margin: 0 0 8px 0;
-  color: ${props => props.$isCurrent ? 'var(--text-primary)' : 'var(--text-primary)'};
+  letter-spacing: 0.2px;
+  margin: 0 0 12px 0;
+  color: var(--text-primary);
+  opacity: 0.9;
 `;
 
 const RewardItem = styled.div<{ $isCurrent: boolean }>`
   font-family: 'Noto Sans SC', 'Inter', Arial, sans-serif;
   font-size: 14px;
-  margin-bottom: 4px;
-  color: ${props => props.$isCurrent ? 'var(--text-secondary)' : 'var(--text-secondary)'};
+  line-height: 1.6;
+  margin-bottom: 10px;
+  color: var(--text-secondary);
   display: flex;
-  align-items: center;
+  align-items: flex-start;
+  
+  &:last-child {
+    margin-bottom: 0;
+  }
 `;
 
 const RewardIcon = styled.span`
-  margin-right: 8px;
+  margin-right: 10px;
+  font-size: 16px;
+  margin-top: 2px;
+  flex-shrink: 0;
+`;
+
+const XPInfoSection = styled.div<{ $isDark: boolean }>`
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 20px;
+  padding: 24px;
+  margin-bottom: 28px;
+  color: var(--text-primary);
+`;
+
+const XPInfoTitle = styled.h3`
+  font-family: 'Noto Sans SC', 'Inter', Arial, sans-serif;
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: -0.2px;
+  margin: 0 0 16px 0;
+  color: var(--text-primary);
+`;
+
+const XPInfoItem = styled.div`
+  font-family: 'Noto Sans SC', 'Inter', Arial, sans-serif;
   font-size: 14px;
+  line-height: 1.6;
+  margin-bottom: 10px;
+  color: var(--text-secondary);
+  display: flex;
+  align-items: flex-start;
+  
+  &:last-child {
+    margin-bottom: 0;
+  }
+`;
+
+const XPInfoIcon = styled.span`
+  margin-right: 10px;
+  font-size: 16px;
+  margin-top: 2px;
+  flex-shrink: 0;
 `;
 
 
@@ -279,9 +343,9 @@ const LevelsModal: React.FC<LevelsModalProps> = ({
       color: '#B9F2FF',
       xpRequired: 100000,
       rewards: [
-        'Комиссия 0₽ навсегда (полное освобождение)',
+        'Комиссия 0₽ навсегда',
         'Специальные предложения на покупку юаней',
-        'Повышенные бонусы для рефералов'
+        'Рефералы получают заказы без комиссии (0₽) на 14 дней при активации реферальной ссылки'
       ]
     }
   ];
@@ -314,6 +378,22 @@ const LevelsModal: React.FC<LevelsModalProps> = ({
         </ModalHeader>
 
         <ModalBody>
+          <XPInfoSection $isDark={isDarkTheme}>
+            <XPInfoTitle>💡 Как получать XP:</XPInfoTitle>
+            <XPInfoItem>
+              <XPInfoIcon>✅</XPInfoIcon>
+              100 XP за подтвержденный заказ
+            </XPInfoItem>
+            <XPInfoItem>
+              <XPInfoIcon>✅</XPInfoIcon>
+              50 XP за приведенного реферала
+            </XPInfoItem>
+            <XPInfoItem>
+              <XPInfoIcon>✅</XPInfoIcon>
+              1 XP за каждые 100₽ потраченных на юани
+            </XPInfoItem>
+          </XPInfoSection>
+          
           <LevelsList>
           {levels.map((level) => (
             <LevelCard
@@ -344,24 +424,6 @@ const LevelsModal: React.FC<LevelsModalProps> = ({
                 <RequirementItem $isCurrent={level.id === currentLevel.toLowerCase()}>
                   • {level.xpRequired.toLocaleString()} XP
                 </RequirementItem>
-                {level.id === 'bronze' && (
-                  <RequirementItem $isCurrent={level.id === currentLevel.toLowerCase()}>
-                    • Начальный уровень
-                  </RequirementItem>
-                )}
-                {level.id !== 'bronze' && (
-                  <>
-                    <RequirementItem $isCurrent={level.id === currentLevel.toLowerCase()}>
-                      • 100 XP за подтвержденный заказ
-                    </RequirementItem>
-                    <RequirementItem $isCurrent={level.id === currentLevel.toLowerCase()}>
-                      • 50 XP за приведенного реферала
-                    </RequirementItem>
-                    <RequirementItem $isCurrent={level.id === currentLevel.toLowerCase()}>
-                      • 1 XP за каждые 100₽ потраченных на юани
-                    </RequirementItem>
-                  </>
-                )}
               </LevelRequirements>
 
               <LevelRewards $isCurrent={level.id === currentLevel.toLowerCase()}>
