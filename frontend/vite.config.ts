@@ -6,7 +6,7 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     sourcemap: false,
-    minify: 'terser',
+    minify: 'esbuild', // Используем esbuild вместо terser (быстрее и идет в комплекте)
     cssCodeSplit: false,
     rollupOptions: {
       output: {
