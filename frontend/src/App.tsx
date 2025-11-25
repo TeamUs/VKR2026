@@ -1097,7 +1097,7 @@ const App: React.FC = () => {
             )}
             
             {currentView === 'referral' && (
-              <ReferralSystem onNavigate={navigateTo} toggleTheme={toggleTheme} isDarkTheme={isDarkTheme} />
+              <ReferralSystem onNavigate={navigateTo} toggleTheme={toggleTheme} isDarkTheme={isDarkTheme} onModalStateChange={setHideNavigation} />
             )}
             
             {currentView === 'exchange-rate' && (

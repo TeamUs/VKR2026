@@ -2,24 +2,11 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
 export default defineConfig({
-  plugins: [
-    react({
-      jsxRuntime: 'automatic',
-    }),
-  ],
+  plugins: [react()],
   build: {
     outDir: 'dist',
     sourcemap: false,
-    minify: 'esbuild',
-    cssCodeSplit: false,
-    rollupOptions: {
-      output: {
-        manualChunks: undefined,
-      },
-    },
-  },
-  optimizeDeps: {
-    include: ['styled-components'],
+    minify: 'terser',
   },
   server: {
     port: 3001,
