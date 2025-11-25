@@ -1957,47 +1957,18 @@ app.post('/api/calculate-price', async (req, res) => {
         const unlockedAchievements = achievements.filter(ach => ach.unlocked);
         
         // Применяем награды от достижений
-        for (const achievement of unlockedAchievements) {
-          switch (achievement.key) {
-            case 'dragon_newbie':
-              // Первый заказ без комиссии за оформление
-              if (achievement.key === 'dragon_newbie') {
-                // Проверяем, это первый заказ пользователя
-                const [orderCount] = await dbConnection.execute(
-                  'SELECT COUNT(*) as count FROM orders WHERE telegram_id = ? AND status = "completed"',
-                  [telegramId]
-                );
-                if (orderCount[0].count === 0) {
-                  finalCommission = 0;
-                  appliedRewards.push('Первый заказ без комиссии (Дракон-новичок)');
-                }
-              }
-              break;
-              
-            case 'emperor_purchases':
-              // Постоянная скидка 0.5% на все заказы
-              finalCommission = Math.max(0, finalCommission - (finalCommission * 0.005));
-              appliedRewards.push('Скидка 0.5% (Император покупок)');
-              break;
-              
-            case 'balance_master':
-              // Скидка 1% на комиссию
-              finalCommission = Math.max(0, finalCommission - (finalCommission * 0.01));
-              appliedRewards.push('Скидка 1% на комиссию (Мастер баланса)');
-              break;
-              
-            case 'economy_dragon':
-              // Постоянная скидка 1% на все операции
-              finalCommission = Math.max(0, finalCommission - (finalCommission * 0.01));
-              appliedRewards.push('Скидка 1% на все операции (Эконом-дракон)');
-              break;
-              
-            case 'dragon_summoner':
-              // Скидка 2% на все заказы
-              finalCommission = Math.max(0, finalCommission - (finalCommission * 0.02));
-              appliedRewards.push('Скидка 2% на все заказы (Дракон-призыватель)');
-              break;
-          }
+        // Проверяем временную скидку (600₽ вместо 1000₽) - применяется автоматически при разблокировке достижения
+        // Здесь проверяем, активна ли временная скидка
+        const [discountData] = await dbConnection.execute(
+          'SELECT temp_discount_active, temp_discount_end_date FROM users WHERE telegram_id = ?',
+          [telegramId]
+        );
+        
+        if (discountData.length > 0 && discountData[0].temp_discount_active && 
+            discountData[0].temp_discount_end_date > new Date()) {
+          // Временная скидка активна - комиссия 600₽ вместо 1000₽
+          finalCommission = 600;
+          appliedRewards.push('Комиссия 600₽ вместо 1000₽ (временная скидка от достижения)');
         }
         
         // Применяем награды от уровня
@@ -2008,6 +1979,21 @@ app.post('/api/calculate-price', async (req, res) => {
         
         if (userData.length > 0) {
           const userLevel = userData[0].current_level;
+          
+          // Проверяем награду бронзового уровня: "Первый заказ без комиссии"
+          if (userLevel === 'Bronze') {
+            // Проверяем, это первый заказ пользователя (учитываем заказы со всеми статусами, кроме отмененных)
+            const [orderCount] = await dbConnection.execute(
+              'SELECT COUNT(*) as count FROM orders WHERE telegram_id = ? AND status != "cancelled"',
+              [telegramId]
+            );
+            if (orderCount[0].count === 0) {
+              // Первый заказ без комиссии (награда бронзового уровня)
+              finalCommission = 0;
+              appliedRewards.push('Первый заказ без комиссии (Уровень Bronze)');
+            }
+          }
+          
           switch (userLevel) {
             case 'Silver':
               // Комиссия 900₽ навсегда
@@ -2245,14 +2231,15 @@ app.post('/api/user/init', async (req, res) => {
           
           console.log(`✅ Обновлен пользователь ${telegramId}: username=${username}, fullName=${fullName}`);
         } else {
-          // Создаем нового пользователя с базовой комиссией и временем активности
+            // Создаем нового пользователя с базовой комиссией и временем активности
+          // Автоматически присваиваем бронзовый уровень (0 XP требуется)
           await dbConnection.execute(
-            `INSERT INTO users (telegram_id, username, full_name, commission, last_activity) 
-             VALUES (?, ?, ?, 1000, NOW())`,
+            `INSERT INTO users (telegram_id, username, full_name, commission, current_level, last_activity) 
+             VALUES (?, ?, ?, 1000, 'Bronze', NOW())`,
             [telegramId, username || null, fullName || null]
           );
           
-          console.log(`✅ Создан новый пользователь ${telegramId}: username=${username}, fullName=${fullName}`);
+          console.log(`✅ Создан новый пользователь ${telegramId}: username=${username}, fullName=${fullName}, level=Bronze`);
         }
 
         res.json({ 
@@ -2341,81 +2328,117 @@ app.post('/api/referral', async (req, res) => {
           return res.status(400).json({ error: 'Пользователь уже зарегистрирован' });
         }
 
-        // Получаем информацию о реферере для уведомления
+        // Получаем информацию о реферере для определения бонусов
         const [referrerInfo] = await dbConnection.execute(
-          'SELECT username, full_name FROM users WHERE telegram_id = ?',
+          'SELECT username, full_name, current_level FROM users WHERE telegram_id = ?',
           [referralId]
         );
 
-        // Создаем пользователя с реферальной скидкой на 2 недели
+        // Определяем комиссию и срок действия в зависимости от уровня реферера
+        let referralCommission = 400; // По умолчанию 400₽
+        let referralDays = 14; // По умолчанию 14 дней
+        
+        // Если реферер имеет уровень Diamond - реферал получает комиссию 0₽ на 14 дней (заказы без комиссии)
+        if (referrerInfo.length > 0 && referrerInfo[0].current_level === 'Diamond') {
+          referralCommission = 0; // Заказы без комиссии
+          referralDays = 14; // 14 дней без комиссии
+        }
+
+        // Создаем пользователя с реферальной скидкой
+        // Автоматически присваиваем бронзовый уровень (0 XP требуется)
         await dbConnection.execute(
-          `INSERT INTO users (telegram_id, commission, referred_by, access_expires_at) 
-           VALUES (?, 400, ?, DATE_ADD(NOW(), INTERVAL 14 DAY))`,
-          [telegramId, referralId]
+          `INSERT INTO users (telegram_id, commission, referred_by, access_expires_at, current_level) 
+           VALUES (?, ?, ?, DATE_ADD(NOW(), INTERVAL ? DAY), 'Bronze')`,
+          [telegramId, referralCommission, referralId, referralDays]
         );
+        
+        console.log(`✅ Создан новый пользователь ${telegramId} по реферальной ссылке, level=Bronze, commission=${referralCommission}₽, days=${referralDays}`);
 
         // Продлеваем скидку реферера на 1 неделю (или даем первую скидку)
-        const [referrerCurrentDiscount] = await dbConnection.execute(
-          'SELECT access_expires_at FROM users WHERE telegram_id = ?',
-          [referralId]
-        );
+        // НО только если реферер НЕ имеет уровень Diamond (у Diamond комиссия уже 0₽ навсегда)
+        if (!(referrerInfo.length > 0 && referrerInfo[0].current_level === 'Diamond')) {
+          const [referrerCurrentDiscount] = await dbConnection.execute(
+            'SELECT access_expires_at FROM users WHERE telegram_id = ?',
+            [referralId]
+          );
 
-        if (referrerCurrentDiscount.length > 0 && referrerCurrentDiscount[0].access_expires_at) {
-          const currentExpiry = new Date(referrerCurrentDiscount[0].access_expires_at);
-          const now = new Date();
-          
-          if (currentExpiry > now) {
-            // У реферера есть активная скидка - продлеваем на 7 дней
-            const newExpiry = new Date(currentExpiry.getTime() + 7 * 24 * 60 * 60 * 1000);
-            await dbConnection.execute(
-              'UPDATE users SET commission = 400, access_expires_at = ? WHERE telegram_id = ?',
-              [newExpiry, referralId]
-            );
+          if (referrerCurrentDiscount.length > 0 && referrerCurrentDiscount[0].access_expires_at) {
+            const currentExpiry = new Date(referrerCurrentDiscount[0].access_expires_at);
+            const now = new Date();
+            
+            if (currentExpiry > now) {
+              // У реферера есть активная скидка - продлеваем на 7 дней
+              const newExpiry = new Date(currentExpiry.getTime() + 7 * 24 * 60 * 60 * 1000);
+              await dbConnection.execute(
+                'UPDATE users SET commission = 400, access_expires_at = ? WHERE telegram_id = ?',
+                [newExpiry, referralId]
+              );
+            } else {
+              // У реферера была скидка, но она истекла - даем новую на 7 дней
+              await dbConnection.execute(
+                'UPDATE users SET commission = 400, access_expires_at = DATE_ADD(NOW(), INTERVAL 7 DAY) WHERE telegram_id = ?',
+                [referralId]
+              );
+            }
           } else {
-            // У реферера была скидка, но она истекла - даем новую на 7 дней
+            // У реферера никогда не было скидки - даем первую на 7 дней
             await dbConnection.execute(
               'UPDATE users SET commission = 400, access_expires_at = DATE_ADD(NOW(), INTERVAL 7 DAY) WHERE telegram_id = ?',
               [referralId]
             );
           }
-        } else {
-          // У реферера никогда не было скидки - даем первую на 7 дней
-          await dbConnection.execute(
-            'UPDATE users SET commission = 400, access_expires_at = DATE_ADD(NOW(), INTERVAL 7 DAY) WHERE telegram_id = ?',
-            [referralId]
-          );
         }
 
         // Отправляем уведомление новому пользователю
-        const newUserMessage = `🎉 <b>Добро пожаловать в Poizonic!</b>\n\n` +
-                               `Вы активировали реферальную программу!\n\n` +
-                               `💰 <b>Ваша комиссия:</b> 400₽ (вместо 1000₽)\n` +
-                               `⏰ <b>Действует до:</b> ${new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toLocaleString('ru-RU')}\n\n` +
-                               `💡 Теперь вы можете делать заказы по сниженной комиссии!`;
+        const expiryDate = new Date(Date.now() + referralDays * 24 * 60 * 60 * 1000);
+        let newUserMessage = `🎉 <b>Добро пожаловать в Poizonic!</b>\n\n` +
+                            `Вы активировали реферальную программу!\n\n`;
+        
+        if (referralCommission === 0) {
+          // Особое уведомление для рефералов Diamond уровня
+          newUserMessage += `🎁 <b>СПЕЦИАЛЬНОЕ ПРЕДЛОЖЕНИЕ!</b>\n\n` +
+                           `💰 <b>Ваша комиссия:</b> 0₽ (заказы без комиссии!)\n` +
+                           `⏰ <b>Действует до:</b> ${expiryDate.toLocaleString('ru-RU')}\n\n` +
+                           `💎 Ваш реферер имеет легендарный уровень Diamond, поэтому вы получаете заказы без комиссии на 14 дней!\n\n` +
+                           `💡 Воспользуйтесь этим преимуществом и сделайте свои первые заказы!`;
+        } else {
+          newUserMessage += `💰 <b>Ваша комиссия:</b> 400₽ (вместо 1000₽)\n` +
+                           `⏰ <b>Действует до:</b> ${expiryDate.toLocaleString('ru-RU')}\n\n` +
+                           `💡 Теперь вы можете делать заказы по сниженной комиссии!`;
+        }
 
         await sendTelegramMessage(telegramId, newUserMessage);
 
-        // Получаем обновленную информацию о скидке реферера для уведомления
-        const [updatedReferrerInfo] = await dbConnection.execute(
-          'SELECT access_expires_at FROM users WHERE telegram_id = ?',
-          [referralId]
-        );
-
-        const referrerExpiry = updatedReferrerInfo[0]?.access_expires_at;
-        const expiryDate = referrerExpiry ? new Date(referrerExpiry).toLocaleString('ru-RU') : 'неизвестно';
-
         // Отправляем уведомление рефереру
-        const referrerMessage = `🎉 <b>Новый реферал!</b>\n\n` +
-                                `Вашу реферальную ссылку активировали!\n\n` +
-                                `🎁 <b>Ваша скидка продлена до:</b> ${expiryDate}\n\n` +
-                                `💡 Спасибо, что приглашаете друзей в Poizonic!`;
+        let referrerMessage = `🎉 <b>Новый реферал!</b>\n\n` +
+                             `Вашу реферальную ссылку активировали!\n\n`;
+        
+        // Если реферер Diamond - указываем особую информацию о бонусе реферала
+        if (referrerInfo.length > 0 && referrerInfo[0].current_level === 'Diamond') {
+          referrerMessage += `💎 <b>Особый бонус для вашего реферала!</b>\n\n` +
+                            `Благодаря вашему легендарному уровню Diamond, ваш реферал получает заказы без комиссии (0₽) на 14 дней!\n\n` +
+                            `💡 Ваши рефералы получают максимальные преимущества благодаря вашему уровню!`;
+        } else {
+          // Получаем обновленную информацию о скидке реферера для уведомления
+          const [updatedReferrerInfo] = await dbConnection.execute(
+            'SELECT access_expires_at FROM users WHERE telegram_id = ?',
+            [referralId]
+          );
+          
+          const referrerExpiry = updatedReferrerInfo[0]?.access_expires_at;
+          const referrerExpiryDate = referrerExpiry ? new Date(referrerExpiry).toLocaleString('ru-RU') : 'неизвестно';
+          
+          referrerMessage += `💰 <b>Ваша комиссия:</b> 400₽ (вместо 1000₽)\n` +
+                            `⏰ <b>Действует до:</b> ${referrerExpiryDate}\n\n` +
+                            `💡 Скидка продлена на 7 дней!`;
+        }
 
         await sendTelegramMessage(referralId, referrerMessage);
 
         // Логируем активность пользователя
         await logUserActivity(telegramId, 'referral_activated', {
           referredBy: referralId,
-          commission: 400
+          commission: referralCommission
         });
 
         // Логируем активность реферера
@@ -2458,10 +2481,14 @@ app.post('/api/referral', async (req, res) => {
             // Отправляем уведомления о разблокированных достижениях
             for (const achievement of achievements) {
               if (!achievement.alreadyUnlocked && achievement.achievement) {
-                const achievementMsg = `🏆 <b>Достижение разблокировано!</b>\n\n` +
+                let achievementMsg = `🏆 <b>Достижение разблокировано!</b>\n\n` +
                   `${achievement.achievement.icon} <b>${achievement.achievement.name}</b>\n` +
                   `📝 ${achievement.achievement.description}\n\n` +
                   `🎁 Награда: +${achievement.achievement.xpReward} XP`;
+                
+                if (achievement.achievement.additionalReward) {
+                  achievementMsg += `\n✨ Бонус: ${achievement.achievement.additionalReward}`;
+                }
                 
                 await sendTelegramMessage(referralId, achievementMsg);
               }
@@ -2668,10 +2695,13 @@ app.post('/api/reviews', upload.array('photos', 10), async (req, res) => {
 
     if (existingUser.length === 0) {
       console.log('Создаем нового пользователя:', telegram_id);
+      // Автоматически присваиваем бронзовый уровень (0 XP требуется)
       await dbConnection.execute(`
-        INSERT INTO users (telegram_id, commission, username, full_name, avatar_url, created_at)
-        VALUES (?, 1000, ?, ?, ?, NOW())
+        INSERT INTO users (telegram_id, commission, username, full_name, avatar_url, current_level, created_at)
+        VALUES (?, 1000, ?, ?, ?, 'Bronze', NOW())
       `, [telegram_id, username || null, full_name || null, avatar_url || null]);
+      
+      console.log(`✅ Создан новый пользователь ${telegram_id}, level=Bronze`);
     } else if (avatar_url || username || full_name) {
       // Обновляем данные пользователя, если они переданы (особенно avatar_url)
       await dbConnection.execute(`
@@ -2957,10 +2987,27 @@ app.get('/api/profile', async (req, res) => {
   try {
     await ensureDBConnection();
     
-    const { telegram_id } = req.query;
+    let telegram_id = req.query.telegram_id;
     
-          // ВРЕМЕННОЕ ИСКЛЮЧЕНИЕ ДЛЯ ТЕСТИРОВАНИЯ - убрать перед релизом
-          if (!telegram_id) {
+    // Если telegram_id не передан в query, пытаемся получить из Telegram WebApp initData
+    if (!telegram_id) {
+      const initData = req.headers['x-telegram-init-data'];
+      if (initData) {
+        try {
+          const urlParams = new URLSearchParams(initData);
+          const userData = urlParams.get('user');
+          if (userData) {
+            const user = JSON.parse(decodeURIComponent(userData));
+            telegram_id = user.id?.toString();
+          }
+        } catch (error) {
+          console.error('Ошибка парсинга initData:', error);
+        }
+      }
+    }
+    
+    // ВРЕМЕННОЕ ИСКЛЮЧЕНИЕ ДЛЯ ТЕСТИРОВАНИЯ - убрать перед релизом
+    if (!telegram_id) {
       const demoProfileData = {
         user: {
           telegram_id: 'demo',
@@ -3002,13 +3049,13 @@ app.get('/api/profile', async (req, res) => {
     
     const user = userRows[0];
     
-    // Получаем статистику заказов
+    // Получаем статистику заказов (только одобренные/завершенные)
     const [orderStats] = await dbConnection.execute(`
       SELECT 
         COUNT(*) as total_orders,
-        COALESCE(SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END), 0) as completed_orders
+        COUNT(*) as completed_orders
       FROM orders 
-      WHERE telegram_id = ?
+      WHERE telegram_id = ? AND status = 'completed'
     `, [telegram_id]);
     
     // Получаем статистику рефералов
@@ -3139,10 +3186,13 @@ app.patch('/api/users', async (req, res) => {
     
     if (existingUser.length === 0) {
       // Создаем нового пользователя
+      // Автоматически присваиваем бронзовый уровень (0 XP требуется)
       await dbConnection.execute(`
-        INSERT INTO users (telegram_id, commission, full_name, phone_number, preferred_currency, avatar_url, created_at) 
-        VALUES (?, 1000, ?, ?, ?, ?, NOW())
+        INSERT INTO users (telegram_id, commission, full_name, phone_number, preferred_currency, avatar_url, current_level, created_at) 
+        VALUES (?, 1000, ?, ?, ?, ?, 'Bronze', NOW())
       `, [telegram_id, full_name, phone_number, preferred_currency, avatar_url]);
+      
+      console.log(`✅ Создан новый пользователь ${telegram_id}, level=Bronze`);
     } else {
       // Обновляем существующего пользователя
       await dbConnection.execute(`
@@ -3199,10 +3249,13 @@ app.post('/api/yuan-purchase', async (req, res) => {
     
     if (existingUser.length === 0) {
       // Создаем нового пользователя
+      // Автоматически присваиваем бронзовый уровень (0 XP требуется)
       await dbConnection.execute(`
-        INSERT INTO users (telegram_id, username, full_name, commission, created_at) 
-        VALUES (?, ?, ?, 1000, NOW())
+        INSERT INTO users (telegram_id, username, full_name, commission, current_level, created_at) 
+        VALUES (?, ?, ?, 1000, 'Bronze', NOW())
       `, [telegramId, username || 'unknown', (firstName && lastName) ? `${firstName} ${lastName}` : (firstName || 'Пользователь')]);
+      
+      console.log(`✅ Создан новый пользователь ${telegramId}, level=Bronze`);
     }
     
     // Создаем запись о покупке
@@ -3938,6 +3991,19 @@ app.post('/api/admin/confirm-order', async (req, res) => {
       try {
         if (gamificationService) {
           if (type === 'order') {
+            // Обновляем total_orders в таблице users (учитываем только завершенные заказы)
+            const [orderStats] = await dbConnection.execute(`
+              SELECT COUNT(*) as total_orders
+              FROM orders 
+              WHERE telegram_id = ? AND status = 'completed'
+            `, [telegramId]);
+            
+            const totalOrders = orderStats[0]?.total_orders || 0;
+            await dbConnection.execute(
+              'UPDATE users SET total_orders = ? WHERE telegram_id = ?',
+              [totalOrders, telegramId]
+            );
+            
             // Заказ подтверждён - даем 100 XP
             const orderHour = new Date().getHours();
             const xpResult = await gamificationService.awardXP(
@@ -3948,7 +4014,7 @@ app.post('/api/admin/confirm-order', async (req, res) => {
               `Заказ #${orderId} подтвержден`
             );
             
-            // Проверяем достижения
+            // Проверяем достижения (теперь total_orders обновлен правильно)
             const achievements = await gamificationService.checkOrderAchievements(
               telegramId,
               orderId,
@@ -3967,12 +4033,20 @@ app.post('/api/admin/confirm-order', async (req, res) => {
             
             for (const achievement of achievements) {
               if (!achievement.alreadyUnlocked && achievement.achievement) {
-                const achievementMsg = `🏆 <b>Достижение разблокировано!</b>\n\n` +
+                let achievementMsg = `🏆 <b>Достижение разблокировано!</b>\n\n` +
                   `${achievement.achievement.icon} <b>${achievement.achievement.name}</b>\n` +
                   `📝 ${achievement.achievement.description}\n\n` +
                   `🎁 Награда: +${achievement.achievement.xpReward} XP`;
+                
+                if (achievement.achievement.additionalReward) {
+                  achievementMsg += `\n✨ Бонус: ${achievement.achievement.additionalReward}`;
+                }
+                
+                // Для dragon_summoner достижение разблокируется у РЕФЕРЕРА, а не у реферала
+                // Поэтому уведомление отправляем рефереру
+                const recipientId = achievement.unlockedFor || telegramId;
                 // Включаем уведомления для продакшена
-                await sendTelegramMessage(telegramId, achievementMsg);
+                await sendTelegramMessage(recipientId, achievementMsg);
               }
             }
           } else if (type === 'yuan') {
@@ -4010,13 +4084,18 @@ app.post('/api/admin/confirm-order', async (req, res) => {
                 
                 for (const achievement of achievements) {
                   if (!achievement.alreadyUnlocked && achievement.achievement) {
-                    const achievementMsg = `🏆 <b>Достижение разблокировано!</b>\n\n` +
+                    let achievementMsg = `🏆 <b>Достижение разблокировано!</b>\n\n` +
                       `${achievement.achievement.icon} <b>${achievement.achievement.name}</b>\n` +
                       `📝 ${achievement.achievement.description}\n\n` +
                       `🎁 Награда: +${achievement.achievement.xpReward} XP`;
+                    
+                    if (achievement.achievement.additionalReward) {
+                      achievementMsg += `\n✨ Бонус: ${achievement.achievement.additionalReward}`;
+                    }
+                    
                     // Включаем уведомления для продакшена
-                await sendTelegramMessage(telegramId, achievementMsg);
-              }
+                    await sendTelegramMessage(telegramId, achievementMsg);
+                  }
                 }
               }
             }
@@ -6203,6 +6282,32 @@ app.post('/api/daily-login', async (req, res) => {
     // Проверяем достижения по активности
     const achievementsResult = await gamificationService.checkActivityAchievements(telegramId);
     
+    // Отправляем уведомления о разблокированных достижениях
+    for (const achievement of achievementsResult) {
+      if (achievement.success && !achievement.alreadyUnlocked && achievement.achievement) {
+        let achievementMsg = `🏆 <b>Достижение разблокировано!</b>\n\n` +
+          `${achievement.achievement.icon} <b>${achievement.achievement.name}</b>\n` +
+          `📝 ${achievement.achievement.description}\n\n` +
+          `🎁 Награда: +${achievement.achievement.xpReward} XP`;
+        
+        if (achievement.achievement.additionalReward) {
+          achievementMsg += `\n✨ Бонус: ${achievement.achievement.additionalReward}`;
+        }
+        
+        await sendTelegramMessage(telegramId, achievementMsg);
+      }
+    }
+    
+    // Отправляем уведомление о повышении уровня, если оно было
+    if (result.leveledUp) {
+      const levelUpMsg = `🎊 <b>Поздравляем!</b>\n\n` +
+        `Вы достигли уровня <b>${result.currentLevel}</b>! 🏆\n\n` +
+        `🎁 <b>Награды:</b>\n${result.rewards.description}\n\n` +
+        `✨ Всего XP: ${result.totalXP}`;
+      
+      await sendTelegramMessage(telegramId, levelUpMsg);
+    }
+    
     res.json({ 
       success: true, 
       streak: newStreak,
@@ -6242,11 +6347,15 @@ app.post('/api/calculate-price', async (req, res) => {
         
         // Отправляем уведомления о достижениях
         for (const achievement of achievements) {
-          if (achievement.success && !achievement.alreadyUnlocked) {
-            const achievementMsg = `🏆 <b>Новое достижение!</b>\n\n` +
+          if (achievement.success && !achievement.alreadyUnlocked && achievement.achievement) {
+            let achievementMsg = `🏆 <b>Достижение разблокировано!</b>\n\n` +
               `${achievement.achievement.icon} <b>${achievement.achievement.name}</b>\n` +
-              `${achievement.achievement.description}\n\n` +
-              `✨ +${achievement.achievement.xpReward} XP`;
+              `📝 ${achievement.achievement.description}\n\n` +
+              `🎁 Награда: +${achievement.achievement.xpReward} XP`;
+            
+            if (achievement.achievement.additionalReward) {
+              achievementMsg += `\n✨ Бонус: ${achievement.achievement.additionalReward}`;
+            }
             
             await sendTelegramMessage(telegramId, achievementMsg);
           }

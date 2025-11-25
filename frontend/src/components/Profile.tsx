@@ -345,7 +345,7 @@ const StatValue = styled.div`
 const StatLabel = styled.div`
   font-family: 'Noto Sans SC', 'Inter', Arial, sans-serif;
   font-size: 12px;
-  color: var(--text-secondary);
+  color: var(--text-primary);
 `;
 
 const LevelCard = styled.div<{ $isDark: boolean }>`
@@ -1647,7 +1647,11 @@ const Profile: React.FC<ProfileProps> = ({ telegramId, isDarkTheme, toggleTheme,
       setLoading(true);
       
       // Получаем РЕАЛЬНЫЕ данные профиля из БД
-      const profileResponse = await fetch('/api/profile');
+      const profileResponse = await fetch('/api/profile', {
+        headers: {
+          'x-telegram-init-data': (window as any).Telegram?.WebApp?.initData || ''
+        }
+      });
       
       if (!profileResponse.ok) {
         if (profileResponse.status === 404) {
@@ -1701,7 +1705,12 @@ const Profile: React.FC<ProfileProps> = ({ telegramId, isDarkTheme, toggleTheme,
       
       // Загружаем реальные данные геймификации
       try {
-        const gamificationResponse = await fetch('/api/gamification/demo');
+        // Получаем telegram_id из Telegram WebApp или используем переданный
+        const telegramWebApp = (window as any).Telegram?.WebApp;
+        const telegramUser = telegramWebApp?.initDataUnsafe?.user;
+        const currentTelegramIdForGamification = telegramUser?.id?.toString() || currentTelegramId || 'demo';
+        
+        const gamificationResponse = await fetch(`/api/gamification/${currentTelegramIdForGamification}`);
         
         if (gamificationResponse.ok) {
           const gamificationData = await gamificationResponse.json();
@@ -1743,18 +1752,43 @@ const Profile: React.FC<ProfileProps> = ({ telegramId, isDarkTheme, toggleTheme,
           };
           
           // Сохраняем все достижения отдельно для модального окна (ОБНОВЛЕНО ДЛЯ НОВОЙ СИСТЕМЫ)
-          setAllAchievements(gamificationData.achievements.map((ach: any, index: number) => ({
-            id: ach.id ? ach.id.toString() : `achievement_${index}`,
-            key: ach.name ? ach.name.toLowerCase().replace(/[^a-z0-9]/g, '_') : `achievement_${index}`,
-            name: ach.name || `Достижение ${index + 1}`,
-            description: ach.description || '',
-            icon: ach.icon || '🏆',
-            category: ach.category || 'Общие',
-            requirement: ach.requirement || '',
-            unlocked: Boolean(ach.unlocked),
-            unlockedAt: ach.unlocked_at,
-            xpReward: ach.xp_reward || 0
-          })));
+          // Получаем все достижения (не только разблокированные) для модального окна
+          const allAchievementsResponse = await fetch(`/api/gamification/${currentTelegramIdForGamification}/achievements-by-category`);
+          if (allAchievementsResponse.ok) {
+            const allAchievementsData = await allAchievementsResponse.json();
+            const allAchievementsFlat: any[] = [];
+            Object.values(allAchievementsData.achievementsByCategory || {}).forEach((categoryAchievements: any) => {
+              categoryAchievements.forEach((ach: any) => {
+                allAchievementsFlat.push({
+                  id: ach.id ? ach.id.toString() : `achievement_${allAchievementsFlat.length}`,
+                  key: ach.achievement_key || ach.key || '',
+                  name: ach.name || `Достижение ${allAchievementsFlat.length + 1}`,
+                  description: ach.description || '',
+                  icon: ach.icon || '🏆',
+                  category: ach.category || 'Общие',
+                  requirement: ach.requirement || '',
+                  unlocked: Boolean(ach.unlocked),
+                  unlockedAt: ach.unlocked_at || null,
+                  xpReward: ach.xp_reward || 0
+                });
+              });
+            });
+            setAllAchievements(allAchievementsFlat);
+          } else {
+            // Fallback: используем достижения из gamificationData
+            setAllAchievements(gamificationData.achievements.map((ach: any, index: number) => ({
+              id: ach.id ? ach.id.toString() : `achievement_${index}`,
+              key: ach.key || ach.achievement_key || '',
+              name: ach.name || `Достижение ${index + 1}`,
+              description: ach.description || '',
+              icon: ach.icon || '🏆',
+              category: ach.category || 'Общие',
+              requirement: ach.requirement || '',
+              unlocked: Boolean(ach.unlocked),
+              unlockedAt: ach.unlocked_at || null,
+              xpReward: ach.xp_reward || 0
+            })));
+          }
           
           // Проверяем недавнее повышение уровня
           await checkRecentLevelUp();
@@ -2094,9 +2128,9 @@ const Profile: React.FC<ProfileProps> = ({ telegramId, isDarkTheme, toggleTheme,
       <UserCard $isDark={isDarkTheme}>
         <UserInfo>
           <UserAvatar $isDark={isDarkTheme}>
-            {telegramUser?.photo_url ? (
+            {(profileData.user.avatar_url || telegramUser?.photo_url) ? (
               <img 
-                src={telegramUser.photo_url} 
+                src={profileData.user.avatar_url || telegramUser?.photo_url} 
                 alt="Avatar" 
                 style={{ 
                   width: '100%', 
@@ -2104,9 +2138,21 @@ const Profile: React.FC<ProfileProps> = ({ telegramId, isDarkTheme, toggleTheme,
                   borderRadius: '50%', 
                   objectFit: 'cover' 
                 }} 
+                onError={(e) => {
+                  // Если аватарка не загрузилась, показываем инициалы
+                  e.currentTarget.style.display = 'none';
+                  const parent = e.currentTarget.parentElement;
+                  if (parent) {
+                    const name = profileData.user.full_name || telegramUser?.first_name || 'П';
+                    parent.textContent = name.charAt(0).toUpperCase();
+                  }
+                }}
               />
             ) : (
-              '👤'
+              (() => {
+                const name = profileData.user.full_name || telegramUser?.first_name || 'П';
+                return name.charAt(0).toUpperCase();
+              })()
             )}
           </UserAvatar>
           <UserDetails>
@@ -2116,7 +2162,6 @@ const Profile: React.FC<ProfileProps> = ({ telegramId, isDarkTheme, toggleTheme,
                 : telegramUser?.first_name || profileData.user.full_name || 'Пользователь'
               }
             </UserName>
-            <UserId $isDark={isDarkTheme}>ID: {profileData.user.telegram_id}</UserId>
             <div style={{ 
               fontSize: '12px', 
               color: isDarkTheme ? 'var(--text-accent)' : 'var(--text-secondary)' 
@@ -2133,7 +2178,7 @@ const Profile: React.FC<ProfileProps> = ({ telegramId, isDarkTheme, toggleTheme,
           </StatItem>
           <StatItem $isDark={isDarkTheme}>
             <StatValue>{profileData.statistics.referrals.total_referrals}</StatValue>
-            <StatLabel>Рефералов</StatLabel>
+            <StatLabel>Приглашено</StatLabel>
           </StatItem>
           <StatItem $isDark={isDarkTheme}>
             <StatValue>{profileData.statistics.yuan_purchases.total_purchases}</StatValue>
