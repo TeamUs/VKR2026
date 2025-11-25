@@ -19,7 +19,7 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     sourcemap: false,
-    minify: 'esbuild',
+    minify: false, // Временно отключаем минификацию для диагностики
     cssCodeSplit: false,
     rollupOptions: {
       output: {
