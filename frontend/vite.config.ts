@@ -2,17 +2,33 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [
+    react({
+      jsxRuntime: 'automatic',
+      babel: {
+        plugins: [
+          ['babel-plugin-styled-components', {
+            displayName: true,
+            fileName: false,
+            ssr: false,
+          }],
+        ],
+      },
+    }),
+  ],
   build: {
     outDir: 'dist',
     sourcemap: false,
-    minify: 'esbuild', // Используем esbuild вместо terser (быстрее и идет в комплекте)
+    minify: 'esbuild',
     cssCodeSplit: false,
     rollupOptions: {
       output: {
         manualChunks: undefined,
       },
     },
+  },
+  optimizeDeps: {
+    include: ['styled-components'],
   },
   server: {
     port: 3001,
