@@ -3,6 +3,15 @@ import ReactDOM from 'react-dom/client';
 import App from './App';
 import './fonts.css';
 
+// Обработка глобальных ошибок
+window.addEventListener('error', (event) => {
+  console.error('[Global Error]', event.error);
+});
+
+window.addEventListener('unhandledrejection', (event) => {
+  console.error('[Unhandled Promise Rejection]', event.reason);
+});
+
 // Создаем style элемент заранее для styled-components
 if (typeof document !== 'undefined') {
   // Проверяем, нет ли уже такого элемента
@@ -13,12 +22,23 @@ if (typeof document !== 'undefined') {
   }
 }
 
-const root = ReactDOM.createRoot(
-  document.getElementById('root') as HTMLElement
-);
+console.log('[index.tsx] Инициализация приложения...');
 
-root.render(
-  <React.StrictMode>
-    <App />
-  </React.StrictMode>
-);
+try {
+  const rootElement = document.getElementById('root');
+  if (!rootElement) {
+    throw new Error('Root element not found!');
+  }
+
+  const root = ReactDOM.createRoot(rootElement);
+  
+  root.render(
+    <React.StrictMode>
+      <App />
+    </React.StrictMode>
+  );
+  
+  console.log('[index.tsx] Приложение запущено');
+} catch (error) {
+  console.error('[index.tsx] Ошибка запуска приложения:', error);
+}
