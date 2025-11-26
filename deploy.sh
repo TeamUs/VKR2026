@@ -104,3 +104,4 @@ echo "  - Логи: pm2 logs poizonic-backend"
 echo "  - Nginx: sudo systemctl status nginx"
 echo ""
 
+

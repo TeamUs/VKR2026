@@ -41,8 +41,6 @@ const subtleGlow = keyframes`
 
 // Потрясающий технологичный дизайн в китайском стиле с поддержкой тем
 const GlobalStyle = createGlobalStyle`
-  @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;600;700;900&family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@300;400;500;600&display=swap');
-  
   :root {
     /* Светлая тема - Дневная китайская деревня (вдохновлено референсом) */
     --bg-primary: #F5F2E8;
