@@ -819,19 +819,26 @@ const App: React.FC = () => {
   };
 
   useEffect(() => {
-    // Выбор случайной китайской мудрости
-    const randomIndex = Math.floor(Math.random() * chineseWisdom.length);
-    setRandomWisdom(chineseWisdom[randomIndex]);
+    console.log('[App] useEffect запущен');
     
-    // Загрузка сохраненной темы
-    const savedTheme = localStorage.getItem('theme');
-    if (savedTheme) {
-      setIsDarkTheme(savedTheme === 'dark');
-      document.documentElement.setAttribute('data-theme', savedTheme);
-    }
+    try {
+      // Выбор случайной китайской мудрости
+      const randomIndex = Math.floor(Math.random() * chineseWisdom.length);
+      setRandomWisdom(chineseWisdom[randomIndex]);
+      
+      // Загрузка сохраненной темы
+      try {
+        const savedTheme = localStorage.getItem('theme');
+        if (savedTheme) {
+          setIsDarkTheme(savedTheme === 'dark');
+          document.documentElement.setAttribute('data-theme', savedTheme);
+        }
+      } catch (e) {
+        console.warn('[App] Ошибка загрузки темы из localStorage:', e);
+      }
 
-    // Инициализация Telegram Web App
-    if (window.Telegram?.WebApp) {
+      // Инициализация Telegram Web App
+      if (window.Telegram?.WebApp) {
       const tg = window.Telegram.WebApp;
       
       // Готовность приложения
@@ -842,10 +849,12 @@ const App: React.FC = () => {
       const user = tg.initDataUnsafe?.user;
       if (user) {
         setTelegramUser(user);
-        console.log('Telegram user:', user);
+        console.log('[App] Telegram user:', user);
         
         // Инициализируем пользователя в базе данных
-        initializeUser(user);
+        initializeUser(user).catch(err => {
+          console.error('[App] Ошибка инициализации пользователя:', err);
+        });
         
         // Запускаем heartbeat для отслеживания онлайн-статуса (каждые 10 секунд)
         const heartbeatInterval = setInterval(async () => {
@@ -860,12 +869,13 @@ const App: React.FC = () => {
               }),
             });
           } catch (error) {
-            console.error('Heartbeat error:', error);
+            console.error('[App] Heartbeat error:', error);
           }
         }, 10000); // Отправляем heartbeat каждые 10 секунд
         
-        // Очистка интервала при размонтировании компонента
-        return () => clearInterval(heartbeatInterval);
+        // Сохраняем интервал для очистки в cleanup функции
+        // НЕ возвращаем cleanup здесь, а сохраним интервал в переменной для cleanup в конце
+        window.heartbeatInterval = heartbeatInterval;
       }
       
       // Настройка Main Button
@@ -875,14 +885,16 @@ const App: React.FC = () => {
         tg.MainButton.hide();
       });
       
-      // Настройка Back Button
-      tg.BackButton.onClick(() => {
-        if (currentView !== 'main') {
-          setCurrentView('main');
-          tg.BackButton.hide();
-          tg.MainButton.hide();
-        }
-      });
+      // Настройка Back Button (с проверкой доступности)
+      if (tg.BackButton) {
+        tg.BackButton.onClick(() => {
+          if (currentView !== 'main') {
+            setCurrentView('main');
+            tg.BackButton.hide();
+            tg.MainButton.hide();
+          }
+        });
+      }
       
       // Обработка start параметра для рефералов
       const urlParams = new URLSearchParams(window.location.search);
@@ -892,22 +904,38 @@ const App: React.FC = () => {
         const referralId = startParam.replace('ref_', '');
         handleReferral(referralId);
       }
+      }
+    } catch (error) {
+      console.error('[App] Ошибка при инициализации:', error);
+      // Даже при ошибке продолжаем работу
     }
     
-    // Завершение загрузки с таймаутом и обработкой ошибок
+    // Завершение загрузки - ВСЕГДА завершаем через 2 секунды, независимо от состояния
+    // Это гарантирует, что приложение запустится даже при проблемах
     const loadingTimeout = setTimeout(() => {
+      console.log('[App] Загрузка завершена по таймауту (2 сек)');
       setIsLoading(false);
-    }, 2000); // Увеличиваем до 2 секунд для надежности
+    }, 2000);
     
-    // Также завершаем загрузку сразу, если Telegram WebApp готов или не требуется
-    if (!window.Telegram?.WebApp) {
-      console.warn('Telegram WebApp не обнаружен, работаем в обычном режиме');
-      clearTimeout(loadingTimeout);
-      setIsLoading(false);
+    // Также завершаем загрузку быстрее, если Telegram WebApp готов
+    if (window.Telegram?.WebApp) {
+      console.log('[App] Telegram WebApp обнаружен');
+      setTimeout(() => {
+        console.log('[App] Завершаем загрузку (Telegram готов)');
+        setIsLoading(false);
+        clearTimeout(loadingTimeout);
+      }, 500);
+    } else {
+      console.warn('[App] Telegram WebApp не обнаружен при инициализации');
     }
     
     return () => {
       clearTimeout(loadingTimeout);
+      // Очищаем heartbeat интервал, если он был создан
+      if (window.heartbeatInterval) {
+        clearInterval(window.heartbeatInterval);
+        delete window.heartbeatInterval;
+      }
     };
   }, []);
 
