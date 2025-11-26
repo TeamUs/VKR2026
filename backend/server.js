@@ -60,7 +60,20 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 // Middleware
-app.use(cors());
+// CORS настройки для Telegram Mini App
+app.use(cors({
+  origin: [
+    'https://poizonic.ru',
+    'https://www.poizonic.ru',
+    'https://web.telegram.org',
+    'https://webk.telegram.org',
+    'https://webz.telegram.org',
+    ...(process.env.CORS_ORIGINS ? process.env.CORS_ORIGINS.split(',') : [])
+  ],
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Telegram-User-Id']
+}));
 app.use(express.json());
 
 // Статическая раздача загруженных файлов (отзывы)
