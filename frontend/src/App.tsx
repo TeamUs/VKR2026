@@ -850,7 +850,7 @@ const App: React.FC = () => {
         // Запускаем heartbeat для отслеживания онлайн-статуса (каждые 10 секунд)
         const heartbeatInterval = setInterval(async () => {
           try {
-            await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3001'}/api/user/heartbeat`, {
+            await fetch('/api/user/heartbeat', {
               method: 'POST',
               headers: {
                 'Content-Type': 'application/json',
@@ -894,10 +894,21 @@ const App: React.FC = () => {
       }
     }
     
-    // Имитация загрузки
-    setTimeout(() => {
+    // Завершение загрузки с таймаутом и обработкой ошибок
+    const loadingTimeout = setTimeout(() => {
       setIsLoading(false);
-    }, 1000);
+    }, 2000); // Увеличиваем до 2 секунд для надежности
+    
+    // Также завершаем загрузку сразу, если Telegram WebApp готов или не требуется
+    if (!window.Telegram?.WebApp) {
+      console.warn('Telegram WebApp не обнаружен, работаем в обычном режиме');
+      clearTimeout(loadingTimeout);
+      setIsLoading(false);
+    }
+    
+    return () => {
+      clearTimeout(loadingTimeout);
+    };
   }, []);
 
   useEffect(() => {
