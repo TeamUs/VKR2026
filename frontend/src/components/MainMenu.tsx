@@ -159,6 +159,16 @@ const WelcomeTitle = styled.h1`
     font-size: 3.2rem;
     margin-top: 20px;
   }
+  
+  @media (max-height: 700px) {
+    font-size: 3rem;
+    margin-top: 10px;
+    margin-bottom: 4px;
+  }
+  
+  @media (max-height: 700px) and (max-width: 480px) {
+    font-size: 2.5rem;
+  }
 `;
 
 const gradientShift = keyframes`
@@ -188,6 +198,11 @@ const WelcomeSubtitle = styled.p`
     margin-bottom: 30px;
     max-width: 280px;
     line-height: 1.4;
+  }
+  
+  @media (max-height: 700px) {
+    margin-bottom: 20px;
+    font-size: 0.95rem;
   }
 `;
 
@@ -279,13 +294,23 @@ const MenuGrid = styled.div`
   gap: 20px;
   max-width: 360px;
   margin: 0 auto;
-  padding: 20px 20px 0 20px;
+  padding: 20px 20px 80px 20px;
   justify-items: center;
   
   @media (max-width: 480px) {
     gap: 16px;
     max-width: 320px;
-    padding: 20px 15px 0 15px;
+    padding: 20px 15px 70px 15px;
+  }
+  
+  @media (max-height: 700px) {
+    gap: 12px;
+    padding: 15px 20px 60px 20px;
+  }
+  
+  @media (max-height: 700px) and (max-width: 480px) {
+    gap: 10px;
+    padding: 10px 15px 60px 15px;
   }
 `;
 
@@ -322,6 +347,20 @@ const MenuButton = styled.button<{ $variant?: 'primary' | 'secondary'; $isDark: 
     height: 130px;
     padding: 18px;
     font-size: 0.95rem;
+  }
+  
+  @media (max-height: 700px) {
+    width: 140px;
+    height: 140px;
+    padding: 16px;
+    font-size: 0.9rem;
+  }
+  
+  @media (max-height: 700px) and (max-width: 480px) {
+    width: 120px;
+    height: 120px;
+    padding: 14px;
+    font-size: 0.85rem;
   }
   
   &::before {
@@ -399,6 +438,16 @@ const ButtonIcon = styled.span<{ $isDark?: boolean }>`
     margin-bottom: 8px;
   }
   
+  @media (max-height: 700px) {
+    font-size: 2.2rem;
+    margin-bottom: 8px;
+  }
+  
+  @media (max-height: 700px) and (max-width: 480px) {
+    font-size: 2rem;
+    margin-bottom: 6px;
+  }
+  
   ${MenuButton}:hover & {
     transform: scale(1.1);
     opacity: 1;
@@ -417,6 +466,11 @@ const ButtonText = styled.span`
   
   @media (max-width: 480px) {
     font-size: 0.95rem;
+    line-height: 1.2;
+  }
+  
+  @media (max-height: 700px) {
+    font-size: 0.9rem;
     line-height: 1.2;
   }
   
@@ -441,6 +495,12 @@ const ChineseAccent = styled.div`
     top: 9px;
     right: 9px;
     font-size: 1.15rem;
+  }
+  
+  @media (max-height: 700px) {
+    top: 10px;
+    right: 10px;
+    font-size: 1.1rem;
   }
   
   ${MenuButton}:hover & {

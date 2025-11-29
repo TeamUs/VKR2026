@@ -135,6 +135,19 @@ class GamificationService {
 
     } catch (error) {
       await connection.rollback();
+      
+      // Lock wait timeout - не критичная ошибка, возникает при одновременном доступе
+      // Можно игнорировать, т.к. один из запросов все равно выполнится успешно
+      if (error.code === 'ER_LOCK_WAIT_TIMEOUT' || error.errno === 1205) {
+        console.warn(`⚠️ Lock timeout при обновлении XP для ${telegramId} (одновременный доступ). Игнорируем.`);
+        // Возвращаем success: false, но не бросаем ошибку
+        return {
+          success: false,
+          skipped: true,
+          reason: 'Concurrent access - другой запрос уже обрабатывается'
+        };
+      }
+      
       console.error('Error awarding XP:', error);
       throw error;
     } finally {
@@ -237,13 +250,22 @@ class GamificationService {
       // Award XP bonus
       let xpResult = null;
       if (achievement.xp_reward > 0) {
-        xpResult = await this.awardXP(
-          telegramId,
-          achievement.xp_reward,
-          'achievement',
-          achievement.id,
-          `Unlocked: ${achievement.name}`
-        );
+        try {
+          xpResult = await this.awardXP(
+            telegramId,
+            achievement.xp_reward,
+            'achievement',
+            achievement.id,
+            `Unlocked: ${achievement.name}`
+          );
+          // Если awardXP был пропущен из-за concurrent access, это нормально
+          if (xpResult && xpResult.skipped) {
+            console.log(`⚠️ XP награда пропущена для достижения ${achievementKey} (одновременный доступ)`);
+          }
+        } catch (err) {
+          // Игнорируем ошибки при награждении XP (они могут быть из-за concurrent access)
+          console.warn(`⚠️ Не удалось наградить XP за достижение ${achievementKey}:`, err.message);
+        }
       }
 
       // Apply additional reward if exists (temporary discount 600₽ instead of 1000₽)
@@ -280,6 +302,13 @@ class GamificationService {
 
     } catch (error) {
       await connection.rollback();
+      
+      // Lock wait timeout - не критичная ошибка при одновременном доступе
+      if (error.code === 'ER_LOCK_WAIT_TIMEOUT' || error.errno === 1205) {
+        console.warn(`⚠️ Lock timeout при разблокировке достижения ${achievementKey} для ${telegramId}. Игнорируем.`);
+        return { success: false, skipped: true, reason: 'Concurrent access' };
+      }
+      
       console.error('Error unlocking achievement:', error);
       throw error;
     } finally {
@@ -379,19 +408,39 @@ class GamificationService {
 
       await connection.commit();
 
-      // Check for streak achievements
+      // Check for streak achievements (игнорируем ошибки при одновременном доступе)
       if (newStreak === 3) {
-        await this.checkAndUnlockAchievement(telegramId, 'daily_ritual');
+        try {
+          await this.checkAndUnlockAchievement(telegramId, 'daily_ritual');
+        } catch (err) {
+          console.warn('⚠️ Ошибка проверки достижения daily_ritual (игнорируем):', err.message);
+        }
       } else if (newStreak === 14) {
-        await this.checkAndUnlockAchievement(telegramId, 'lunar_cycle');
+        try {
+          await this.checkAndUnlockAchievement(telegramId, 'lunar_cycle');
+        } catch (err) {
+          console.warn('⚠️ Ошибка проверки достижения lunar_cycle (игнорируем):', err.message);
+        }
       } else if (newStreak === 365) {
-        await this.checkAndUnlockAchievement(telegramId, 'year_of_dragon');
+        try {
+          await this.checkAndUnlockAchievement(telegramId, 'year_of_dragon');
+        } catch (err) {
+          console.warn('⚠️ Ошибка проверки достижения year_of_dragon (игнорируем):', err.message);
+        }
       }
 
       return { streak: newStreak, alreadyLoggedToday: false };
 
     } catch (error) {
       await connection.rollback();
+      
+      // Lock wait timeout - не критичная ошибка при одновременном доступе
+      if (error.code === 'ER_LOCK_WAIT_TIMEOUT' || error.errno === 1205) {
+        console.warn(`⚠️ Lock timeout при обновлении daily login для ${telegramId}. Игнорируем.`);
+        // Возвращаем результат, как будто все ОК (другой запрос уже обновил)
+        return { streak: null, skipped: true, reason: 'Concurrent access - уже обновлено другим запросом' };
+      }
+      
       console.error('Error updating daily login:', error);
       throw error;
     } finally {

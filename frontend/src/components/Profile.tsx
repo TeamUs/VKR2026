@@ -101,7 +101,7 @@ interface ProfileProps {
   onModalStateChange?: (isOpen: boolean) => void;
 }
 
-const ProfileContainer = styled.div<{ $isDark: boolean }>`
+const ProfileContainer = styled.div<{ $isDark: boolean; $hideContent?: boolean }>`
   padding: 0px 0px 100px 0px;
   min-height: 100vh;
   background: transparent;
@@ -161,13 +161,14 @@ const Hieroglyph = styled.div`
 `;
 
 
-const Header = styled.div`
+const Header = styled.div<{ $hidden?: boolean }>`
   text-align: center;
   margin-top: 0;
   margin-bottom: 24px;
   padding-top: 0;
   padding: 0 16px;
   position: relative;
+  display: ${props => props.$hidden ? 'none' : 'block'};
 `;
 
 const AdminButton = styled.button<{ $isDark: boolean }>`
@@ -210,7 +211,7 @@ const ProfileTitle = styled.h1<{ $isDark: boolean }>`
   text-shadow: ${props => props.$isDark ? '0 0 10px var(--glow-red)' : 'none'};
 `;
 
-const ThemeToggle = styled.div`
+const ThemeToggle = styled.div<{ $hidden?: boolean }>`
   position: fixed;
   top: 10px;
   right: 20px;
@@ -225,7 +226,7 @@ const ThemeToggle = styled.div`
     0 2px 6px var(--shadow-soft);
   backdrop-filter: blur(10px);
   transition: all 0.3s ease;
-  display: flex;
+  display: ${props => props.$hidden ? 'none' : 'flex'};
   align-items: center;
   padding: 2px;
   z-index: 1000;
@@ -1211,10 +1212,11 @@ const Profile: React.FC<ProfileProps> = ({ telegramId, isDarkTheme, toggleTheme,
       const user = tg?.initDataUnsafe?.user;
       const userId = user?.id?.toString();
       
-      // Временно даем доступ всем для разработки
-      // const adminIds = ['7696515351', '690296532'];
-      // return adminIds.includes(userId || '');
-      return true; // Временно открываем доступ всем
+      // Доступ только для администратора и менеджера
+      // ADMIN_TELEGRAM_ID: 690296532
+      // MANAGER_TELEGRAM_ID: 7696515351
+      const adminIds = ['690296532', '7696515351'];
+      return adminIds.includes(userId || '');
     };
 
     setIsAdmin(checkAdminAccess());
@@ -2001,16 +2003,153 @@ const Profile: React.FC<ProfileProps> = ({ telegramId, isDarkTheme, toggleTheme,
     };
 
     if (showPasswordModal) {
-      updateModalPosition(); // Устанавливаем начальную позицию
-      window.addEventListener('scroll', updateModalPosition);
+      // Блокируем скролл и скрываем навигацию
+      document.body.style.overflow = 'hidden';
+      document.body.style.position = 'fixed';
+      document.body.style.width = '100%';
+      onModalStateChange?.(true);
+      
+      // Скрываем Telegram WebApp header и ВСЕ элементы кроме модального окна
+      if (window.Telegram?.WebApp) {
+        const tg = window.Telegram.WebApp;
+        tg.expand(); // Разворачиваем на весь экран
+      }
+      
+      // Скрываем ВСЕ элементы страницы кроме модального окна через CSS
+      const style = document.createElement('style');
+      style.id = 'hide-telegram-header';
+      style.textContent = `
+        /* Telegram WebApp header - АГРЕССИВНОЕ СКРЫТИЕ */
+        .tg-viewport,
+        .tg-viewport * {
+          padding-top: 0 !important;
+          margin-top: 0 !important;
+        }
+        header, 
+        .tg-header,
+        [class*="header"],
+        [class*="Header"],
+        [id*="header"],
+        [id*="Header"],
+        .telegram-header,
+        .tg-viewport > header,
+        body > header,
+        html > body > header,
+        /* Все возможные варианты навигации и header */
+        nav,
+        [role="banner"],
+        [role="navigation"],
+        .navbar,
+        .nav-bar,
+        .top-bar,
+        .app-header,
+        .appHeader {
+          display: none !important;
+          visibility: hidden !important;
+          height: 0 !important;
+          max-height: 0 !important;
+          padding: 0 !important;
+          margin: 0 !important;
+          opacity: 0 !important;
+          pointer-events: none !important;
+          overflow: hidden !important;
+          position: absolute !important;
+          top: -9999px !important;
+          left: -9999px !important;
+        }
+        /* Убираем ВСЕ отступы сверху - полностью */
+        html,
+        body {
+          padding-top: 0 !important;
+          margin-top: 0 !important;
+          overflow: hidden !important;
+        }
+        /* Убираем безопасную зону сверху на мобильных */
+        @supports (padding-top: env(safe-area-inset-top)) {
+          body,
+          html {
+            padding-top: 0 !important;
+            margin-top: 0 !important;
+          }
+        }
+        /* Убираем все отступы сверху у viewport и контейнеров */
+        .tg-viewport,
+        #root,
+        [id="root"] {
+          padding-top: 0 !important;
+          margin-top: 0 !important;
+        }
+        /* Модальное окно начинается с самого верха экрана - перекрываем полоску */
+        body > div[style*="z-index: 10000"],
+        [style*="z-index: 10000"] {
+          top: -20px !important;
+          left: 0 !important;
+          right: 0 !important;
+          margin: 0 !important;
+          padding-top: 20px !important;
+          padding-left: 20px !important;
+          padding-right: 20px !important;
+          padding-bottom: 20px !important;
+          height: calc(100% + 20px) !important;
+        }
+        /* Скрываем все что может быть сверху - АГРЕССИВНО */
+        body::before,
+        html::before,
+        .tg-viewport::before,
+        body > *:first-child:not([style*="z-index: 10000"]) {
+          display: none !important;
+          height: 0 !important;
+          padding-top: 0 !important;
+          margin-top: 0 !important;
+        }
+        /* Скрываем все элементы выше модального окна */
+        body > div:not([style*="z-index: 10000"]) {
+          margin-top: 0 !important;
+          padding-top: 0 !important;
+        }
+        /* НЕ скрываем контент - он должен быть виден под затемнением! */
+        /* Только скрываем навигацию и header */
+        [class*="ProfileContainer"] > header[data-hidden="true"],
+        [class*="ProfileContainer"] > div[class*="ThemeToggle"][data-hidden="true"] {
+          display: none !important;
+        }
+      `;
+      document.head.appendChild(style);
+      
+      // НЕ скрываем контент - он должен быть виден под затемнением!
+      
+      // Устанавливаем начальную позицию и обновляем при изменении размера
+      updateModalPosition();
       window.addEventListener('resize', updateModalPosition);
+    } else {
+      // Восстанавливаем скролл и показываем навигацию
+      document.body.style.overflow = '';
+      document.body.style.position = '';
+      document.body.style.width = '';
+      onModalStateChange?.(false);
+      
+      // Восстанавливаем Telegram WebApp header
+      const hideHeaderStyle = document.getElementById('hide-telegram-header');
+      if (hideHeaderStyle) {
+        hideHeaderStyle.remove();
+      }
     }
 
     return () => {
-      window.removeEventListener('scroll', updateModalPosition);
+      // При размонтировании восстанавливаем скролл и убираем слушатели
+      document.body.style.overflow = '';
+      document.body.style.position = '';
+      document.body.style.width = '';
+      onModalStateChange?.(false);
       window.removeEventListener('resize', updateModalPosition);
+      
+      // Восстанавливаем header при размонтировании
+      const hideHeaderStyle = document.getElementById('hide-telegram-header');
+      if (hideHeaderStyle) {
+        hideHeaderStyle.remove();
+      }
     };
-  }, [showPasswordModal]);
+  }, [showPasswordModal, onModalStateChange]);
 
   // Обработчик нажатия на кнопку админки
   const handleAdminClick = () => {
@@ -2018,6 +2157,9 @@ const Profile: React.FC<ProfileProps> = ({ telegramId, isDarkTheme, toggleTheme,
     setShowPasswordModal(true);
     setPassword('');
     setPasswordError('');
+    // Скрываем навигацию и блокируем скролл
+    onModalStateChange?.(true);
+    document.body.style.overflow = 'hidden';
   };
 
   // Обработчик подтверждения пароля
@@ -2032,6 +2174,9 @@ const Profile: React.FC<ProfileProps> = ({ telegramId, isDarkTheme, toggleTheme,
       setShowPasswordModal(false);
       setPassword('');
       setPasswordError('');
+      // Восстанавливаем навигацию и скролл
+      onModalStateChange?.(false);
+      document.body.style.overflow = '';
       onNavigate('admin');
     } else {
       setPasswordError('Неверный пароль');
@@ -2044,6 +2189,9 @@ const Profile: React.FC<ProfileProps> = ({ telegramId, isDarkTheme, toggleTheme,
     setShowPasswordModal(false);
     setPassword('');
     setPasswordError('');
+    // Восстанавливаем навигацию и скролл
+    onModalStateChange?.(false);
+    document.body.style.overflow = '';
   };
 
 
@@ -2072,7 +2220,7 @@ const Profile: React.FC<ProfileProps> = ({ telegramId, isDarkTheme, toggleTheme,
   }
 
   return (
-    <ProfileContainer $isDark={isDarkTheme}>
+    <ProfileContainer $isDark={isDarkTheme} $hideContent={showPasswordModal}>
       {/* Confetti Animation */}
       {showConfetti && (
         <Confetti
@@ -2106,7 +2254,7 @@ const Profile: React.FC<ProfileProps> = ({ telegramId, isDarkTheme, toggleTheme,
         <Hieroglyph>勇</Hieroglyph>
       </BackgroundHieroglyphs>
       
-      <Header>
+      <Header $hidden={showPasswordModal}>
         {isAdmin && (
           <AdminButton 
             $isDark={isDarkTheme}
@@ -2119,7 +2267,7 @@ const Profile: React.FC<ProfileProps> = ({ telegramId, isDarkTheme, toggleTheme,
         <ProfileTitle $isDark={isDarkTheme}>Профиль</ProfileTitle>
       </Header>
 
-      <ThemeToggle onClick={toggleTheme}>
+      <ThemeToggle $hidden={showPasswordModal} onClick={toggleTheme}>
         <ToggleIcon $isDark={isDarkTheme}>🌙</ToggleIcon>
         <ToggleIconDark $isDark={isDarkTheme}>☀️</ToggleIconDark>
         <ToggleSlider $isDark={isDarkTheme}></ToggleSlider>
@@ -2565,12 +2713,17 @@ const Profile: React.FC<ProfileProps> = ({ telegramId, isDarkTheme, toggleTheme,
             left: 0,
             right: 0,
             bottom: 0,
-            backgroundColor: 'rgba(0, 0, 0, 0.5)',
+            margin: 0,
+            padding: '20px',
+            paddingTop: '20px',
+            marginTop: 0,
+            backgroundColor: 'rgba(26, 26, 26, 0.7)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            zIndex: 1000,
-            padding: '20px'
+            zIndex: 10000,
+            overflow: 'hidden',
+            touchAction: 'none'
           }}
           onClick={handlePasswordModalClose}
         >

@@ -50,6 +50,47 @@ if (missingVars.length > 0) {
   process.exit(1);
 }
 
+// ============================================
+// ПРОВЕРКА НА ЛОКАЛЬНЫЕ АДРЕСА В PRODUCTION
+// ============================================
+const isProduction = process.env.NODE_ENV === 'production';
+
+if (isProduction) {
+  const localhostPatterns = [
+    /^http:\/\/localhost/i,
+    /^http:\/\/127\.0\.0\.1/i,
+    /localhost/i,
+    /127\.0\.0\.1/
+  ];
+
+  // Проверка FRONTEND_URL
+  if (process.env.FRONTEND_URL) {
+    const hasLocalhost = localhostPatterns.some(pattern => pattern.test(process.env.FRONTEND_URL));
+    if (hasLocalhost) {
+      console.error('❌ КРИТИЧЕСКАЯ ОШИБКА: В PRODUCTION режиме FRONTEND_URL содержит localhost!');
+      console.error(`   Текущее значение: ${process.env.FRONTEND_URL}`);
+      console.error('   ⚠️  Это недопустимо для production! Используйте реальный домен (например: https://poizonic.ru)');
+      process.exit(1);
+    }
+  }
+
+  // Проверка CORS_ORIGINS
+  if (process.env.CORS_ORIGINS) {
+    const origins = process.env.CORS_ORIGINS.split(',').map(o => o.trim());
+    const hasLocalhost = origins.some(origin => 
+      localhostPatterns.some(pattern => pattern.test(origin))
+    );
+    if (hasLocalhost) {
+      console.error('❌ КРИТИЧЕСКАЯ ОШИБКА: В PRODUCTION режиме CORS_ORIGINS содержит localhost!');
+      console.error(`   Текущее значение: ${process.env.CORS_ORIGINS}`);
+      console.error('   ⚠️  Удалите localhost из CORS_ORIGINS для production!');
+      process.exit(1);
+    }
+  }
+
+  console.log('✅ Проверка окружения: production настройки корректны');
+}
+
 // Gamification System
 const { GamificationService, LEVELS, LEVEL_REWARDS, XP_RULES } = require('./gamification');
 
@@ -215,7 +256,14 @@ async function sendReviewToFeedbackChannel(reviewData, userInfo) {
     if (reviewData.photo_url) {
       try {
         // Формируем полный URL для фото (будет работать когда будет домен)
-        const fullPhotoUrl = `${process.env.FRONTEND_URL || 'http://localhost:3000'}${reviewData.photo_url}`;
+        // Используем FRONTEND_URL, если не задан - используем относительный путь или генерируем по host
+        const frontendUrl = process.env.FRONTEND_URL;
+        if (!frontendUrl) {
+          console.error('⚠️ FRONTEND_URL не задан! Невозможно сформировать полный URL для фото.');
+          // Используем относительный путь как fallback
+          reviewData.photo_url = reviewData.photo_url.startsWith('/') ? reviewData.photo_url : '/' + reviewData.photo_url;
+        }
+        const fullPhotoUrl = frontendUrl ? `${frontendUrl}${reviewData.photo_url}` : reviewData.photo_url;
         await sendTelegramPhoto(channelId, fullPhotoUrl, message);
       } catch (photoError) {
         console.error('❌ Ошибка отправки фото, отправляем только текст:', photoError.message);
@@ -316,12 +364,25 @@ async function connectDB() {
     await dbConnection.execute("SET CHARACTER SET utf8mb4");
     await dbConnection.execute("SET character_set_connection=utf8mb4");
     
-    // Обработчики событий соединения
+    // Обработчики событий соединения - переподключение только при реальных ошибках
     dbConnection.on('error', (err) => {
-      console.error('❌ Ошибка соединения с БД:', err);
-      if (err.code === 'PROTOCOL_CONNECTION_LOST') {
-        console.log('🔄 Соединение потеряно, будет переподключение...');
+      // Проверяем, это реальная ошибка или просто разрыв соединения
+      const isCriticalError = err.code === 'PROTOCOL_CONNECTION_LOST' || 
+                              err.code === 'ECONNRESET' ||
+                              err.code === 'ETIMEDOUT' ||
+                              err.code === 'PROTOCOL_ENQUEUE_AFTER_QUIT';
+      
+      if (isCriticalError) {
+        console.error('❌ Ошибка соединения с БД:', err.code, err.message);
         dbConnection = null;
+        
+        // Переподключаемся только при реальной ошибке
+        ensureDBConnection().catch(reconnectErr => {
+          console.error('❌ Не удалось переподключиться после ошибки:', reconnectErr.message);
+        });
+      } else {
+        // Не критичные ошибки просто логируем
+        console.error('⚠️ Ошибка БД (не критичная):', err.code, err.message);
       }
     });
     
@@ -349,33 +410,12 @@ async function connectDB() {
   }
 }
 
-// Функция для проверки и переподключения к БД
+// Функция для проверки и переподключения к БД (только при реальных ошибках)
 async function ensureDBConnection() {
   try {
+    // Проверяем только если соединение действительно разорвано
     if (!dbConnection || dbConnection.state === 'disconnected' || dbConnection.state === 'protocol_error') {
-      console.log('🔄 Переподключение к базе данных...');
-      
-      // Отправляем уведомление админу о сбое БД
-      try {
-        const botToken = process.env.BOT_TOKEN;
-        const managerChatId = process.env.MANAGER_CHAT_ID || process.env.MANAGER_TELEGRAM_ID;
-        
-        if (botToken && managerChatId) {
-          const errorMessage = `🚨 <b>ПРОБЛЕМА С БД</b>\n\n` +
-            `⚠️ <b>Статус:</b> Соединение с базой данных разорвано\n\n` +
-            `🔄 <b>Действие:</b> Попытка переподключения...\n\n` +
-            `📅 <b>Время:</b> ${new Date().toLocaleString('ru-RU')}`;
-          
-          await axios.post(`https://api.telegram.org/bot${botToken}/sendMessage`, {
-            chat_id: managerChatId,
-            text: errorMessage,
-            parse_mode: 'HTML'
-          }).catch(() => {});
-        }
-      } catch (notifyError) {
-        console.error('❌ Не удалось отправить уведомление о сбое БД:', notifyError);
-      }
-      
+      // Тихая попытка переподключения без логирования и уведомлений
       if (dbConnection) {
         try {
           await dbConnection.end();
@@ -384,16 +424,18 @@ async function ensureDBConnection() {
         }
       }
       await connectDB();
+      return; // Успешно переподключились, уведомления не нужны
     }
     
-    // Проверяем соединение тестовым запросом
+    // Проверяем соединение тестовым запросом (тихо, без логирования)
     if (dbConnection) {
       await dbConnection.execute('SELECT 1');
     }
   } catch (error) {
-    console.error('❌ Ошибка при проверке соединения с БД:', error);
+    // Это реальная ошибка - логируем и отправляем уведомление
+    console.error('❌ КРИТИЧЕСКАЯ ОШИБКА: Не удалось подключиться к БД:', error.message);
     
-    // Отправляем уведомление админу о критической ошибке БД
+    // Отправляем уведомление админу только при реальной критической ошибке
     try {
       const botToken = process.env.BOT_TOKEN;
       const managerChatId = process.env.MANAGER_CHAT_ID || process.env.MANAGER_TELEGRAM_ID;
@@ -401,9 +443,9 @@ async function ensureDBConnection() {
       if (botToken && managerChatId) {
         const errorMessage = `🚨 <b>КРИТИЧЕСКАЯ ОШИБКА БД</b>\n\n` +
           `❌ <b>Ошибка:</b> ${error.message}\n\n` +
-          `🔄 <b>Действие:</b> Попытка принудительного переподключения...\n\n` +
+          `🔄 <b>Действие:</b> Попытка переподключения...\n\n` +
           `📅 <b>Время:</b> ${new Date().toLocaleString('ru-RU')}\n\n` +
-          `🔴 <b>ВНИМАНИЕ:</b> Сервис может работать некорректно!`;
+          `🔴 <b>ВНИМАНИЕ:</b> Не удалось восстановить соединение!`;
         
         await axios.post(`https://api.telegram.org/bot${botToken}/sendMessage`, {
           chat_id: managerChatId,
@@ -415,15 +457,19 @@ async function ensureDBConnection() {
       console.error('❌ Не удалось отправить уведомление о сбое БД:', notifyError);
     }
     
-    console.log('🔄 Принудительное переподключение...');
-    if (dbConnection) {
-      try {
-        await dbConnection.end();
-      } catch (e) {
-        // Игнорируем ошибки при закрытии
+    // Пытаемся переподключиться
+    try {
+      if (dbConnection) {
+        try {
+          await dbConnection.end();
+        } catch (e) {
+          // Игнорируем ошибки при закрытии
+        }
       }
+      await connectDB();
+    } catch (reconnectError) {
+      console.error('❌ Не удалось переподключиться к БД:', reconnectError.message);
     }
-    await connectDB();
   }
 }
 
@@ -6196,19 +6242,7 @@ process.on('SIGTERM', async () => {
   process.exit(0);
 });
 
-// Периодическая проверка соединения с БД каждые 5 минут
-setInterval(async () => {
-  try {
-    if (dbConnection && dbConnection.state === 'authenticated') {
-      await dbConnection.execute('SELECT 1');
-    } else {
-      console.log('🔄 Периодическая проверка: переподключение к БД...');
-      await ensureDBConnection();
-    }
-  } catch (error) {
-    console.error('❌ Ошибка при периодической проверке БД:', error);
-  }
-}, 5 * 60 * 1000); // 5 минут
+// Периодическая проверка удалена - переподключение происходит только при реальных ошибках соединения
 
 // Ручной endpoint для тестирования проверки комиссий
 app.post('/api/admin/check-expired-commissions', async (req, res) => {
