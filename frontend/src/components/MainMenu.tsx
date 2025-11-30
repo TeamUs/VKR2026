@@ -137,10 +137,10 @@ const WelcomeTitle = styled.h1`
   position: relative;
   z-index: 2;
   font-family: 'Music Warrior', 'Noto Sans SC', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'WenQuanYi Micro Hei', sans-serif;
-  font-size: 4.2rem;
+  font-size: 3.2rem;
   font-weight: 400;
   color: var(--text-primary);
-  margin-bottom: 8px;
+  margin-bottom: 6px;
   letter-spacing: -0.02em;
   text-shadow: 0 0 20px rgba(162, 59, 59, 0.4);
   background: linear-gradient(90deg, 
@@ -152,22 +152,22 @@ const WelcomeTitle = styled.h1`
   background-clip: text;
   text-align: center;
   margin: 0;
-  margin-top: 20px;
+  margin-top: 15px;
   text-transform: uppercase;
   
   @media (max-width: 480px) {
-    font-size: 3.2rem;
-    margin-top: 20px;
+    font-size: 2.8rem;
+    margin-top: 12px;
   }
   
   @media (max-height: 700px) {
-    font-size: 3rem;
+    font-size: 2.6rem;
     margin-top: 10px;
     margin-bottom: 4px;
   }
   
   @media (max-height: 700px) and (max-width: 480px) {
-    font-size: 2.5rem;
+    font-size: 2.2rem;
   }
 `;
 
@@ -181,9 +181,9 @@ const WelcomeSubtitle = styled.p`
   position: relative;
   z-index: 2;
   font-family: 'Inter', Arial, sans-serif;
-  font-size: 1.1rem;
+  font-size: 1rem;
   color: var(--text-primary);
-  margin-bottom: 40px;
+  margin-bottom: 30px;
   opacity: 1;
   font-weight: 500;
   line-height: 1.5;
@@ -194,15 +194,15 @@ const WelcomeSubtitle = styled.p`
   padding: 0 20px;
   
   @media (max-width: 480px) {
-    font-size: 1rem;
-    margin-bottom: 30px;
+    font-size: 0.95rem;
+    margin-bottom: 25px;
     max-width: 280px;
     line-height: 1.4;
   }
   
   @media (max-height: 700px) {
-    margin-bottom: 20px;
-    font-size: 0.95rem;
+    margin-bottom: 18px;
+    font-size: 0.9rem;
   }
 `;
 
@@ -291,21 +291,21 @@ const AboutUsButton = styled.button<{ $isDark: boolean }>`
 const MenuGrid = styled.div`
   display: grid;
   grid-template-columns: repeat(2, 1fr);
-  gap: 20px;
+  gap: 16px;
   max-width: 360px;
   margin: 0 auto;
-  padding: 20px 20px 80px 20px;
+  padding: 15px 20px 75px 20px;
   justify-items: center;
   
   @media (max-width: 480px) {
-    gap: 16px;
+    gap: 14px;
     max-width: 320px;
-    padding: 20px 15px 70px 15px;
+    padding: 12px 15px 70px 15px;
   }
   
   @media (max-height: 700px) {
     gap: 12px;
-    padding: 15px 20px 60px 20px;
+    padding: 12px 20px 65px 20px;
   }
   
   @media (max-height: 700px) and (max-width: 480px) {
@@ -317,15 +317,15 @@ const MenuGrid = styled.div`
 const MenuButton = styled.button<{ $variant?: 'primary' | 'secondary'; $isDark: boolean }>`
   position: relative;
   z-index: 2;
-  padding: 20px;
+  padding: 18px;
   border: 1px solid var(--border-color);
-  border-radius: 20px;
+  border-radius: 18px;
   background: ${props => props.$variant === 'primary' 
     ? 'var(--matte-red)' 
     : props.$isDark ? 'rgba(42, 42, 42, 0.8)' : 'rgba(230, 211, 179, 0.8)'};
   color: ${props => props.$variant === 'primary' ? 'var(--bg-primary)' : 'var(--text-primary)'};
   font-family: 'Noto Sans SC', 'Inter', Arial, sans-serif;
-  font-size: 1rem;
+  font-size: 0.95rem;
   font-weight: 600;
   cursor: pointer;
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
@@ -335,32 +335,32 @@ const MenuButton = styled.button<{ $variant?: 'primary' | 'secondary'; $isDark: 
   backdrop-filter: blur(10px);
   letter-spacing: 0.02em;
   overflow: hidden;
-  width: 150px;
-  height: 150px;
+  width: 135px;
+  height: 135px;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   
   @media (max-width: 480px) {
-    width: 130px;
-    height: 130px;
-    padding: 18px;
-    font-size: 0.95rem;
-  }
-  
-  @media (max-height: 700px) {
-    width: 140px;
-    height: 140px;
+    width: 120px;
+    height: 120px;
     padding: 16px;
     font-size: 0.9rem;
   }
   
-  @media (max-height: 700px) and (max-width: 480px) {
-    width: 120px;
-    height: 120px;
+  @media (max-height: 700px) {
+    width: 125px;
+    height: 125px;
     padding: 14px;
     font-size: 0.85rem;
+  }
+  
+  @media (max-height: 700px) and (max-width: 480px) {
+    width: 110px;
+    height: 110px;
+    padding: 12px;
+    font-size: 0.8rem;
   }
   
   &::before {
@@ -425,8 +425,8 @@ const MenuButton = styled.button<{ $variant?: 'primary' | 'secondary'; $isDark: 
 
 const ButtonIcon = styled.span<{ $isDark?: boolean }>`
   display: block;
-  font-size: 2.5rem;
-  margin-bottom: 10px;
+  font-size: 2.2rem;
+  margin-bottom: 8px;
   color: inherit;
   opacity: 0.9;
   text-shadow: 0 0 10px currentColor;
@@ -434,18 +434,18 @@ const ButtonIcon = styled.span<{ $isDark?: boolean }>`
   filter: ${props => props.$isDark ? 'brightness(2.5) contrast(1.5) saturate(1.2)' : 'none'};
   
   @media (max-width: 480px) {
-    font-size: 2.3rem;
-    margin-bottom: 8px;
+    font-size: 2rem;
+    margin-bottom: 7px;
   }
   
   @media (max-height: 700px) {
-    font-size: 2.2rem;
-    margin-bottom: 8px;
+    font-size: 1.9rem;
+    margin-bottom: 7px;
   }
   
   @media (max-height: 700px) and (max-width: 480px) {
-    font-size: 2rem;
-    margin-bottom: 6px;
+    font-size: 1.8rem;
+    margin-bottom: 5px;
   }
   
   ${MenuButton}:hover & {
@@ -457,20 +457,20 @@ const ButtonIcon = styled.span<{ $isDark?: boolean }>`
 
 const ButtonText = styled.span`
   display: block;
-  font-size: 1.05rem;
-  line-height: 1.3;
+  font-size: 0.95rem;
+  line-height: 1.25;
   font-weight: 600;
   letter-spacing: 0.02em;
   text-align: center;
   transition: all 0.3s ease;
   
   @media (max-width: 480px) {
-    font-size: 0.95rem;
+    font-size: 0.9rem;
     line-height: 1.2;
   }
   
   @media (max-height: 700px) {
-    font-size: 0.9rem;
+    font-size: 0.85rem;
     line-height: 1.2;
   }
   
