@@ -317,9 +317,8 @@ const ResultDetailValue = styled.span`
 `;
 
 const OrderButton = styled.button`
-  width: calc(100% - 40px);
-  max-width: 400px;
-  margin: 25px auto 0;
+  width: 100%;
+  margin: 20px 0;
   padding: 16px 24px;
   border: 2px solid var(--matte-red);
   border-radius: 16px;
@@ -1222,6 +1221,18 @@ const PriceCalculator: React.FC<PriceCalculatorProps> = ({ onNavigate, toggleThe
               <TotalValue>{result.totalCost} ₽</TotalValue>
             </TotalRow>
             
+            <OrderButton
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                HapticFeedback.impactOccurred('medium');
+                console.log('Navigating to order page');
+                onNavigate('order');
+              }}
+            >
+              Сделать заказ
+            </OrderButton>
+            
             <ResultDetails>
               <ResultDetail>
                 <ResultDetailLabel>Цена товара:</ResultDetailLabel>
@@ -1233,17 +1244,6 @@ const PriceCalculator: React.FC<PriceCalculatorProps> = ({ onNavigate, toggleThe
               </ResultDetail>
             </ResultDetails>
           </ResultCard>
-        )}
-
-        {result && (
-          <OrderButton
-            onClick={() => {
-              HapticFeedback.impactOccurred('medium');
-              onNavigate('order');
-            }}
-          >
-            Сделать заказ
-          </OrderButton>
         )}
 
         <ManagerButtons>
