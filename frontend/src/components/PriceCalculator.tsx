@@ -317,61 +317,48 @@ const ResultDetailValue = styled.span`
 `;
 
 const OrderButton = styled.button`
-  width: 100%;
-  padding: 18px 25px;
-  border: none;
+  width: calc(100% - 40px);
+  max-width: 400px;
+  margin: 25px auto 0;
+  padding: 16px 24px;
+  border: 2px solid var(--matte-red);
   border-radius: 16px;
   font-family: 'Noto Sans SC', 'Inter', Arial, sans-serif;
-  font-size: 1.1rem;
-  font-weight: 700;
+  font-size: 1rem;
+  font-weight: 600;
   cursor: pointer;
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-  background: var(--matte-red);
-  color: var(--bg-primary);
-  margin-top: 25px;
+  background: transparent;
+  color: var(--matte-red);
+  display: block;
   box-shadow: 
-    0 6px 25px rgba(162, 59, 59, 0.4),
-    0 4px 12px var(--shadow-soft);
+    0 0 0 0 rgba(162, 59, 59, 0),
+    0 2px 8px var(--shadow-soft);
   position: relative;
-  overflow: hidden;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
   
   &:hover {
-    transform: translateY(-3px);
+    background: rgba(162, 59, 59, 0.1);
+    border-color: var(--terracotta);
+    color: var(--terracotta);
     box-shadow: 
-      0 8px 30px rgba(162, 59, 59, 0.5),
-      0 6px 15px var(--shadow-soft);
-    background: var(--terracotta);
+      0 0 0 2px rgba(162, 59, 59, 0.15),
+      0 4px 12px var(--shadow-soft);
+    transform: translateY(-2px);
   }
   
   &:active {
-    transform: translateY(-1px);
+    transform: translateY(0);
+    background: rgba(162, 59, 59, 0.15);
     box-shadow: 
-      0 4px 15px rgba(162, 59, 59, 0.4),
-      0 2px 8px var(--shadow-soft);
+      0 0 0 2px rgba(162, 59, 59, 0.2),
+      0 2px 6px var(--shadow-soft);
   }
   
   &:focus {
     outline: none;
     box-shadow: 
-      0 0 0 3px rgba(162, 59, 59, 0.3),
-      0 6px 25px rgba(162, 59, 59, 0.4);
-  }
-  
-  &::before {
-    content: '';
-    position: absolute;
-    top: 0;
-    left: -100%;
-    width: 100%;
-    height: 100%;
-    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
-    transition: left 0.6s ease;
-  }
-  
-  &:hover::before {
-    left: 100%;
+      0 0 0 3px rgba(162, 59, 59, 0.2),
+      0 2px 8px var(--shadow-soft);
   }
 `;
 
@@ -1255,7 +1242,7 @@ const PriceCalculator: React.FC<PriceCalculatorProps> = ({ onNavigate, toggleThe
               onNavigate('order');
             }}
           >
-            🏮 Сделать заказ
+            Сделать заказ
           </OrderButton>
         )}
 
