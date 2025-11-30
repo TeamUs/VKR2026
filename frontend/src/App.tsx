@@ -987,8 +987,8 @@ const App: React.FC = () => {
   const navigateTo = (view: string) => {
     setCurrentView(view as AppView);
     
-    // Сбрасываем скролл при переходе на главное меню
-    if (view === 'main') {
+    // Сбрасываем скролл при переходе на главное меню или раздел заказа
+    if (view === 'main' || view === 'order') {
       window.scrollTo(0, 0);
       document.documentElement.scrollTop = 0;
       document.body.scrollTop = 0;
