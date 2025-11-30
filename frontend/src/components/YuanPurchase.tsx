@@ -1082,8 +1082,8 @@ const YuanPurchase: React.FC<YuanPurchaseProps> = ({ telegramId, isDarkTheme, to
       return false;
     }
     
-    if (numValue > 10000) {
-      setInputError('Максимальное количество: 10,000 юаней');
+    if (numValue > 100000) {
+      setInputError('Максимальное количество: 100,000 юаней');
       return false;
     }
     
@@ -1098,7 +1098,7 @@ const YuanPurchase: React.FC<YuanPurchaseProps> = ({ telegramId, isDarkTheme, to
     }
     
     const numValue = parseFloat(value);
-    if (!isNaN(numValue) && numValue >= 200 && numValue <= 10000) {
+    if (!isNaN(numValue) && numValue >= 200 && numValue <= 100000) {
       setInputError(null);
     }
   };
@@ -1319,7 +1319,7 @@ const YuanPurchase: React.FC<YuanPurchaseProps> = ({ telegramId, isDarkTheme, to
             onChange={(e) => handleAmountChange(e.target.value)}
             placeholder="Введите количество (от 200 ¥)"
             min="200"
-            max="10000"
+            max="100000"
             $isDark={isDarkTheme}
           />
           {inputError && <InputError>{inputError}</InputError>}
