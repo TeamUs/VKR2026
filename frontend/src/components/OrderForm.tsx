@@ -1460,6 +1460,13 @@ const OrderForm: React.FC<OrderFormProps> = ({ onNavigate, toggleTheme, isDarkTh
   const [successModalPosition, setSuccessModalPosition] = useState({ top: '50%', transform: 'translateY(-50%)' });
   const [videoError, setVideoError] = useState(false);
 
+  // Сбрасываем скролл при открытии формы заказа
+  useEffect(() => {
+    window.scrollTo(0, 0);
+    document.documentElement.scrollTop = 0;
+    document.body.scrollTop = 0;
+  }, []);
+
   // Функции для работы с товарами
   const addItem = () => {
     setFormData(prev => ({
