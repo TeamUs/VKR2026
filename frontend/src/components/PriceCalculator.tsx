@@ -316,6 +316,65 @@ const ResultDetailValue = styled.span`
   opacity: 0.7;
 `;
 
+const OrderButton = styled.button`
+  width: 100%;
+  padding: 18px 25px;
+  border: none;
+  border-radius: 16px;
+  font-family: 'Noto Sans SC', 'Inter', Arial, sans-serif;
+  font-size: 1.1rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  background: var(--matte-red);
+  color: var(--bg-primary);
+  margin-top: 25px;
+  box-shadow: 
+    0 6px 25px rgba(162, 59, 59, 0.4),
+    0 4px 12px var(--shadow-soft);
+  position: relative;
+  overflow: hidden;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  
+  &:hover {
+    transform: translateY(-3px);
+    box-shadow: 
+      0 8px 30px rgba(162, 59, 59, 0.5),
+      0 6px 15px var(--shadow-soft);
+    background: var(--terracotta);
+  }
+  
+  &:active {
+    transform: translateY(-1px);
+    box-shadow: 
+      0 4px 15px rgba(162, 59, 59, 0.4),
+      0 2px 8px var(--shadow-soft);
+  }
+  
+  &:focus {
+    outline: none;
+    box-shadow: 
+      0 0 0 3px rgba(162, 59, 59, 0.3),
+      0 6px 25px rgba(162, 59, 59, 0.4);
+  }
+  
+  &::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -100%;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
+    transition: left 0.6s ease;
+  }
+  
+  &:hover::before {
+    left: 100%;
+  }
+`;
+
 const ErrorMessage = styled.div`
   color: var(--matte-red);
   font-size: 0.9rem;
@@ -1187,6 +1246,17 @@ const PriceCalculator: React.FC<PriceCalculatorProps> = ({ onNavigate, toggleThe
               </ResultDetail>
             </ResultDetails>
           </ResultCard>
+        )}
+
+        {result && (
+          <OrderButton
+            onClick={() => {
+              HapticFeedback.impactOccurred('medium');
+              onNavigate('order');
+            }}
+          >
+            🏮 Сделать заказ
+          </OrderButton>
         )}
 
         <ManagerButtons>
