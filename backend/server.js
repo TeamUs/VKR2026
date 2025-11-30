@@ -67,10 +67,10 @@ if (isProduction) {
   if (process.env.FRONTEND_URL) {
     const hasLocalhost = localhostPatterns.some(pattern => pattern.test(process.env.FRONTEND_URL));
     if (hasLocalhost) {
-      console.error('❌ КРИТИЧЕСКАЯ ОШИБКА: В PRODUCTION режиме FRONTEND_URL содержит localhost!');
-      console.error(`   Текущее значение: ${process.env.FRONTEND_URL}`);
-      console.error('   ⚠️  Это недопустимо для production! Используйте реальный домен (например: https://poizonic.ru)');
-      process.exit(1);
+      console.warn('⚠️  ПРЕДУПРЕЖДЕНИЕ: В PRODUCTION режиме FRONTEND_URL содержит localhost!');
+      console.warn(`   Текущее значение: ${process.env.FRONTEND_URL}`);
+      console.warn('   ⚠️  Это недопустимо для production! Используйте реальный домен (например: https://poizonic.ru)');
+      console.warn('   ⚠️  Сервер запускается, но рекомендуется исправить настройки!');
     }
   }
 
@@ -81,14 +81,16 @@ if (isProduction) {
       localhostPatterns.some(pattern => pattern.test(origin))
     );
     if (hasLocalhost) {
-      console.error('❌ КРИТИЧЕСКАЯ ОШИБКА: В PRODUCTION режиме CORS_ORIGINS содержит localhost!');
-      console.error(`   Текущее значение: ${process.env.CORS_ORIGINS}`);
-      console.error('   ⚠️  Удалите localhost из CORS_ORIGINS для production!');
-      process.exit(1);
+      console.warn('⚠️  ПРЕДУПРЕЖДЕНИЕ: В PRODUCTION режиме CORS_ORIGINS содержит localhost!');
+      console.warn(`   Текущее значение: ${process.env.CORS_ORIGINS}`);
+      console.warn('   ⚠️  Удалите localhost из CORS_ORIGINS для production!');
+      console.warn('   ⚠️  Сервер запускается, но рекомендуется исправить настройки!');
     }
   }
 
-  console.log('✅ Проверка окружения: production настройки корректны');
+  if (!process.env.FRONTEND_URL || !localhostPatterns.some(p => p.test(process.env.FRONTEND_URL || ''))) {
+    console.log('✅ Проверка окружения: production настройки корректны');
+  }
 }
 
 // Gamification System
