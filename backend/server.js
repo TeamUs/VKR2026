@@ -3065,34 +3065,8 @@ app.get('/api/profile', async (req, res) => {
       }
     }
     
-    // ВРЕМЕННОЕ ИСКЛЮЧЕНИЕ ДЛЯ ТЕСТИРОВАНИЯ - убрать перед релизом
     if (!telegram_id) {
-      const demoProfileData = {
-        user: {
-          telegram_id: 'demo',
-          full_name: 'Демо Пользователь',
-          phone_number: '+7 (999) 123-45-67',
-          preferred_currency: 'RUB',
-          commission: 1000,
-          created_at: new Date().toISOString()
-        },
-        statistics: {
-          orders: { total_orders: 0, completed_orders: 0 },
-          referrals: { total_referrals: 0, total_clicks: 0 },
-          yuan_purchases: { total_purchases: 0, total_spent_rub: 0, total_bought_cny: 0, total_savings: 0 },
-          total_savings: { total: 0 }
-        },
-        gamification: {
-          level: 'Bronze',
-          levelProgress: 0,
-          nextLevel: 'Silver',
-          ordersToNext: 1000,
-          xp: 0,
-          xpToNext: 1000,
-          achievements: []
-        }
-      };
-      return res.json(demoProfileData);
+      return res.status(401).json({ error: 'Не авторизован' });
     }
     
     // Получаем данные пользователя
@@ -5307,116 +5281,7 @@ app.get('/api/admin/orders-for-profit', async (req, res) => {
 // 404 handler (должен быть в самом конце)
 // ==================== DELIVERY TRACKING API ====================
 
-// Тестовый endpoint для проверки работы API
-app.get('/api/test-delivery', async (req, res) => {
-  try {
-    console.log('🧪 Тестовый запрос delivery API');
-    await ensureDBConnection();
-    
-    const [orderCount] = await dbConnection.execute('SELECT COUNT(*) as count FROM orders');
-    const [trackingCount] = await dbConnection.execute('SELECT COUNT(*) as count FROM delivery_tracking');
-    
-    res.json({
-      success: true,
-      message: 'Delivery API работает',
-      orders_count: orderCount[0].count,
-      tracking_count: trackingCount[0].count,
-      timestamp: new Date().toISOString()
-    });
-  } catch (error) {
-    console.error('❌ Ошибка тестового endpoint:', error);
-    res.status(500).json({ error: 'Ошибка тестового endpoint' });
-  }
-});
-
-// Тестовый endpoint для заказов пользователя без авторизации (только для разработки)
-app.get('/api/test-user-orders', async (req, res) => {
-  try {
-    console.log('🧪 Тестовый запрос заказов пользователя');
-    await ensureDBConnection();
-
-    // Получаем все заказы с информацией о доставке (без проверки telegram_id)
-    const [rows] = await dbConnection.execute(`
-      SELECT 
-        o.order_id,
-        o.full_name,
-        o.phone_number,
-        o.pickup_point,
-        o.pickup_point_address,
-        o.estimated_savings,
-        o.created_at,
-        dt.internal_tracking_number,
-        dt.status as delivery_status,
-        dt.last_updated
-      FROM orders o
-      LEFT JOIN delivery_tracking dt ON o.order_id = dt.order_id
-      ORDER BY o.created_at DESC
-      LIMIT 10
-    `);
-
-    console.log(`📦 Найдено заказов: ${rows.length}`);
-
-    res.json({
-      success: true,
-      orders: rows
-    });
-
-  } catch (error) {
-    console.error('❌ Ошибка тестового получения заказов:', error);
-    res.status(500).json({ error: 'Ошибка получения заказов' });
-  }
-});
-
-// Тестовый endpoint для отслеживания без авторизации (только для разработки)
-app.get('/api/test-tracking/:trackingNumber', async (req, res) => {
-  try {
-    const { trackingNumber } = req.params;
-    console.log(`🧪 Тестовый поиск заказа по трек-номеру: ${trackingNumber}`);
-    
-    await ensureDBConnection();
-
-    // Получаем информацию о доставке БЕЗ проверки telegram_id (только для тестирования)
-    const [rows] = await dbConnection.execute(`
-      SELECT 
-        dt.internal_tracking_number,
-        dt.status,
-        dt.last_updated,
-        o.order_id,
-        o.full_name,
-        o.phone_number,
-        o.telegram_id
-      FROM delivery_tracking dt
-      JOIN orders o ON dt.order_id = o.order_id
-      WHERE dt.internal_tracking_number = ?
-    `, [trackingNumber]);
-
-    console.log(`📦 Найдено записей: ${rows.length}`);
-
-    if (rows.length === 0) {
-      console.log('❌ Заказ не найден');
-      return res.status(404).json({ error: 'Заказ не найден' });
-    }
-
-    const trackingData = rows[0];
-    console.log('✅ Найден заказ:', {
-      order_id: trackingData.order_id,
-      status: trackingData.status,
-      tracking_number: trackingData.internal_tracking_number
-    });
-    
-    res.json({
-      success: true,
-      trackingNumber: trackingData.internal_tracking_number,
-      status: trackingData.status,
-      lastUpdated: trackingData.last_updated,
-      orderId: trackingData.order_id
-    });
-
-  } catch (error) {
-    console.error('❌ Ошибка тестового отслеживания:', error);
-    res.status(500).json({ error: 'Ошибка получения статуса доставки' });
-  }
-});
+// Тестовые endpoints удалены - используются только авторизованные endpoints
 
 // Получение статуса доставки по tracking number
 app.get('/api/tracking/:trackingNumber', async (req, res) => {
@@ -5838,26 +5703,7 @@ app.get('/api/gamification/:telegramId', async (req, res) => {
     );
     
     if (users.length === 0) {
-      // ВРЕМЕННОЕ ИСКЛЮЧЕНИЕ ДЛЯ ТЕСТИРОВАНИЯ - убрать перед релизом
-      const demoGamificationData = {
-        success: true,
-        xp: 0,
-        currentLevel: 'Bronze',
-        loginStreak: 0,
-        levelProgress: { progress: 0 },
-        nextLevel: 'Silver',
-        xpToNext: 1000,
-        achievements: [],
-        levelRewards: LEVEL_REWARDS['Bronze'],
-        levels: LEVELS,
-        user: {
-          total_savings: 0,
-          total_orders: 0,
-          total_yuan_bought: 0,
-          total_referrals: 0
-        }
-      };
-      return res.json(demoGamificationData);
+      return res.status(401).json({ error: 'Не авторизован' });
     }
     
     const user = users[0];
@@ -6057,23 +5903,7 @@ app.get('/api/gamification/:telegramId/achievements-by-category', async (req, re
 
 // ========== SCHEDULER API ==========
 
-// Тестирование уведомлений
-app.post('/api/test-notification', async (req, res) => {
-  try {
-    console.log('🧪 Тестирование уведомления...');
-    await testNotification();
-    res.json({ 
-      success: true, 
-      message: 'Тестовое уведомление отправлено менеджеру' 
-    });
-  } catch (error) {
-    console.error('❌ Ошибка тестирования уведомления:', error);
-    res.status(500).json({ 
-      success: false, 
-      error: 'Ошибка отправки уведомления' 
-    });
-  }
-});
+// Тестовый endpoint уведомлений удален
 
 // Ручная проверка истечения скидок
 app.post('/api/check-expired-discounts', async (req, res) => {

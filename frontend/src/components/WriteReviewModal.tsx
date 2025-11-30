@@ -525,8 +525,11 @@ const WriteReviewModal: React.FC<WriteReviewModalProps> = ({ isOpen, onClose, on
       const telegramWebApp = (window as any).Telegram?.WebApp;
       const telegramUser = telegramWebApp?.initDataUnsafe?.user;
       const telegramId = telegramUser?.id?.toString() || '123456789';
-      const username = telegramUser?.username || 'test_user';
-      const fullName = telegramUser?.first_name || 'Test User';
+      if (!telegramUser?.username || !telegramUser?.first_name) {
+        throw new Error('Недостаточно данных пользователя для отправки отзыва');
+      }
+      const username = telegramUser.username;
+      const fullName = telegramUser.first_name;
       // Получаем avatar_url из Telegram WebApp (если доступен)
       // В Telegram WebApp аватарка может быть доступна через photo_url
       // Если нет, нужно получить через Telegram Bot API

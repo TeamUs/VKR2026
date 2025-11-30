@@ -1151,7 +1151,7 @@ const App: React.FC = () => {
         {activeTab === 'profile' && (
           <Suspense fallback={<div style={{ padding: '20px', textAlign: 'center' }}>Загрузка профиля...</div>}>
             <Profile 
-              telegramId={telegramUser?.id?.toString() || 'demo'} 
+              telegramId={telegramUser?.id?.toString()} 
               isDarkTheme={isDarkTheme}
               toggleTheme={toggleTheme}
               onNavigate={navigateTo}
@@ -1175,7 +1175,7 @@ const App: React.FC = () => {
         {activeTab === 'yuan' && (
           <Suspense fallback={<div style={{ padding: '20px', textAlign: 'center' }}>Загрузка...</div>}>
             <YuanPurchase 
-              telegramId={telegramUser?.id?.toString() || 'demo'} 
+              telegramId={telegramUser?.id?.toString()} 
               isDarkTheme={isDarkTheme}
               toggleTheme={toggleTheme}
               onModalStateChange={setHideNavigation}
