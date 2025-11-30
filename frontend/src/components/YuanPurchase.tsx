@@ -1049,10 +1049,8 @@ const YuanPurchase: React.FC<YuanPurchaseProps> = ({ telegramId, isDarkTheme, to
         return;
       }
       
-      // Демо-данные для локального тестирования
-      if (telegramId === 'demo') {
-        setPurchaseHistory([]);
-        setPurchaseHistoryLoaded(true);
+      if (!telegramId) {
+        console.error('Telegram ID не найден');
         return;
       }
       

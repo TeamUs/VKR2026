@@ -293,17 +293,15 @@ const TrackingForm: React.FC<TrackingFormProps> = ({ isDark = false, onNavigate,
   const loadUserOrders = async () => {
     setLoadingOrders(true);
     try {
-      // В тестовом режиме используем endpoint без авторизации
-      const isTestMode = !(window as any).Telegram?.WebApp?.initData;
-      const endpoint = isTestMode 
-        ? '/api/test-user-orders'
-        : '/api/user/orders';
+      const initData = (window as any).Telegram?.WebApp?.initData;
+      if (!initData) {
+        setError('Требуется авторизация через Telegram');
+        return;
+      }
       
-      const headers = isTestMode 
-        ? {}
-        : { 'x-telegram-init-data': (window as any).Telegram?.WebApp?.initData || '' };
-      
-      const response = await fetch(endpoint, { headers });
+      const response = await fetch('/api/user/orders', {
+        headers: { 'x-telegram-init-data': initData }
+      });
       
       if (response.ok) {
         const data = await response.json();
@@ -327,17 +325,15 @@ const TrackingForm: React.FC<TrackingFormProps> = ({ isDark = false, onNavigate,
     setTrackingData(null);
 
     try {
-      // В тестовом режиме используем endpoint без авторизации
-      const isTestMode = !(window as any).Telegram?.WebApp?.initData;
-      const endpoint = isTestMode 
-        ? `/api/test-tracking/${trackingNumber.trim()}`
-        : `/api/tracking/${trackingNumber.trim()}`;
+      const initData = (window as any).Telegram?.WebApp?.initData;
+      if (!initData) {
+        setError('Требуется авторизация через Telegram');
+        return;
+      }
       
-      const headers = isTestMode 
-        ? {}
-        : { 'x-telegram-init-data': (window as any).Telegram?.WebApp?.initData || '' };
-      
-      const response = await fetch(endpoint, { headers });
+      const response = await fetch(`/api/tracking/${trackingNumber.trim()}`, {
+        headers: { 'x-telegram-init-data': initData }
+      });
 
       const data = await response.json();
 

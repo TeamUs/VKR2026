@@ -1644,7 +1644,11 @@ const Profile: React.FC<ProfileProps> = ({ telegramId, isDarkTheme, toggleTheme,
 
 
   const fetchProfileData = async (userId?: string) => {
-    const currentTelegramId = userId || telegramId || 'demo';
+    const currentTelegramId = userId || telegramId;
+    if (!currentTelegramId) {
+      console.error('Telegram ID не найден');
+      return;
+    }
     try {
       setLoading(true);
       
@@ -1656,34 +1660,8 @@ const Profile: React.FC<ProfileProps> = ({ telegramId, isDarkTheme, toggleTheme,
       });
       
       if (!profileResponse.ok) {
-        if (profileResponse.status === 404) {
-          // Создаем демо-пользователя для входа
-          const demoProfileData: ProfileData = {
-            user: {
-              telegram_id: 'demo',
-              full_name: 'Демо Пользователь',
-              phone_number: '+7 (999) 123-45-67',
-              preferred_currency: 'RUB',
-              commission: 1000,
-              created_at: new Date().toISOString()
-            },
-            statistics: {
-              orders: { total_orders: 0, completed_orders: 0 },
-              referrals: { total_referrals: 0, total_clicks: 0 },
-              yuan_purchases: { total_purchases: 0, total_spent_rub: 0, total_bought_cny: 0, total_savings: 0 },
-              total_savings: { total: 0 }
-            },
-            gamification: {
-              level: 'Bronze',
-              levelProgress: 0,
-              nextLevel: 'Silver',
-              ordersToNext: 1000,
-              xp: 0,
-              xpToNext: 1000,
-              achievements: []
-            }
-          };
-          setProfileData(demoProfileData);
+        if (profileResponse.status === 404 || profileResponse.status === 401) {
+          setError('Не удалось загрузить профиль. Пожалуйста, авторизуйтесь.');
           setLoading(false);
           return;
         } else {
