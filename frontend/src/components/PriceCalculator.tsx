@@ -1225,8 +1225,7 @@ const PriceCalculator: React.FC<PriceCalculatorProps> = ({ onNavigate, toggleThe
               onClick={(e) => {
                 e.preventDefault();
                 e.stopPropagation();
-                HapticFeedback.impactOccurred('medium');
-                console.log('Navigating to order page');
+                HapticFeedback.medium();
                 onNavigate('order');
               }}
             >
