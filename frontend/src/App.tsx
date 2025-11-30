@@ -878,20 +878,12 @@ const App: React.FC = () => {
         window.heartbeatInterval = heartbeatInterval;
       }
       
-      // Настройка Main Button
-      tg.MainButton.text = '🐉 Главное меню';
-      tg.MainButton.onClick(() => {
-        setCurrentView('main');
-        tg.MainButton.hide();
-      });
-      
       // Настройка Back Button (с проверкой доступности)
       if (tg.BackButton) {
         tg.BackButton.onClick(() => {
           if (currentView !== 'main') {
             setCurrentView('main');
             tg.BackButton.hide();
-            tg.MainButton.hide();
           }
         });
       }
@@ -940,12 +932,11 @@ const App: React.FC = () => {
   }, []);
 
   useEffect(() => {
-    // Обновление кнопок Telegram при смене view
+    // Обновление Back Button Telegram при смене view
     if (window.Telegram?.WebApp) {
       const tg = window.Telegram.WebApp;
       
       if (currentView === 'main') {
-        tg.MainButton.hide();
         // Проверяем поддержку BackButton
         if (isBackButtonSupported()) {
           tg.BackButton.hide();
@@ -955,7 +946,6 @@ const App: React.FC = () => {
         if (isBackButtonSupported()) {
           tg.BackButton.show();
         }
-        tg.MainButton.show();
       }
     }
   }, [currentView]);
