@@ -3270,8 +3270,8 @@ app.post('/api/yuan-purchase', async (req, res) => {
     const amountCnyNum = parseFloat(amountCny);
     const amountRubNum = parseFloat(amountRub);
     
-    if (amountCnyNum < 200 || amountCnyNum > 10000) {
-      return res.status(400).json({ error: 'Количество юаней должно быть от 200 до 10,000' });
+    if (amountCnyNum < 200 || amountCnyNum > 100000) {
+      return res.status(400).json({ error: 'Количество юаней должно быть от 200 до 100,000' });
     }
     
     // Проверяем, существует ли пользователь
