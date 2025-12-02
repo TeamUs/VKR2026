@@ -3136,14 +3136,31 @@ app.post('/api/admin/purchases/upload', (req, res, next) => {
     console.log('📤 Начало загрузки изображений выкупов');
     
     // Проверка прав администратора
-    const initData = req.headers['x-telegram-init-data'];
+    let initData = req.headers['x-telegram-init-data'];
+    
+    // Проверяем разные варианты заголовка (разные регистры)
+    if (!initData) {
+      initData = req.headers['X-Telegram-Init-Data'];
+    }
+    if (!initData) {
+      initData = req.headers['X-TELEGRAM-INIT-DATA'];
+    }
+    
+    console.log('📋 Получен initData:', initData ? `${typeof initData}, длина: ${initData.length}, первые 50 символов: ${initData.substring(0, 50)}...` : 'НЕТ');
+    
     if (!initData) {
       console.error('❌ Нет initData в заголовках');
+      console.error('   Все заголовки:', Object.keys(req.headers).filter(h => h.toLowerCase().includes('telegram')));
       return res.status(401).json({ error: 'Не авторизован' });
     }
 
-    if (typeof initData !== 'string' || initData.trim() === '') {
-      console.error('❌ initData пустой или не является строкой');
+    if (typeof initData !== 'string') {
+      console.error('❌ initData не является строкой:', typeof initData);
+      return res.status(401).json({ error: 'Не авторизован: нет данных пользователя' });
+    }
+
+    if (initData.trim() === '') {
+      console.error('❌ initData пустой');
       return res.status(401).json({ error: 'Не авторизован: нет данных пользователя' });
     }
 
@@ -3153,11 +3170,40 @@ app.post('/api/admin/purchases/upload', (req, res, next) => {
       // Проверяем, что строка выглядит как query string
       if (!initData.includes('=')) {
         console.error('❌ initData не является валидным query string');
-        console.error('   initData (первые 100 символов):', initData.substring(0, 100));
+        console.error('   initData полностью:', initData);
         return res.status(401).json({ error: 'Ошибка авторизации: неверный формат данных' });
       }
 
-      const urlParams = new URLSearchParams(initData);
+      // Проверяем, что строка не содержит недопустимых символов для query string
+      // URLSearchParams ожидает строку вида "key=value&key2=value2"
+      // Проверяем, что нет неэкранированных символов, которые могут вызвать ошибку
+      const invalidPatterns = [
+        /[<>]/g,  // HTML теги
+        /\r\n|\r|\n/g,  // Переносы строк
+      ];
+      
+      for (const pattern of invalidPatterns) {
+        if (pattern.test(initData)) {
+          console.error('❌ initData содержит недопустимые символы:', pattern.toString());
+          console.error('   initData (первые 200 символов):', initData.substring(0, 200));
+          return res.status(401).json({ error: 'Ошибка авторизации: неверный формат данных' });
+        }
+      }
+
+      // Пробуем создать URLSearchParams
+      let urlParams;
+      try {
+        // Очищаем строку от лишних пробелов и переносов
+        const cleanedInitData = initData.trim().replace(/\r\n|\r|\n/g, '');
+        urlParams = new URLSearchParams(cleanedInitData);
+      } catch (urlError) {
+        console.error('❌ Ошибка создания URLSearchParams:', urlError.message);
+        console.error('   Ошибка типа:', urlError.name);
+        console.error('   initData (первые 200 символов):', initData.substring(0, 200));
+        console.error('   initData длина:', initData.length);
+        return res.status(401).json({ error: 'Ошибка авторизации: неверный формат данных' });
+      }
+      
       const userData = urlParams.get('user');
       
       if (userData) {
@@ -3167,18 +3213,20 @@ app.post('/api/admin/purchases/upload', (req, res, next) => {
           telegram_id = user.id?.toString();
           console.log(`👤 Telegram ID пользователя: ${telegram_id}`);
         } catch (parseError) {
-          console.error('❌ Ошибка парсинга userData:', parseError);
-          console.error('   userData:', userData?.substring(0, 200));
+          console.error('❌ Ошибка парсинга userData:', parseError.message);
+          console.error('   userData (первые 200 символов):', userData?.substring(0, 200));
           return res.status(401).json({ error: 'Ошибка парсинга данных пользователя' });
         }
       } else {
         console.error('❌ userData не найден в initData');
+        console.error('   Все параметры в initData:', Array.from(urlParams.keys()));
         console.error('   initData (первые 200 символов):', initData.substring(0, 200));
         return res.status(401).json({ error: 'Ошибка авторизации: данные пользователя не найдены' });
       }
     } catch (error) {
       console.error('❌ Ошибка парсинга initData:', error);
       console.error('   Ошибка:', error.message);
+      console.error('   Stack:', error.stack);
       console.error('   initData (первые 200 символов):', initData?.substring(0, 200));
       return res.status(401).json({ error: 'Ошибка авторизации: неверный формат данных' });
     }

@@ -6548,29 +6548,79 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
 
                         // Получаем initData из Telegram WebApp
                         let initData = '';
-                        if (window.Telegram?.WebApp) {
-                          initData = window.Telegram.WebApp.initData || '';
+                        try {
+                          if (window.Telegram?.WebApp) {
+                            initData = window.Telegram.WebApp.initData || '';
+                            console.log('📤 initData получен:', initData ? `${initData.substring(0, 50)}...` : 'пустой');
+                          }
+                        } catch (err) {
+                          console.error('❌ Ошибка получения initData:', err);
                         }
                         
-                        if (!initData || initData.trim() === '') {
-                          console.error('❌ initData пустой:', { 
+                        if (!initData || typeof initData !== 'string' || initData.trim() === '') {
+                          console.error('❌ initData пустой или невалидный:', { 
                             hasTelegram: !!window.Telegram, 
                             hasWebApp: !!window.Telegram?.WebApp,
-                            initData: window.Telegram?.WebApp?.initData 
+                            initDataType: typeof window.Telegram?.WebApp?.initData,
+                            initDataLength: window.Telegram?.WebApp?.initData?.length || 0
                           });
                           alert('❌ Ошибка: не удалось получить данные авторизации Telegram. Убедитесь, что вы открываете приложение через Telegram.');
                           return;
                         }
+                        
+                        // Проверяем формат initData перед отправкой
+                        if (!initData.includes('=') || !initData.includes('user')) {
+                          console.error('❌ initData имеет неверный формат:', initData.substring(0, 100));
+                          alert('❌ Ошибка: данные авторизации имеют неверный формат. Попробуйте перезагрузить приложение.');
+                          return;
+                        }
 
-                        const response = await fetch('/api/admin/purchases/upload', {
-                          method: 'POST',
-                          headers: {
-                            'x-telegram-init-data': initData
-                          },
-                          body: formData
-                        });
+                        // Убеждаемся, что initData - это строка и правильно закодирована
+                        const cleanInitData = String(initData).trim();
+                        
+                        let response;
+                        try {
+                          response = await fetch('/api/admin/purchases/upload', {
+                            method: 'POST',
+                            headers: {
+                              'x-telegram-init-data': cleanInitData
+                            },
+                            body: formData
+                          });
+                        } catch (fetchError: any) {
+                          console.error('❌ Ошибка fetch:', fetchError);
+                          console.error('   Тип ошибки:', fetchError.name);
+                          console.error('   Сообщение:', fetchError.message);
+                          console.error('   Stack:', fetchError.stack);
+                          HapticFeedback.error();
+                          
+                          // Показываем более детальную ошибку пользователю
+                          let errorMsg = 'Не удалось отправить запрос';
+                          if (fetchError.message) {
+                            errorMsg = fetchError.message;
+                          } else if (fetchError.name) {
+                            errorMsg = `Ошибка: ${fetchError.name}`;
+                          }
+                          
+                          alert(`❌ Ошибка сети: ${errorMsg}`);
+                          return;
+                        }
 
-                        const result = await response.json();
+                        let result;
+                        try {
+                          const text = await response.text();
+                          if (!text) {
+                            throw new Error('Пустой ответ от сервера');
+                          }
+                          result = JSON.parse(text);
+                        } catch (parseError: any) {
+                          console.error('❌ Ошибка парсинга ответа:', parseError);
+                          console.error('   Статус:', response.status);
+                          console.error('   Ответ:', await response.text());
+                          HapticFeedback.error();
+                          alert(`❌ Ошибка: неверный формат ответа от сервера`);
+                          return;
+                        }
 
                         if (response.ok) {
                           HapticFeedback.success();
