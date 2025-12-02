@@ -952,6 +952,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
   const [uploadingPurchases, setUploadingPurchases] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [uploadedFiles, setUploadedFiles] = useState<string[]>([]);
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [selectedUserForHistory, setSelectedUserForHistory] = useState('');
   const [userHistory, setUserHistory] = useState<any>(null);
   const [loadingUserHistory, setLoadingUserHistory] = useState(false);
@@ -2287,7 +2288,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
               }}>
                 УВЕДОМЛЕНИЯ & УПРАВЛЕНИЕ
               </div>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '8px' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px' }}>
                 <TabButton $active={activeTab === 'notifications'} $isDark={isDarkTheme} onClick={() => setActiveTab('notifications')}>
                   <div style={{ fontSize: '20px', marginBottom: '4px' }}>📢</div>
                   <div>Уведомл.</div>
@@ -2296,30 +2297,6 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
                   <div style={{ fontSize: '20px', marginBottom: '4px' }}>⚙️</div>
                   <div>Управление</div>
                 </TabButton>
-              </div>
-            </div>
-
-            {/* Разделитель */}
-            <div style={{ 
-              height: '1px', 
-              background: 'linear-gradient(90deg, transparent, var(--border-color), transparent)',
-              margin: '12px 0'
-            }} />
-
-            {/* Контент */}
-            <div style={{ marginBottom: '12px' }}>
-              <div style={{ 
-                fontSize: '0.85rem', 
-                fontWeight: '700', 
-                color: 'var(--matte-red)', 
-                marginBottom: '8px',
-                paddingLeft: '4px',
-                opacity: 0.9,
-                letterSpacing: '1px'
-              }}>
-                КОНТЕНТ
-              </div>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '8px' }}>
                 <TabButton $active={activeTab === 'purchases'} $isDark={isDarkTheme} onClick={() => setActiveTab('purchases')}>
                   <div style={{ fontSize: '20px', marginBottom: '4px' }}>🖼️</div>
                   <div>Выкупы</div>
@@ -6249,51 +6226,16 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
                 multiple
                 accept="image/*"
                 style={{ display: 'none' }}
-                onChange={async (e) => {
+                onChange={(e) => {
                   const files = e.target.files;
                   if (!files || files.length === 0) return;
 
-                  setUploadingPurchases(true);
-                  setUploadProgress(0);
-
-                  try {
-                    const formData = new FormData();
-                    for (let i = 0; i < files.length; i++) {
-                      formData.append('images', files[i]);
-                    }
-
-                    const initData = window.Telegram?.WebApp?.initData || '';
-                    const response = await fetch('/api/admin/purchases/upload', {
-                      method: 'POST',
-                      headers: {
-                        'x-telegram-init-data': initData
-                      },
-                      body: formData
-                    });
-
-                    const result = await response.json();
-
-                    if (response.ok) {
-                      HapticFeedback.success();
-                      setUploadedFiles(result.files?.map((f: any) => f.path) || []);
-                      alert(`✅ Успешно загружено ${result.files?.length || 0} изображений!`);
-                      // Очищаем input
-                      e.target.value = '';
-                    } else {
-                      HapticFeedback.error();
-                      const errorMsg = result.details ? `${result.error}: ${result.details}` : result.error;
-                      console.error('Ошибка загрузки:', result);
-                      alert(`❌ Ошибка: ${errorMsg || 'Неизвестная ошибка'}`);
-                    }
-                  } catch (error: any) {
-                    console.error('Ошибка загрузки:', error);
-                    HapticFeedback.error();
-                    const errorMsg = error.message || 'Неизвестная ошибка';
-                    alert(`❌ Ошибка при загрузке изображений: ${errorMsg}`);
-                  } finally {
-                    setUploadingPurchases(false);
-                    setUploadProgress(0);
-                  }
+                  // Добавляем файлы в список выбранных
+                  const newFiles = Array.from(files);
+                  setSelectedFiles(prev => [...prev, ...newFiles]);
+                  
+                  // Очищаем input для возможности повторного выбора
+                  e.target.value = '';
                 }}
               />
 
@@ -6347,6 +6289,121 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
                 )}
               </label>
 
+              {selectedFiles.length > 0 && (
+                <div style={{ 
+                  marginTop: '16px', 
+                  padding: '12px', 
+                  background: 'rgba(162, 59, 59, 0.1)',
+                  borderRadius: '8px',
+                  border: '1px solid rgba(162, 59, 59, 0.3)'
+                }}>
+                  <div style={{ fontSize: '0.9rem', fontWeight: '600', color: 'var(--text-primary)', marginBottom: '8px' }}>
+                    📋 Выбрано {selectedFiles.length} изображений:
+                  </div>
+                  <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', maxHeight: '150px', overflowY: 'auto', marginBottom: '12px' }}>
+                    {selectedFiles.map((file, idx) => (
+                      <div key={idx} style={{ marginBottom: '4px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <span>• {file.name}</span>
+                        <button
+                          onClick={() => {
+                            setSelectedFiles(prev => prev.filter((_, i) => i !== idx));
+                          }}
+                          style={{
+                            padding: '2px 8px',
+                            background: 'transparent',
+                            border: '1px solid var(--matte-red)',
+                            borderRadius: '4px',
+                            color: 'var(--matte-red)',
+                            cursor: 'pointer',
+                            fontSize: '0.75rem'
+                          }}
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                  <button
+                    onClick={async () => {
+                      if (selectedFiles.length === 0) return;
+
+                      setUploadingPurchases(true);
+                      setUploadProgress(0);
+
+                      try {
+                        const formData = new FormData();
+                        for (let i = 0; i < selectedFiles.length; i++) {
+                          formData.append('images', selectedFiles[i]);
+                        }
+
+                        const initData = window.Telegram?.WebApp?.initData || '';
+                        const response = await fetch('/api/admin/purchases/upload', {
+                          method: 'POST',
+                          headers: {
+                            'x-telegram-init-data': initData
+                          },
+                          body: formData
+                        });
+
+                        const result = await response.json();
+
+                        if (response.ok) {
+                          HapticFeedback.success();
+                          setUploadedFiles(result.files?.map((f: any) => f.path) || []);
+                          setSelectedFiles([]); // Очищаем список выбранных файлов
+                          alert(`✅ Успешно загружено ${result.files?.length || 0} изображений!`);
+                        } else {
+                          HapticFeedback.error();
+                          const errorMsg = result.details ? `${result.error}: ${result.details}` : result.error;
+                          console.error('Ошибка загрузки:', result);
+                          alert(`❌ Ошибка: ${errorMsg || 'Неизвестная ошибка'}`);
+                        }
+                      } catch (error: any) {
+                        console.error('Ошибка загрузки:', error);
+                        HapticFeedback.error();
+                        const errorMsg = error.message || 'Неизвестная ошибка';
+                        alert(`❌ Ошибка при загрузке изображений: ${errorMsg}`);
+                      } finally {
+                        setUploadingPurchases(false);
+                        setUploadProgress(0);
+                      }
+                    }}
+                    disabled={selectedFiles.length === 0 || uploadingPurchases}
+                    style={{
+                      width: '100%',
+                      padding: '12px',
+                      background: selectedFiles.length === 0 || uploadingPurchases ? 'var(--bg-secondary)' : 'var(--matte-red)',
+                      border: 'none',
+                      borderRadius: '8px',
+                      color: selectedFiles.length === 0 || uploadingPurchases ? 'var(--text-secondary)' : 'white',
+                      cursor: selectedFiles.length === 0 || uploadingPurchases ? 'not-allowed' : 'pointer',
+                      fontSize: '1rem',
+                      fontWeight: '600',
+                      transition: 'all 0.3s ease',
+                      opacity: selectedFiles.length === 0 || uploadingPurchases ? 0.6 : 1
+                    }}
+                  >
+                    {uploadingPurchases ? '⏳ Загрузка...' : `🖼️ Загрузить выкупы (${selectedFiles.length})`}
+                  </button>
+                  <button
+                    onClick={() => setSelectedFiles([])}
+                    style={{
+                      marginTop: '8px',
+                      width: '100%',
+                      padding: '8px',
+                      background: 'transparent',
+                      border: '1px solid var(--border-color)',
+                      borderRadius: '6px',
+                      color: 'var(--text-primary)',
+                      cursor: 'pointer',
+                      fontSize: '0.85rem'
+                    }}
+                  >
+                    Очистить список
+                  </button>
+                </div>
+              )}
+
               {uploadedFiles.length > 0 && (
                 <div style={{ 
                   marginTop: '16px', 
@@ -6356,7 +6413,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
                   border: '1px solid rgba(39, 174, 96, 0.3)'
                 }}>
                   <div style={{ fontSize: '0.9rem', fontWeight: '600', color: 'var(--text-primary)', marginBottom: '8px' }}>
-                    ✅ Загружено {uploadedFiles.length} изображений:
+                    ✅ Последняя загрузка: {uploadedFiles.length} изображений
                   </div>
                   <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
                     {uploadedFiles.slice(0, 5).map((file, idx) => (
