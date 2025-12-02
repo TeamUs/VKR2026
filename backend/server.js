@@ -151,12 +151,23 @@ const upload = multer({
 const purchasesStorage = multer.diskStorage({
   destination: (req, file, cb) => {
     try {
-      const uploadDir = path.join(__dirname, '../frontend/public/images/purchases');
-      console.log(`📁 Multer destination: ${uploadDir}`);
+      // В production используем dist, в dev - public
+      const isProduction = process.env.NODE_ENV === 'production';
+      const uploadDirDev = path.join(__dirname, '../frontend/public/images/purchases');
+      const uploadDirProd = path.join(__dirname, '../frontend/dist/images/purchases');
+      const uploadDir = isProduction ? uploadDirProd : uploadDirDev;
+      
+      console.log(`📁 Multer destination: ${uploadDir} (${isProduction ? 'production' : 'development'})`);
       if (!fs.existsSync(uploadDir)) {
         console.log(`📁 Создание директории: ${uploadDir}`);
         fs.mkdirSync(uploadDir, { recursive: true });
       }
+      
+      // Также создаем в public для совместимости
+      if (isProduction && !fs.existsSync(uploadDirDev)) {
+        fs.mkdirSync(uploadDirDev, { recursive: true });
+      }
+      
       cb(null, uploadDir);
     } catch (error) {
       console.error('❌ Ошибка настройки destination в multer:', error);
@@ -3051,14 +3062,35 @@ app.get('/api/admin/reviews/stats', async (req, res) => {
 // Endpoint для получения списка изображений выкупов
 app.get('/api/purchases/images', (req, res) => {
   try {
-    const purchasesDir = path.join(__dirname, '../frontend/public/images/purchases');
+    // Проверяем оба возможных пути (dev и production)
+    const purchasesDirDev = path.join(__dirname, '../frontend/public/images/purchases');
+    const purchasesDirProd = path.join(__dirname, '../frontend/dist/images/purchases');
+    
+    let purchasesDir = null;
+    if (fs.existsSync(purchasesDirDev)) {
+      purchasesDir = purchasesDirDev;
+    } else if (fs.existsSync(purchasesDirProd)) {
+      purchasesDir = purchasesDirProd;
+    }
 
-    if (!fs.existsSync(purchasesDir)) {
+    if (!purchasesDir) {
+      console.log('📂 Директория выкупов не найдена. Проверяемые пути:');
+      console.log(`   Dev: ${purchasesDirDev}`);
+      console.log(`   Prod: ${purchasesDirProd}`);
       return res.json([]);
     }
 
+    console.log(`📂 Используется директория: ${purchasesDir}`);
+
     const files = fs.readdirSync(purchasesDir)
-      .filter(file => /\.(jpg|jpeg|png|gif|webp)$/i.test(file))
+      .filter(file => {
+        // Исключаем временные файлы (temp-*)
+        if (file.startsWith('temp-')) {
+          return false;
+        }
+        // Только изображения
+        return /\.(jpg|jpeg|png|gif|webp)$/i.test(file);
+      })
       .map(file => {
         const filePath = path.join(purchasesDir, file);
         const stats = fs.statSync(filePath);
@@ -3071,9 +3103,10 @@ app.get('/api/purchases/images', (req, res) => {
       .sort((a, b) => b.mtime - a.mtime) // Сортировка по дате изменения (новые сверху)
       .map(file => file.path); // Возвращаем только пути
 
+    console.log(`📸 Найдено ${files.length} изображений выкупов`);
     res.json(files);
   } catch (error) {
-    console.error('Ошибка получения изображений выкупов:', error);
+    console.error('❌ Ошибка получения изображений выкупов:', error);
     res.status(500).json({ error: 'Ошибка получения изображений' });
   }
 });
@@ -3148,15 +3181,27 @@ app.post('/api/admin/purchases/upload', (req, res, next) => {
     
     console.log(`✅ Получено ${req.files.length} файлов`);
 
-    const purchasesDir = path.join(__dirname, '../frontend/public/images/purchases');
-    console.log(`📂 Путь к директории выкупов: ${purchasesDir}`);
+    // Проверяем оба возможных пути (dev и production)
+    const purchasesDirDev = path.join(__dirname, '../frontend/public/images/purchases');
+    const purchasesDirProd = path.join(__dirname, '../frontend/dist/images/purchases');
     
-    // Создаем директорию, если её нет
+    // В production используем dist, в dev - public
+    const isProduction = process.env.NODE_ENV === 'production';
+    const purchasesDir = isProduction ? purchasesDirProd : purchasesDirDev;
+    
+    console.log(`📂 Путь к директории выкупов: ${purchasesDir} (${isProduction ? 'production' : 'development'})`);
+    
+    // Создаем директории, если их нет
     if (!fs.existsSync(purchasesDir)) {
       console.log(`📁 Создание директории: ${purchasesDir}`);
       fs.mkdirSync(purchasesDir, { recursive: true });
     } else {
       console.log(`✅ Директория существует: ${purchasesDir}`);
+    }
+    
+    // Также создаем в public для совместимости
+    if (!fs.existsSync(purchasesDirDev)) {
+      fs.mkdirSync(purchasesDirDev, { recursive: true });
     }
 
     // Получаем список существующих файлов для генерации уникального имени
@@ -3199,6 +3244,17 @@ app.post('/api/admin/purchases/upload', (req, res, next) => {
       try {
         fs.renameSync(file.path, newFilePath);
         console.log(`✅ Файл сохранен: ${newFileName}`);
+        
+        // В production также копируем в public для совместимости
+        if (isProduction) {
+          const publicFilePath = path.join(purchasesDirDev, newFileName);
+          try {
+            fs.copyFileSync(newFilePath, publicFilePath);
+            console.log(`📋 Файл также скопирован в public: ${publicFilePath}`);
+          } catch (copyError) {
+            console.warn(`⚠️ Не удалось скопировать в public: ${copyError.message}`);
+          }
+        }
       } catch (renameError) {
         console.error(`❌ Ошибка перемещения файла ${file.originalname}:`, renameError);
         // Пытаемся скопировать, если перемещение не удалось
@@ -3206,6 +3262,13 @@ app.post('/api/admin/purchases/upload', (req, res, next) => {
           fs.copyFileSync(file.path, newFilePath);
           fs.unlinkSync(file.path); // Удаляем временный файл
           console.log(`✅ Файл скопирован: ${newFileName}`);
+          
+          // В production также копируем в public
+          if (isProduction) {
+            const publicFilePath = path.join(purchasesDirDev, newFileName);
+            fs.copyFileSync(newFilePath, publicFilePath);
+            console.log(`📋 Файл также скопирован в public: ${publicFilePath}`);
+          }
         } catch (copyError) {
           console.error(`❌ Ошибка копирования файла ${file.originalname}:`, copyError);
           throw copyError;
