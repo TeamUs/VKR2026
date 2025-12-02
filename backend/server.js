@@ -147,6 +147,34 @@ const upload = multer({
   }
 });
 
+// Настройка multer для загрузки изображений выкупов
+const purchasesStorage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    const uploadDir = path.join(__dirname, '../frontend/public/images/purchases');
+    if (!fs.existsSync(uploadDir)) {
+      fs.mkdirSync(uploadDir, { recursive: true });
+    }
+    cb(null, uploadDir);
+  },
+  filename: (req, file, cb) => {
+    // Временное имя, потом переименуем
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    cb(null, 'temp-' + uniqueSuffix + path.extname(file.originalname));
+  }
+});
+
+const uploadPurchases = multer({ 
+  storage: purchasesStorage,
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB limit
+  fileFilter: (req, file, cb) => {
+    if (file.mimetype.startsWith('image/')) {
+      cb(null, true);
+    } else {
+      cb(new Error('Только изображения разрешены'), false);
+    }
+  }
+});
+
 // Database connection
 let dbConnection;
 
@@ -3038,6 +3066,107 @@ app.get('/api/purchases/images', (req, res) => {
   } catch (error) {
     console.error('Ошибка получения изображений выкупов:', error);
     res.status(500).json({ error: 'Ошибка получения изображений' });
+  }
+});
+
+// Загрузка изображений выкупов (только для админа)
+app.post('/api/admin/purchases/upload', uploadPurchases.array('images', 20), async (req, res) => {
+  try {
+    // Проверка прав администратора
+    const initData = req.headers['x-telegram-init-data'];
+    if (!initData) {
+      return res.status(401).json({ error: 'Не авторизован' });
+    }
+
+    let telegram_id = null;
+    try {
+      const urlParams = new URLSearchParams(initData);
+      const userData = urlParams.get('user');
+      if (userData) {
+        const user = JSON.parse(decodeURIComponent(userData));
+        telegram_id = user.id?.toString();
+      }
+    } catch (error) {
+      console.error('Ошибка парсинга initData:', error);
+      return res.status(401).json({ error: 'Ошибка авторизации' });
+    }
+
+    // Проверка, что это администратор
+    const adminTelegramId = process.env.ADMIN_TELEGRAM_ID;
+    const managerTelegramId = process.env.MANAGER_TELEGRAM_ID;
+    
+    if (telegram_id !== adminTelegramId && telegram_id !== managerTelegramId) {
+      return res.status(403).json({ error: 'Доступ запрещен' });
+    }
+
+    if (!req.files || req.files.length === 0) {
+      return res.status(400).json({ error: 'Файлы не загружены' });
+    }
+
+    const purchasesDir = path.join(__dirname, '../frontend/public/images/purchases');
+    
+    // Создаем директорию, если её нет
+    if (!fs.existsSync(purchasesDir)) {
+      fs.mkdirSync(purchasesDir, { recursive: true });
+    }
+
+    // Получаем список существующих файлов для генерации уникального имени
+    const existingFiles = fs.existsSync(purchasesDir) 
+      ? fs.readdirSync(purchasesDir).filter(file => /^purchase_\d+\./i.test(file))
+      : [];
+    
+    // Находим максимальный номер
+    let maxNumber = 0;
+    existingFiles.forEach(file => {
+      const match = file.match(/^purchase_(\d+)\./i);
+      if (match) {
+        const num = parseInt(match[1], 10);
+        if (num > maxNumber) {
+          maxNumber = num;
+        }
+      }
+    });
+
+    const uploadedFiles = [];
+    let currentNumber = maxNumber;
+
+    // Сохраняем загруженные файлы
+    for (const file of req.files) {
+      // Проверяем тип файла
+      if (!file.mimetype.startsWith('image/')) {
+        continue; // Пропускаем не-изображения
+      }
+
+      currentNumber++;
+      const extension = path.extname(file.originalname).toLowerCase();
+      const newFileName = `purchase_${currentNumber}${extension}`;
+      const newFilePath = path.join(purchasesDir, newFileName);
+
+      // Перемещаем файл
+      fs.renameSync(file.path, newFilePath);
+
+      uploadedFiles.push({
+        originalName: file.originalname,
+        savedName: newFileName,
+        path: `/images/purchases/${newFileName}`
+      });
+    }
+
+    if (uploadedFiles.length === 0) {
+      return res.status(400).json({ error: 'Нет подходящих изображений для загрузки' });
+    }
+
+    console.log(`✅ Загружено ${uploadedFiles.length} изображений выкупов администратором ${telegram_id}`);
+
+    res.json({
+      success: true,
+      message: `Загружено ${uploadedFiles.length} изображений`,
+      files: uploadedFiles
+    });
+
+  } catch (error) {
+    console.error('Ошибка загрузки изображений выкупов:', error);
+    res.status(500).json({ error: 'Ошибка загрузки изображений' });
   }
 });
 

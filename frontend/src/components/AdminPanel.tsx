@@ -947,6 +947,11 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
   
   // Состояния для новых функций
   const [systemStatus, setSystemStatus] = useState<any>(null);
+  
+  // Состояния для загрузки изображений выкупов
+  const [uploadingPurchases, setUploadingPurchases] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [uploadedFiles, setUploadedFiles] = useState<string[]>([]);
   const [selectedUserForHistory, setSelectedUserForHistory] = useState('');
   const [userHistory, setUserHistory] = useState<any>(null);
   const [loadingUserHistory, setLoadingUserHistory] = useState(false);
@@ -2290,6 +2295,34 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
                 <TabButton $active={activeTab === 'user-management'} $isDark={isDarkTheme} onClick={() => setActiveTab('user-management')}>
                   <div style={{ fontSize: '20px', marginBottom: '4px' }}>⚙️</div>
                   <div>Управление</div>
+                </TabButton>
+              </div>
+            </div>
+
+            {/* Разделитель */}
+            <div style={{ 
+              height: '1px', 
+              background: 'linear-gradient(90deg, transparent, var(--border-color), transparent)',
+              margin: '12px 0'
+            }} />
+
+            {/* Контент */}
+            <div style={{ marginBottom: '12px' }}>
+              <div style={{ 
+                fontSize: '0.85rem', 
+                fontWeight: '700', 
+                color: 'var(--matte-red)', 
+                marginBottom: '8px',
+                paddingLeft: '4px',
+                opacity: 0.9,
+                letterSpacing: '1px'
+              }}>
+                КОНТЕНТ
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '8px' }}>
+                <TabButton $active={activeTab === 'purchases'} $isDark={isDarkTheme} onClick={() => setActiveTab('purchases')}>
+                  <div style={{ fontSize: '20px', marginBottom: '4px' }}>🖼️</div>
+                  <div>Выкупы</div>
                 </TabButton>
               </div>
             </div>
@@ -6196,6 +6229,197 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
           </Section>
         )}
 
+        {activeTab === 'purchases' && (
+          <Section id="purchases-section" $isDark={isDarkTheme}>
+            <SectionTitle>🖼️ Управление изображениями выкупов</SectionTitle>
+            
+            <div style={{ marginBottom: '24px' }}>
+              <h3 style={{ 
+                fontSize: '1.1rem', 
+                fontWeight: '600', 
+                color: 'var(--text-primary)',
+                marginBottom: '16px'
+              }}>
+                Загрузить новые изображения
+              </h3>
+              
+              <input
+                type="file"
+                id="purchases-upload"
+                multiple
+                accept="image/*"
+                style={{ display: 'none' }}
+                onChange={async (e) => {
+                  const files = e.target.files;
+                  if (!files || files.length === 0) return;
+
+                  setUploadingPurchases(true);
+                  setUploadProgress(0);
+
+                  try {
+                    const formData = new FormData();
+                    for (let i = 0; i < files.length; i++) {
+                      formData.append('images', files[i]);
+                    }
+
+                    const initData = window.Telegram?.WebApp?.initData || '';
+                    const response = await fetch('/api/admin/purchases/upload', {
+                      method: 'POST',
+                      headers: {
+                        'x-telegram-init-data': initData
+                      },
+                      body: formData
+                    });
+
+                    const result = await response.json();
+
+                    if (response.ok) {
+                      HapticFeedback.success();
+                      setUploadedFiles(result.files?.map((f: any) => f.path) || []);
+                      alert(`✅ Успешно загружено ${result.files?.length || 0} изображений!`);
+                      // Очищаем input
+                      e.target.value = '';
+                    } else {
+                      HapticFeedback.error();
+                      alert(`❌ Ошибка: ${result.error || 'Неизвестная ошибка'}`);
+                    }
+                  } catch (error) {
+                    console.error('Ошибка загрузки:', error);
+                    HapticFeedback.error();
+                    alert('❌ Ошибка при загрузке изображений');
+                  } finally {
+                    setUploadingPurchases(false);
+                    setUploadProgress(0);
+                  }
+                }}
+              />
+
+              <label
+                htmlFor="purchases-upload"
+                style={{
+                  display: 'block',
+                  padding: '16px 24px',
+                  border: '2px dashed var(--border-color)',
+                  borderRadius: '12px',
+                  background: 'var(--bg-secondary)',
+                  cursor: uploadingPurchases ? 'not-allowed' : 'pointer',
+                  textAlign: 'center',
+                  color: 'var(--text-primary)',
+                  fontWeight: '600',
+                  transition: 'all 0.3s ease',
+                  opacity: uploadingPurchases ? 0.6 : 1,
+                  pointerEvents: uploadingPurchases ? 'none' : 'auto'
+                }}
+                onMouseEnter={(e) => {
+                  if (!uploadingPurchases) {
+                    e.currentTarget.style.borderColor = 'var(--matte-red)';
+                    e.currentTarget.style.background = 'var(--bg-card)';
+                  }
+                }}
+                onMouseLeave={(e) => {
+                  if (!uploadingPurchases) {
+                    e.currentTarget.style.borderColor = 'var(--border-color)';
+                    e.currentTarget.style.background = 'var(--bg-secondary)';
+                  }
+                }}
+              >
+                {uploadingPurchases ? (
+                  <div>
+                    <div style={{ fontSize: '24px', marginBottom: '8px' }}>⏳</div>
+                    <div>Загрузка изображений...</div>
+                    {uploadProgress > 0 && (
+                      <div style={{ marginTop: '8px', fontSize: '0.9rem', opacity: 0.7 }}>
+                        {uploadProgress}%
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div>
+                    <div style={{ fontSize: '32px', marginBottom: '8px' }}>📁</div>
+                    <div>Нажмите для выбора изображений</div>
+                    <div style={{ fontSize: '0.85rem', marginTop: '8px', opacity: 0.7 }}>
+                      Можно загрузить до 20 изображений одновременно
+                    </div>
+                  </div>
+                )}
+              </label>
+
+              {uploadedFiles.length > 0 && (
+                <div style={{ 
+                  marginTop: '16px', 
+                  padding: '12px', 
+                  background: 'rgba(39, 174, 96, 0.1)',
+                  borderRadius: '8px',
+                  border: '1px solid rgba(39, 174, 96, 0.3)'
+                }}>
+                  <div style={{ fontSize: '0.9rem', fontWeight: '600', color: 'var(--text-primary)', marginBottom: '8px' }}>
+                    ✅ Загружено {uploadedFiles.length} изображений:
+                  </div>
+                  <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+                    {uploadedFiles.slice(0, 5).map((file, idx) => (
+                      <div key={idx} style={{ marginBottom: '4px' }}>• {file.split('/').pop()}</div>
+                    ))}
+                    {uploadedFiles.length > 5 && (
+                      <div style={{ marginTop: '4px', opacity: 0.7 }}>
+                        ...и еще {uploadedFiles.length - 5} файлов
+                      </div>
+                    )}
+                  </div>
+                  <button
+                    onClick={() => setUploadedFiles([])}
+                    style={{
+                      marginTop: '8px',
+                      padding: '6px 12px',
+                      background: 'transparent',
+                      border: '1px solid var(--border-color)',
+                      borderRadius: '6px',
+                      color: 'var(--text-primary)',
+                      cursor: 'pointer',
+                      fontSize: '0.85rem'
+                    }}
+                  >
+                    Очистить список
+                  </button>
+                </div>
+              )}
+            </div>
+
+            <div style={{ 
+              height: '1px', 
+              background: 'linear-gradient(90deg, transparent, var(--border-color), transparent)',
+              margin: '24px 0'
+            }} />
+
+            <div>
+              <h3 style={{ 
+                fontSize: '1.1rem', 
+                fontWeight: '600', 
+                color: 'var(--text-primary)',
+                marginBottom: '16px'
+              }}>
+                Информация
+              </h3>
+              <div style={{ 
+                padding: '16px',
+                background: 'var(--bg-secondary)',
+                borderRadius: '12px',
+                fontSize: '0.9rem',
+                color: 'var(--text-secondary)',
+                lineHeight: '1.6'
+              }}>
+                <div style={{ marginBottom: '8px' }}>
+                  <strong>💡 Загруженные изображения</strong> автоматически добавляются в галерею выкупов в разделе "Отзывы".
+                </div>
+                <div style={{ marginBottom: '8px' }}>
+                  <strong>📋 Формат:</strong> JPG, PNG, GIF, WebP (до 10 МБ каждый файл)
+                </div>
+                <div>
+                  <strong>🔢 Лимит:</strong> до 20 изображений за раз
+                </div>
+              </div>
+            </div>
+          </Section>
+        )}
 
     </AdminContainer>
   );
