@@ -953,6 +953,8 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
   const [uploadProgress, setUploadProgress] = useState(0);
   const [uploadedFiles, setUploadedFiles] = useState<string[]>([]);
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+  const [existingPurchases, setExistingPurchases] = useState<string[]>([]);
+  const [loadingPurchases, setLoadingPurchases] = useState(false);
   const [selectedUserForHistory, setSelectedUserForHistory] = useState('');
   const [userHistory, setUserHistory] = useState<any>(null);
   const [loadingUserHistory, setLoadingUserHistory] = useState(false);
@@ -1032,6 +1034,24 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
     // Для отзывов устанавливаем фильтр на 'pending' по умолчанию
     if (activeTab === 'reviews') {
       setReviewsFilter('pending');
+    }
+    // Загружаем список изображений выкупов при открытии вкладки
+    if (activeTab === 'purchases') {
+      const loadPurchases = async () => {
+        setLoadingPurchases(true);
+        try {
+          const response = await fetch('/api/purchases/images');
+          if (response.ok) {
+            const data = await response.json();
+            setExistingPurchases(data || []);
+          }
+        } catch (error) {
+          console.error('Ошибка загрузки списка выкупов:', error);
+        } finally {
+          setLoadingPurchases(false);
+        }
+      };
+      loadPurchases();
     }
   }, [activeTab]);
 
@@ -6210,6 +6230,186 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
           <Section id="purchases-section" $isDark={isDarkTheme}>
             <SectionTitle>🖼️ Управление изображениями выкупов</SectionTitle>
             
+            {/* Список существующих изображений */}
+            <div style={{ marginBottom: '24px' }}>
+              <div style={{ marginBottom: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <h3 style={{ 
+                  fontSize: '1.1rem', 
+                  fontWeight: '600', 
+                  color: 'var(--text-primary)',
+                  margin: 0
+                }}>
+                  Загруженные изображения ({existingPurchases.length})
+                </h3>
+                <button
+                  onClick={async () => {
+                    setLoadingPurchases(true);
+                    try {
+                      const response = await fetch('/api/purchases/images');
+                      if (response.ok) {
+                        const data = await response.json();
+                        setExistingPurchases(data || []);
+                        HapticFeedback.success();
+                      }
+                    } catch (error) {
+                      console.error('Ошибка загрузки списка:', error);
+                      HapticFeedback.error();
+                    } finally {
+                      setLoadingPurchases(false);
+                    }
+                  }}
+                  disabled={loadingPurchases}
+                  style={{
+                    padding: '6px 12px',
+                    background: 'var(--bg-card)',
+                    border: '1px solid var(--border-color)',
+                    borderRadius: '6px',
+                    color: 'var(--text-primary)',
+                    cursor: loadingPurchases ? 'not-allowed' : 'pointer',
+                    fontSize: '0.8rem',
+                    opacity: loadingPurchases ? 0.6 : 1
+                  }}
+                >
+                  {loadingPurchases ? '⏳' : '🔄'}
+                </button>
+              </div>
+              
+              {existingPurchases.length > 0 ? (
+                <div style={{ 
+                  display: 'grid', 
+                  gridTemplateColumns: 'repeat(auto-fill, minmax(100px, 1fr))', 
+                  gap: '12px'
+                }}>
+                  {existingPurchases.map((imagePath, idx) => {
+                    const filename = imagePath.split('/').pop() || '';
+                    return (
+                      <div
+                        key={idx}
+                        style={{
+                          position: 'relative',
+                          aspectRatio: '1',
+                          borderRadius: '8px',
+                          overflow: 'hidden',
+                          border: '2px solid var(--border-color)',
+                          background: 'var(--bg-secondary)'
+                        }}
+                      >
+                        <img
+                          src={imagePath}
+                          alt={filename}
+                          style={{
+                            width: '100%',
+                            height: '100%',
+                            objectFit: 'cover'
+                          }}
+                          onError={(e) => {
+                            (e.target as HTMLImageElement).style.display = 'none';
+                          }}
+                        />
+                        <button
+                          onClick={async () => {
+                            if (!confirm(`Удалить ${filename}?`)) return;
+                            
+                            try {
+                              const initData = window.Telegram?.WebApp?.initData || '';
+                              const response = await fetch(`/api/admin/purchases/images/${filename}`, {
+                                method: 'DELETE',
+                                headers: {
+                                  'x-telegram-init-data': initData
+                                }
+                              });
+
+                              const result = await response.json();
+
+                              if (response.ok) {
+                                HapticFeedback.success();
+                                setExistingPurchases(prev => prev.filter(p => p !== imagePath));
+                                // Уведомление через console, alert убран для лучшего UX
+                                console.log('✅ Изображение удалено:', filename);
+                              } else {
+                                HapticFeedback.error();
+                                alert(`❌ Ошибка: ${result.error || 'Неизвестная ошибка'}`);
+                              }
+                            } catch (error: any) {
+                              console.error('Ошибка удаления:', error);
+                              HapticFeedback.error();
+                              alert(`❌ Ошибка при удалении: ${error.message || 'Неизвестная ошибка'}`);
+                            }
+                          }}
+                          style={{
+                            position: 'absolute',
+                            top: '4px',
+                            right: '4px',
+                            width: '28px',
+                            height: '28px',
+                            borderRadius: '50%',
+                            background: 'rgba(231, 76, 60, 0.9)',
+                            border: 'none',
+                            color: 'white',
+                            fontSize: '16px',
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            fontWeight: 'bold',
+                            boxShadow: '0 2px 8px rgba(0,0,0,0.3)',
+                            transition: 'all 0.2s ease'
+                          }}
+                          onMouseEnter={(e) => {
+                            e.currentTarget.style.background = 'rgba(192, 57, 43, 1)';
+                            e.currentTarget.style.transform = 'scale(1.1)';
+                          }}
+                          onMouseLeave={(e) => {
+                            e.currentTarget.style.background = 'rgba(231, 76, 60, 0.9)';
+                            e.currentTarget.style.transform = 'scale(1)';
+                          }}
+                        >
+                          ✕
+                        </button>
+                        <div
+                          style={{
+                            position: 'absolute',
+                            bottom: 0,
+                            left: 0,
+                            right: 0,
+                            background: 'linear-gradient(to top, rgba(0,0,0,0.7), transparent)',
+                            padding: '4px 8px',
+                            fontSize: '0.7rem',
+                            color: 'white',
+                            whiteSpace: 'nowrap',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis'
+                          }}
+                          title={filename}
+                        >
+                          {filename.length > 15 ? filename.substring(0, 15) + '...' : filename}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                !loadingPurchases && (
+                  <div style={{ 
+                    padding: '24px',
+                    textAlign: 'center',
+                    background: 'var(--bg-secondary)',
+                    borderRadius: '12px',
+                    color: 'var(--text-secondary)'
+                  }}>
+                    📭 Нет загруженных изображений
+                  </div>
+                )
+              )}
+            </div>
+
+            <div style={{ 
+              height: '1px', 
+              background: 'linear-gradient(90deg, transparent, var(--border-color), transparent)',
+              margin: '24px 0'
+            }} />
+
+            {/* Загрузка новых изображений */}
             <div style={{ marginBottom: '24px' }}>
               <h3 style={{ 
                 fontSize: '1.1rem', 
@@ -6351,6 +6551,12 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
                           HapticFeedback.success();
                           setUploadedFiles(result.files?.map((f: any) => f.path) || []);
                           setSelectedFiles([]); // Очищаем список выбранных файлов
+                          // Обновляем список существующих изображений
+                          const refreshResponse = await fetch('/api/purchases/images');
+                          if (refreshResponse.ok) {
+                            const refreshData = await refreshResponse.json();
+                            setExistingPurchases(refreshData || []);
+                          }
                           alert(`✅ Успешно загружено ${result.files?.length || 0} изображений!`);
                         } else {
                           HapticFeedback.error();
@@ -6444,12 +6650,6 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
               )}
             </div>
 
-            <div style={{ 
-              height: '1px', 
-              background: 'linear-gradient(90deg, transparent, var(--border-color), transparent)',
-              margin: '24px 0'
-            }} />
-
             <div>
               <h3 style={{ 
                 fontSize: '1.1rem', 
@@ -6473,8 +6673,11 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
                 <div style={{ marginBottom: '8px' }}>
                   <strong>📋 Формат:</strong> JPG, PNG, GIF, WebP (до 10 МБ каждый файл)
                 </div>
-                <div>
+                <div style={{ marginBottom: '8px' }}>
                   <strong>🔢 Лимит:</strong> до 20 изображений за раз
+                </div>
+                <div>
+                  <strong>🗑️ Удаление:</strong> нажмите на кнопку ✕ на изображении для удаления
                 </div>
               </div>
             </div>

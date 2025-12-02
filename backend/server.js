@@ -3304,6 +3304,88 @@ app.post('/api/admin/purchases/upload', (req, res, next) => {
   }
 });
 
+// Удаление изображения выкупа (только для админа)
+app.delete('/api/admin/purchases/images/:filename', async (req, res) => {
+  try {
+    console.log('🗑️ Запрос на удаление изображения выкупа:', req.params.filename);
+    
+    // Проверка прав администратора
+    const initData = req.headers['x-telegram-init-data'];
+    if (!initData) {
+      console.error('❌ Нет initData в заголовках');
+      return res.status(401).json({ error: 'Не авторизован' });
+    }
+
+    let telegram_id = null;
+    try {
+      const urlParams = new URLSearchParams(initData);
+      const userData = urlParams.get('user');
+      if (userData) {
+        const user = JSON.parse(decodeURIComponent(userData));
+        telegram_id = user.id?.toString();
+        console.log(`👤 Telegram ID пользователя: ${telegram_id}`);
+      }
+    } catch (error) {
+      console.error('❌ Ошибка парсинга initData:', error);
+      return res.status(401).json({ error: 'Ошибка авторизации' });
+    }
+
+    // Проверка, что это администратор
+    const adminTelegramId = process.env.ADMIN_TELEGRAM_ID;
+    const managerTelegramId = process.env.MANAGER_TELEGRAM_ID;
+    
+    if (telegram_id !== adminTelegramId && telegram_id !== managerTelegramId) {
+      console.error(`❌ Доступ запрещен для пользователя ${telegram_id}`);
+      return res.status(403).json({ error: 'Доступ запрещен' });
+    }
+
+    const filename = req.params.filename;
+    
+    // Проверяем оба возможных пути
+    const purchasesDirDev = path.join(__dirname, '../frontend/public/images/purchases');
+    const purchasesDirProd = path.join(__dirname, '../frontend/dist/images/purchases');
+    
+    const isProduction = process.env.NODE_ENV === 'production';
+    const purchasesDir = isProduction ? purchasesDirProd : purchasesDirDev;
+    
+    const filePath = path.join(purchasesDir, filename);
+    const filePathDev = path.join(purchasesDirDev, filename);
+    
+    // Проверяем, что файл существует
+    if (!fs.existsSync(filePath) && !fs.existsSync(filePathDev)) {
+      console.error(`❌ Файл не найден: ${filename}`);
+      return res.status(404).json({ error: 'Файл не найден' });
+    }
+
+    // Удаляем файл из основного места
+    if (fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath);
+      console.log(`✅ Файл удален: ${filePath}`);
+    }
+    
+    // Удаляем файл из public для совместимости
+    if (fs.existsSync(filePathDev)) {
+      fs.unlinkSync(filePathDev);
+      console.log(`✅ Файл удален из public: ${filePathDev}`);
+    }
+
+    console.log(`✅ Изображение ${filename} удалено администратором ${telegram_id}`);
+
+    res.json({
+      success: true,
+      message: 'Изображение удалено'
+    });
+
+  } catch (error) {
+    console.error('❌ Ошибка удаления изображения выкупа:', error);
+    console.error('❌ Stack trace:', error.stack);
+    res.status(500).json({ 
+      error: 'Ошибка удаления изображения',
+      details: error.message || 'Неизвестная ошибка'
+    });
+  }
+});
+
 // Получение профиля пользователя
 app.get('/api/profile', async (req, res) => {
   try {
