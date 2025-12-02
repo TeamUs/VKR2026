@@ -6311,7 +6311,17 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
                             if (!confirm(`Удалить ${filename}?`)) return;
                             
                             try {
-                              const initData = window.Telegram?.WebApp?.initData || '';
+                              // Получаем initData из Telegram WebApp
+                              let initData = '';
+                              if (window.Telegram?.WebApp) {
+                                initData = window.Telegram.WebApp.initData || '';
+                              }
+                              
+                              if (!initData || initData.trim() === '') {
+                                alert('❌ Ошибка: не удалось получить данные авторизации Telegram.');
+                                return;
+                              }
+
                               const response = await fetch(`/api/admin/purchases/images/${filename}`, {
                                 method: 'DELETE',
                                 headers: {
@@ -6536,7 +6546,22 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
                           formData.append('images', selectedFiles[i]);
                         }
 
-                        const initData = window.Telegram?.WebApp?.initData || '';
+                        // Получаем initData из Telegram WebApp
+                        let initData = '';
+                        if (window.Telegram?.WebApp) {
+                          initData = window.Telegram.WebApp.initData || '';
+                        }
+                        
+                        if (!initData || initData.trim() === '') {
+                          console.error('❌ initData пустой:', { 
+                            hasTelegram: !!window.Telegram, 
+                            hasWebApp: !!window.Telegram?.WebApp,
+                            initData: window.Telegram?.WebApp?.initData 
+                          });
+                          alert('❌ Ошибка: не удалось получить данные авторизации Telegram. Убедитесь, что вы открываете приложение через Telegram.');
+                          return;
+                        }
+
                         const response = await fetch('/api/admin/purchases/upload', {
                           method: 'POST',
                           headers: {

@@ -3142,18 +3142,45 @@ app.post('/api/admin/purchases/upload', (req, res, next) => {
       return res.status(401).json({ error: 'Не авторизован' });
     }
 
+    if (typeof initData !== 'string' || initData.trim() === '') {
+      console.error('❌ initData пустой или не является строкой');
+      return res.status(401).json({ error: 'Не авторизован: нет данных пользователя' });
+    }
+
     let telegram_id = null;
     try {
+      // Безопасный парсинг initData
+      // Проверяем, что строка выглядит как query string
+      if (!initData.includes('=')) {
+        console.error('❌ initData не является валидным query string');
+        console.error('   initData (первые 100 символов):', initData.substring(0, 100));
+        return res.status(401).json({ error: 'Ошибка авторизации: неверный формат данных' });
+      }
+
       const urlParams = new URLSearchParams(initData);
       const userData = urlParams.get('user');
+      
       if (userData) {
-        const user = JSON.parse(decodeURIComponent(userData));
-        telegram_id = user.id?.toString();
-        console.log(`👤 Telegram ID пользователя: ${telegram_id}`);
+        try {
+          const decoded = decodeURIComponent(userData);
+          const user = JSON.parse(decoded);
+          telegram_id = user.id?.toString();
+          console.log(`👤 Telegram ID пользователя: ${telegram_id}`);
+        } catch (parseError) {
+          console.error('❌ Ошибка парсинга userData:', parseError);
+          console.error('   userData:', userData?.substring(0, 200));
+          return res.status(401).json({ error: 'Ошибка парсинга данных пользователя' });
+        }
+      } else {
+        console.error('❌ userData не найден в initData');
+        console.error('   initData (первые 200 символов):', initData.substring(0, 200));
+        return res.status(401).json({ error: 'Ошибка авторизации: данные пользователя не найдены' });
       }
     } catch (error) {
       console.error('❌ Ошибка парсинга initData:', error);
-      return res.status(401).json({ error: 'Ошибка авторизации' });
+      console.error('   Ошибка:', error.message);
+      console.error('   initData (первые 200 символов):', initData?.substring(0, 200));
+      return res.status(401).json({ error: 'Ошибка авторизации: неверный формат данных' });
     }
 
     // Проверка, что это администратор
@@ -3316,18 +3343,40 @@ app.delete('/api/admin/purchases/images/:filename', async (req, res) => {
       return res.status(401).json({ error: 'Не авторизован' });
     }
 
+    if (typeof initData !== 'string' || initData.trim() === '') {
+      console.error('❌ initData пустой или не является строкой');
+      return res.status(401).json({ error: 'Не авторизован: нет данных пользователя' });
+    }
+
     let telegram_id = null;
     try {
+      // Безопасный парсинг initData
+      if (!initData.includes('=')) {
+        console.error('❌ initData не является валидным query string');
+        return res.status(401).json({ error: 'Ошибка авторизации: неверный формат данных' });
+      }
+
       const urlParams = new URLSearchParams(initData);
       const userData = urlParams.get('user');
+      
       if (userData) {
-        const user = JSON.parse(decodeURIComponent(userData));
-        telegram_id = user.id?.toString();
-        console.log(`👤 Telegram ID пользователя: ${telegram_id}`);
+        try {
+          const decoded = decodeURIComponent(userData);
+          const user = JSON.parse(decoded);
+          telegram_id = user.id?.toString();
+          console.log(`👤 Telegram ID пользователя: ${telegram_id}`);
+        } catch (parseError) {
+          console.error('❌ Ошибка парсинга userData:', parseError);
+          return res.status(401).json({ error: 'Ошибка парсинга данных пользователя' });
+        }
+      } else {
+        console.error('❌ userData не найден в initData');
+        return res.status(401).json({ error: 'Ошибка авторизации: данные пользователя не найдены' });
       }
     } catch (error) {
       console.error('❌ Ошибка парсинга initData:', error);
-      return res.status(401).json({ error: 'Ошибка авторизации' });
+      console.error('   Ошибка:', error.message);
+      return res.status(401).json({ error: 'Ошибка авторизации: неверный формат данных' });
     }
 
     // Проверка, что это администратор
