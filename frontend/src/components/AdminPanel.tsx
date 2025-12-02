@@ -6535,53 +6535,77 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
                   </div>
                   <button
                     onClick={async () => {
-                      if (selectedFiles.length === 0) return;
+                      // Защита от повторных нажатий
+                      if (selectedFiles.length === 0 || uploadingPurchases) return;
 
+                      // Получаем initData ПЕРЕД созданием FormData
+                      let initData = '';
+                      try {
+                        if (window.Telegram?.WebApp) {
+                          initData = window.Telegram.WebApp.initData || '';
+                          console.log('📤 initData получен:', initData ? `${initData.substring(0, 50)}...` : 'пустой');
+                        }
+                      } catch (err) {
+                        console.error('❌ Ошибка получения initData:', err);
+                        HapticFeedback.error();
+                        alert('❌ Ошибка: не удалось получить данные авторизации Telegram.');
+                        return;
+                      }
+                      
+                      if (!initData || typeof initData !== 'string' || initData.trim() === '') {
+                        console.error('❌ initData пустой или невалидный:', { 
+                          hasTelegram: !!window.Telegram, 
+                          hasWebApp: !!window.Telegram?.WebApp,
+                          initDataType: typeof window.Telegram?.WebApp?.initData,
+                          initDataLength: window.Telegram?.WebApp?.initData?.length || 0
+                        });
+                        HapticFeedback.error();
+                        alert('❌ Ошибка: не удалось получить данные авторизации Telegram. Убедитесь, что вы открываете приложение через Telegram.');
+                        return;
+                      }
+                      
+                      // Проверяем формат initData перед отправкой
+                      if (!initData.includes('=') || !initData.includes('user')) {
+                        console.error('❌ initData имеет неверный формат:', initData.substring(0, 100));
+                        HapticFeedback.error();
+                        alert('❌ Ошибка: данные авторизации имеют неверный формат. Попробуйте перезагрузить приложение.');
+                        return;
+                      }
+
+                      // Теперь устанавливаем состояние загрузки и создаем FormData
                       setUploadingPurchases(true);
                       setUploadProgress(0);
 
                       try {
+                        // Создаем новый FormData для каждого запроса
                         const formData = new FormData();
-                        for (let i = 0; i < selectedFiles.length; i++) {
-                          formData.append('images', selectedFiles[i]);
+                        
+                        // Проверяем, что файлы еще доступны
+                        if (!selectedFiles || selectedFiles.length === 0) {
+                          setUploadingPurchases(false);
+                          alert('❌ Файлы не выбраны');
+                          return;
                         }
 
-                        // Получаем initData из Telegram WebApp
-                        let initData = '';
-                        try {
-                          if (window.Telegram?.WebApp) {
-                            initData = window.Telegram.WebApp.initData || '';
-                            console.log('📤 initData получен:', initData ? `${initData.substring(0, 50)}...` : 'пустой');
+                        for (let i = 0; i < selectedFiles.length; i++) {
+                          const file = selectedFiles[i];
+                          if (file && file instanceof File) {
+                            formData.append('images', file, file.name);
+                          } else {
+                            console.warn(`⚠️ Пропущен файл ${i}: не является File объектом`, file);
                           }
-                        } catch (err) {
-                          console.error('❌ Ошибка получения initData:', err);
-                        }
-                        
-                        if (!initData || typeof initData !== 'string' || initData.trim() === '') {
-                          console.error('❌ initData пустой или невалидный:', { 
-                            hasTelegram: !!window.Telegram, 
-                            hasWebApp: !!window.Telegram?.WebApp,
-                            initDataType: typeof window.Telegram?.WebApp?.initData,
-                            initDataLength: window.Telegram?.WebApp?.initData?.length || 0
-                          });
-                          alert('❌ Ошибка: не удалось получить данные авторизации Telegram. Убедитесь, что вы открываете приложение через Telegram.');
-                          return;
-                        }
-                        
-                        // Проверяем формат initData перед отправкой
-                        if (!initData.includes('=') || !initData.includes('user')) {
-                          console.error('❌ initData имеет неверный формат:', initData.substring(0, 100));
-                          alert('❌ Ошибка: данные авторизации имеют неверный формат. Попробуйте перезагрузить приложение.');
-                          return;
                         }
 
                         // Убеждаемся, что initData - это строка и правильно закодирована
                         const cleanInitData = String(initData).trim();
                         
+                        console.log(`📤 Отправка ${selectedFiles.length} файлов на сервер...`);
+                        
                         let response;
                         try {
                           response = await fetch('/api/admin/purchases/upload', {
                             method: 'POST',
+                            // НЕ указываем Content-Type - браузер сам установит с boundary для FormData
                             headers: {
                               'x-telegram-init-data': cleanInitData
                             },
@@ -6603,6 +6627,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
                           }
                           
                           alert(`❌ Ошибка сети: ${errorMsg}`);
+                          setUploadingPurchases(false);
                           return;
                         }
 
@@ -6616,22 +6641,30 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
                         } catch (parseError: any) {
                           console.error('❌ Ошибка парсинга ответа:', parseError);
                           console.error('   Статус:', response.status);
-                          console.error('   Ответ:', await response.text());
+                          console.error('   Статус текст:', response.statusText);
                           HapticFeedback.error();
-                          alert(`❌ Ошибка: неверный формат ответа от сервера`);
+                          setUploadingPurchases(false);
+                          alert(`❌ Ошибка: неверный формат ответа от сервера (статус: ${response.status})`);
                           return;
                         }
 
                         if (response.ok) {
                           HapticFeedback.success();
-                          setUploadedFiles(result.files?.map((f: any) => f.path) || []);
+                          const uploadedPaths = result.files?.map((f: any) => f.path) || [];
+                          setUploadedFiles(uploadedPaths);
                           setSelectedFiles([]); // Очищаем список выбранных файлов
+                          
                           // Обновляем список существующих изображений
-                          const refreshResponse = await fetch('/api/purchases/images');
-                          if (refreshResponse.ok) {
-                            const refreshData = await refreshResponse.json();
-                            setExistingPurchases(refreshData || []);
+                          try {
+                            const refreshResponse = await fetch('/api/purchases/images');
+                            if (refreshResponse.ok) {
+                              const refreshData = await refreshResponse.json();
+                              setExistingPurchases(refreshData || []);
+                            }
+                          } catch (refreshError) {
+                            console.warn('⚠️ Не удалось обновить список изображений:', refreshError);
                           }
+                          
                           alert(`✅ Успешно загружено ${result.files?.length || 0} изображений!`);
                         } else {
                           HapticFeedback.error();
@@ -6641,6 +6674,8 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
                         }
                       } catch (error: any) {
                         console.error('Ошибка загрузки:', error);
+                        console.error('   Тип ошибки:', error.name);
+                        console.error('   Сообщение:', error.message);
                         HapticFeedback.error();
                         const errorMsg = error.message || 'Неизвестная ошибка';
                         alert(`❌ Ошибка при загрузке изображений: ${errorMsg}`);
