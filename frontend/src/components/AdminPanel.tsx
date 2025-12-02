@@ -6281,12 +6281,15 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
                       e.target.value = '';
                     } else {
                       HapticFeedback.error();
-                      alert(`❌ Ошибка: ${result.error || 'Неизвестная ошибка'}`);
+                      const errorMsg = result.details ? `${result.error}: ${result.details}` : result.error;
+                      console.error('Ошибка загрузки:', result);
+                      alert(`❌ Ошибка: ${errorMsg || 'Неизвестная ошибка'}`);
                     }
-                  } catch (error) {
+                  } catch (error: any) {
                     console.error('Ошибка загрузки:', error);
                     HapticFeedback.error();
-                    alert('❌ Ошибка при загрузке изображений');
+                    const errorMsg = error.message || 'Неизвестная ошибка';
+                    alert(`❌ Ошибка при загрузке изображений: ${errorMsg}`);
                   } finally {
                     setUploadingPurchases(false);
                     setUploadProgress(0);

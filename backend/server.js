@@ -150,16 +150,25 @@ const upload = multer({
 // Настройка multer для загрузки изображений выкупов
 const purchasesStorage = multer.diskStorage({
   destination: (req, file, cb) => {
-    const uploadDir = path.join(__dirname, '../frontend/public/images/purchases');
-    if (!fs.existsSync(uploadDir)) {
-      fs.mkdirSync(uploadDir, { recursive: true });
+    try {
+      const uploadDir = path.join(__dirname, '../frontend/public/images/purchases');
+      console.log(`📁 Multer destination: ${uploadDir}`);
+      if (!fs.existsSync(uploadDir)) {
+        console.log(`📁 Создание директории: ${uploadDir}`);
+        fs.mkdirSync(uploadDir, { recursive: true });
+      }
+      cb(null, uploadDir);
+    } catch (error) {
+      console.error('❌ Ошибка настройки destination в multer:', error);
+      cb(error, '');
     }
-    cb(null, uploadDir);
   },
   filename: (req, file, cb) => {
     // Временное имя, потом переименуем
     const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-    cb(null, 'temp-' + uniqueSuffix + path.extname(file.originalname));
+    const tempName = 'temp-' + uniqueSuffix + path.extname(file.originalname);
+    console.log(`📝 Временное имя файла: ${tempName}`);
+    cb(null, tempName);
   }
 });
 
@@ -3070,11 +3079,33 @@ app.get('/api/purchases/images', (req, res) => {
 });
 
 // Загрузка изображений выкупов (только для админа)
-app.post('/api/admin/purchases/upload', uploadPurchases.array('images', 20), async (req, res) => {
+app.post('/api/admin/purchases/upload', (req, res, next) => {
+  uploadPurchases.array('images', 20)(req, res, (err) => {
+    if (err) {
+      console.error('❌ Ошибка multer при загрузке файлов:', err);
+      console.error('❌ Тип ошибки:', err.constructor.name);
+      console.error('❌ Код ошибки:', err.code);
+      if (err instanceof multer.MulterError) {
+        if (err.code === 'LIMIT_FILE_SIZE') {
+          return res.status(400).json({ error: 'Размер файла превышает 10 МБ' });
+        }
+        if (err.code === 'LIMIT_FILE_COUNT') {
+          return res.status(400).json({ error: 'Превышено максимальное количество файлов (20)' });
+        }
+        return res.status(400).json({ error: `Ошибка загрузки: ${err.message}` });
+      }
+      return res.status(400).json({ error: err.message || 'Ошибка загрузки файлов' });
+    }
+    next();
+  });
+}, async (req, res) => {
   try {
+    console.log('📤 Начало загрузки изображений выкупов');
+    
     // Проверка прав администратора
     const initData = req.headers['x-telegram-init-data'];
     if (!initData) {
+      console.error('❌ Нет initData в заголовках');
       return res.status(401).json({ error: 'Не авторизован' });
     }
 
@@ -3085,9 +3116,10 @@ app.post('/api/admin/purchases/upload', uploadPurchases.array('images', 20), asy
       if (userData) {
         const user = JSON.parse(decodeURIComponent(userData));
         telegram_id = user.id?.toString();
+        console.log(`👤 Telegram ID пользователя: ${telegram_id}`);
       }
     } catch (error) {
-      console.error('Ошибка парсинга initData:', error);
+      console.error('❌ Ошибка парсинга initData:', error);
       return res.status(401).json({ error: 'Ошибка авторизации' });
     }
 
@@ -3095,19 +3127,36 @@ app.post('/api/admin/purchases/upload', uploadPurchases.array('images', 20), asy
     const adminTelegramId = process.env.ADMIN_TELEGRAM_ID;
     const managerTelegramId = process.env.MANAGER_TELEGRAM_ID;
     
+    console.log(`🔐 Проверка прав: admin=${adminTelegramId}, manager=${managerTelegramId}, user=${telegram_id}`);
+    
+    if (!telegram_id) {
+      console.error('❌ Telegram ID не определен');
+      return res.status(401).json({ error: 'Telegram ID не определен' });
+    }
+    
     if (telegram_id !== adminTelegramId && telegram_id !== managerTelegramId) {
+      console.error(`❌ Доступ запрещен для пользователя ${telegram_id}`);
       return res.status(403).json({ error: 'Доступ запрещен' });
     }
 
+    console.log(`📁 Проверка файлов: req.files = ${req.files ? req.files.length : 'null'}`);
+    
     if (!req.files || req.files.length === 0) {
+      console.error('❌ Файлы не загружены');
       return res.status(400).json({ error: 'Файлы не загружены' });
     }
+    
+    console.log(`✅ Получено ${req.files.length} файлов`);
 
     const purchasesDir = path.join(__dirname, '../frontend/public/images/purchases');
+    console.log(`📂 Путь к директории выкупов: ${purchasesDir}`);
     
     // Создаем директорию, если её нет
     if (!fs.existsSync(purchasesDir)) {
+      console.log(`📁 Создание директории: ${purchasesDir}`);
       fs.mkdirSync(purchasesDir, { recursive: true });
+    } else {
+      console.log(`✅ Директория существует: ${purchasesDir}`);
     }
 
     // Получаем список существующих файлов для генерации уникального имени
@@ -3143,7 +3192,25 @@ app.post('/api/admin/purchases/upload', uploadPurchases.array('images', 20), asy
       const newFilePath = path.join(purchasesDir, newFileName);
 
       // Перемещаем файл
-      fs.renameSync(file.path, newFilePath);
+      console.log(`💾 Сохранение файла: ${file.originalname} -> ${newFileName}`);
+      console.log(`   Временный путь: ${file.path}`);
+      console.log(`   Финальный путь: ${newFilePath}`);
+      
+      try {
+        fs.renameSync(file.path, newFilePath);
+        console.log(`✅ Файл сохранен: ${newFileName}`);
+      } catch (renameError) {
+        console.error(`❌ Ошибка перемещения файла ${file.originalname}:`, renameError);
+        // Пытаемся скопировать, если перемещение не удалось
+        try {
+          fs.copyFileSync(file.path, newFilePath);
+          fs.unlinkSync(file.path); // Удаляем временный файл
+          console.log(`✅ Файл скопирован: ${newFileName}`);
+        } catch (copyError) {
+          console.error(`❌ Ошибка копирования файла ${file.originalname}:`, copyError);
+          throw copyError;
+        }
+      }
 
       uploadedFiles.push({
         originalName: file.originalname,
@@ -3165,8 +3232,12 @@ app.post('/api/admin/purchases/upload', uploadPurchases.array('images', 20), asy
     });
 
   } catch (error) {
-    console.error('Ошибка загрузки изображений выкупов:', error);
-    res.status(500).json({ error: 'Ошибка загрузки изображений' });
+    console.error('❌ Ошибка загрузки изображений выкупов:', error);
+    console.error('❌ Stack trace:', error.stack);
+    res.status(500).json({ 
+      error: 'Ошибка загрузки изображений',
+      details: error.message || 'Неизвестная ошибка'
+    });
   }
 });
 
