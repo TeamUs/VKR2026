@@ -115,7 +115,9 @@ app.use(cors({
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Telegram-User-Id']
 }));
-app.use(express.json());
+// Увеличиваем лимиты для загрузки больших файлов
+app.use(express.json({ limit: '100mb' }));
+app.use(express.urlencoded({ limit: '100mb', extended: true }));
 
 // Статическая раздача загруженных файлов (отзывы)
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
@@ -185,7 +187,14 @@ const purchasesStorage = multer.diskStorage({
 
 const uploadPurchases = multer({ 
   storage: purchasesStorage,
-  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB limit
+  limits: { 
+    fileSize: 20 * 1024 * 1024, // 20MB на файл
+    fieldSize: 20 * 1024 * 1024, // 20MB для полей
+    fieldNameSize: 100, // 100 байт для имени поля
+    fieldValueSize: 20 * 1024 * 1024, // 20MB для значения поля
+    headerPairs: 2000, // Максимум пар заголовков
+    files: 20 // Максимум 20 файлов
+  },
   fileFilter: (req, file, cb) => {
     if (file.mimetype.startsWith('image/')) {
       cb(null, true);
@@ -3120,7 +3129,7 @@ app.post('/api/admin/purchases/upload', (req, res, next) => {
       console.error('❌ Код ошибки:', err.code);
       if (err instanceof multer.MulterError) {
         if (err.code === 'LIMIT_FILE_SIZE') {
-          return res.status(400).json({ error: 'Размер файла превышает 10 МБ' });
+          return res.status(400).json({ error: 'Размер файла превышает 20 МБ' });
         }
         if (err.code === 'LIMIT_FILE_COUNT') {
           return res.status(400).json({ error: 'Превышено максимальное количество файлов (20)' });
