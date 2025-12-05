@@ -116,8 +116,10 @@ app.use(cors({
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Telegram-User-Id']
 }));
 // Увеличиваем лимиты для загрузки больших файлов
-app.use(express.json({ limit: '100mb' }));
-app.use(express.urlencoded({ limit: '100mb', extended: true }));
+// Для multipart/form-data (multer) эти лимиты не применяются напрямую,
+// но они нужны для других типов запросов
+app.use(express.json({ limit: '200mb' }));
+app.use(express.urlencoded({ limit: '200mb', extended: true }));
 
 // Статическая раздача загруженных файлов (отзывы)
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
@@ -188,12 +190,13 @@ const purchasesStorage = multer.diskStorage({
 const uploadPurchases = multer({ 
   storage: purchasesStorage,
   limits: { 
-    fileSize: 20 * 1024 * 1024, // 20MB на файл
-    fieldSize: 20 * 1024 * 1024, // 20MB для полей
-    fieldNameSize: 100, // 100 байт для имени поля
-    fieldValueSize: 20 * 1024 * 1024, // 20MB для значения поля
-    headerPairs: 2000, // Максимум пар заголовков
-    files: 20 // Максимум 20 файлов
+    fileSize: 50 * 1024 * 1024, // 50MB на файл (для больших изображений)
+    fieldSize: 50 * 1024 * 1024, // 50MB для полей формы
+    fieldNameSize: 200, // 200 байт для имени поля
+    fieldValueSize: 50 * 1024 * 1024, // 50MB для значения поля
+    headerPairs: 4000, // Максимум пар заголовков (увеличен для больших запросов)
+    files: 20, // Максимум 20 файлов
+    parts: 50 // Максимум частей (файлы + поля)
   },
   fileFilter: (req, file, cb) => {
     if (file.mimetype.startsWith('image/')) {
@@ -3128,13 +3131,28 @@ app.post('/api/admin/purchases/upload', (req, res, next) => {
       console.error('❌ Тип ошибки:', err.constructor.name);
       console.error('❌ Код ошибки:', err.code);
       if (err instanceof multer.MulterError) {
+        console.error('❌ Multer Error Code:', err.code);
+        console.error('❌ Multer Error Field:', err.field);
+        
         if (err.code === 'LIMIT_FILE_SIZE') {
-          return res.status(400).json({ error: 'Размер файла превышает 20 МБ' });
+          return res.status(400).json({ error: 'Размер одного из файлов превышает 50 МБ' });
         }
         if (err.code === 'LIMIT_FILE_COUNT') {
           return res.status(400).json({ error: 'Превышено максимальное количество файлов (20)' });
         }
-        return res.status(400).json({ error: `Ошибка загрузки: ${err.message}` });
+        if (err.code === 'LIMIT_FIELD_VALUE') {
+          return res.status(400).json({ error: 'Размер поля формы слишком большой' });
+        }
+        if (err.code === 'LIMIT_FIELD_KEY') {
+          return res.status(400).json({ error: 'Имя поля формы слишком длинное' });
+        }
+        if (err.code === 'LIMIT_PART_COUNT') {
+          return res.status(400).json({ error: 'Слишком много частей в запросе (файлы + поля)' });
+        }
+        if (err.code === 'LIMIT_UNEXPECTED_FILE') {
+          return res.status(400).json({ error: 'Неожиданное поле в запросе' });
+        }
+        return res.status(400).json({ error: `Ошибка загрузки: ${err.message} (код: ${err.code})` });
       }
       return res.status(400).json({ error: err.message || 'Ошибка загрузки файлов' });
     }
@@ -3143,6 +3161,15 @@ app.post('/api/admin/purchases/upload', (req, res, next) => {
 }, async (req, res) => {
   try {
     console.log('📤 Начало загрузки изображений выкупов');
+    console.log('📊 Размер запроса (Content-Length):', req.headers['content-length'], 'байт');
+    console.log('📊 Количество файлов:', req.files ? req.files.length : 0);
+    if (req.files && req.files.length > 0) {
+      const totalSize = req.files.reduce((sum, file) => sum + file.size, 0);
+      console.log('📊 Общий размер файлов:', totalSize, 'байт (', (totalSize / 1024 / 1024).toFixed(2), 'MB)');
+      req.files.forEach((file, index) => {
+        console.log(`📊 Файл ${index + 1}: ${file.originalname}, размер: ${file.size} байт (${(file.size / 1024 / 1024).toFixed(2)} MB)`);
+      });
+    }
     
     // Проверка прав администратора
     let initData = req.headers['x-telegram-init-data'];
