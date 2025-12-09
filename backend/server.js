@@ -3666,9 +3666,9 @@ app.get('/api/profile', async (req, res) => {
         yuan_purchases: yuanStats[0],
         order_savings: orderSavingsStats[0],
         total_savings: {
-          yuan_savings: yuanStats[0].total_savings || 0,
-          order_savings: orderSavingsStats[0].total_order_savings || 0,
-          total: (yuanStats[0].total_savings || 0) + (orderSavingsStats[0].total_order_savings || 0)
+          yuan_savings: parseFloat(yuanStats[0].total_savings) || 0,
+          order_savings: parseFloat(orderSavingsStats[0].total_order_savings) || 0,
+          total: (parseFloat(yuanStats[0].total_savings) || 0) + (parseFloat(orderSavingsStats[0].total_order_savings) || 0)
         }
       },
       gamification: gamificationData
