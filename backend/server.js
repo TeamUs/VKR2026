@@ -2230,13 +2230,14 @@ app.post('/api/orders', async (req, res) => {
 
       // Добавляем товары в заказ
       for (const item of items) {
-        const itemSavings = 5000.00; // 5000₽ за каждый товар
+        const quantity = item.quantity || 1;
+        const itemSavings = 5000.00 * quantity; // 5000₽ за каждый товар (с учетом количества)
         totalSavings += itemSavings;
 
         await dbConnection.execute(
           `INSERT INTO order_items (order_id, product_link, product_size, quantity, estimated_savings) 
            VALUES (?, ?, ?, ?, ?)`,
-          [orderId, item.productLink, item.productSize || '', item.quantity || 1, itemSavings]
+          [orderId, item.productLink, item.productSize || '', quantity, itemSavings]
         );
       }
 
@@ -3589,13 +3590,13 @@ app.get('/api/profile', async (req, res) => {
       WHERE telegram_id = ? AND status = 'completed'
     `, [telegram_id]);
 
-    // Получаем экономию от заказов
+    // Получаем экономию от заказов (только завершенные заказы, как и для покупок юаней)
     const [orderSavingsStats] = await dbConnection.execute(`
       SELECT 
         COUNT(*) as total_orders,
         COALESCE(SUM(estimated_savings), 0) as total_order_savings
       FROM orders 
-      WHERE telegram_id = ?
+      WHERE telegram_id = ? AND status = 'completed'
     `, [telegram_id]);
 
     // Получаем данные геймификации из новой системы
