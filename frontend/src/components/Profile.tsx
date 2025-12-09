@@ -1636,13 +1636,6 @@ const Profile: React.FC<ProfileProps> = ({ telegramId, isDarkTheme, toggleTheme,
     }
   };
 
-  // Функция для расчета общей экономии
-  const calculateTotalSavings = (ordersCount: number, yuanSavings: number) => {
-    const ORDER_SAVINGS_CONSTANT = 5000; // 5000 рублей с каждого заказа
-    return (ordersCount * ORDER_SAVINGS_CONSTANT) + yuanSavings;
-  };
-
-
   const fetchProfileData = async (userId?: string) => {
     const currentTelegramId = userId || telegramId;
     if (!currentTelegramId) {
@@ -1673,15 +1666,9 @@ const Profile: React.FC<ProfileProps> = ({ telegramId, isDarkTheme, toggleTheme,
       
       // Основные данные профиля уже содержат всю необходимую информацию
       // из таблиц users, orders, referrals, yuan_purchases
-      
-      // Рассчитываем общую экономию динамически
-      const totalSavings = calculateTotalSavings(
-        profileData.statistics.orders.total_orders,
-        profileData.statistics.yuan_purchases.total_savings
-      );
-      
-      // Добавляем рассчитанную экономию в данные профиля
-      profileData.statistics.total_savings = { total: totalSavings };
+      // total_savings уже правильно рассчитано на бэкенде:
+      // total = сумма estimated_savings из orders + сумма savings из yuan_purchases
+      // Не нужно перезаписывать это значение!
       
       // Загружаем реальные данные геймификации
       try {
