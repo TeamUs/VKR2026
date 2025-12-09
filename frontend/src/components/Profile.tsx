@@ -1795,11 +1795,22 @@ const Profile: React.FC<ProfileProps> = ({ telegramId, isDarkTheme, toggleTheme,
     });
   };
 
-  const formatCurrency = (amount: number) => {
+  const formatCurrency = (amount: number | string | null | undefined) => {
+    // Преобразуем в число, если это строка или null/undefined
+    const numAmount = typeof amount === 'number' ? amount : parseFloat(String(amount || 0));
+    
+    // Проверяем, что это валидное число
+    if (isNaN(numAmount)) {
+      return new Intl.NumberFormat('ru-RU', {
+        style: 'currency',
+        currency: 'RUB'
+      }).format(0);
+    }
+    
     return new Intl.NumberFormat('ru-RU', {
       style: 'currency',
       currency: 'RUB'
-    }).format(amount);
+    }).format(numAmount);
   };
 
   // =====================================================
@@ -2298,7 +2309,7 @@ const Profile: React.FC<ProfileProps> = ({ telegramId, isDarkTheme, toggleTheme,
             <StatLabel>Покупок юаня</StatLabel>
           </StatItem>
           <StatItem $isDark={isDarkTheme}>
-            <StatValue>{formatCurrency(profileData.statistics.total_savings?.total || 0)}</StatValue>
+            <StatValue>{formatCurrency(Number(profileData.statistics.total_savings?.total) || 0)}</StatValue>
             <StatLabel>Сэкономлено</StatLabel>
           </StatItem>
         </UserStats>
