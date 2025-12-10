@@ -303,10 +303,12 @@ const TrackingForm: React.FC<TrackingFormProps> = ({ isDark = false, onNavigate,
 
   const loadUserOrders = async () => {
     setLoadingOrders(true);
+    setError(''); // Очищаем предыдущие ошибки
     try {
       const initData = (window as any).Telegram?.WebApp?.initData;
       if (!initData) {
         setError('Требуется авторизация через Telegram');
+        setUserOrders([]);
         return;
       }
       
@@ -316,10 +318,36 @@ const TrackingForm: React.FC<TrackingFormProps> = ({ isDark = false, onNavigate,
       
       if (response.ok) {
         const data = await response.json();
-        setUserOrders(data.orders || []);
+        const orders = data.orders || [];
+        console.log('📦 Загружены заказы пользователя:', orders.length, 'заказов');
+        console.log('📋 Заказы:', orders);
+        // Бэкенд уже возвращает только незавершенные заказы (status NOT IN ('completed', 'cancelled'))
+        // Но добавим дополнительную проверку на всякий случай
+        const activeOrders = orders.filter((order: any) => {
+          const status = order.order_status;
+          const isValid = status && status !== 'completed' && status !== 'cancelled';
+          if (!isValid) {
+            console.warn('⚠️ Пропущен заказ с неверным статусом:', order.order_id, 'status:', status);
+          }
+          return isValid;
+        });
+        console.log('✅ Активные заказы для отображения:', activeOrders.length, 'заказов');
+        if (activeOrders.length > 0) {
+          console.log('📋 Детали заказов:', activeOrders.map((o: any) => ({
+            id: o.order_id,
+            status: o.order_status,
+            delivery_status: o.delivery_status,
+            tracking: o.internal_tracking_number
+          })));
+        }
+        setUserOrders(activeOrders);
+      } else {
+        console.error('❌ Ошибка загрузки заказов, статус:', response.status);
+        setUserOrders([]);
       }
     } catch (error) {
-      console.error('Ошибка загрузки заказов:', error);
+      console.error('❌ Ошибка загрузки заказов:', error);
+      setUserOrders([]);
     } finally {
       setLoadingOrders(false);
     }
@@ -449,22 +477,24 @@ const TrackingForm: React.FC<TrackingFormProps> = ({ isDark = false, onNavigate,
       </Container>
 
       {/* Список заказов пользователя (второй) */}
-      {userOrders.length > 0 && (
-        <Container $isDark={isDark}>
-          <div style={{
-            fontSize: '1.3rem',
-            fontWeight: 'bold',
-            color: 'var(--text-primary)',
-            marginBottom: '16px',
-            textAlign: 'center'
-          }}>
-            📦 Ваши заказы
-          </div>
-          
+      <Container $isDark={isDark}>
+        <div style={{
+          fontSize: '1.3rem',
+          fontWeight: 'bold',
+          color: 'var(--text-primary)',
+          marginBottom: '16px',
+          textAlign: 'center'
+        }}>
+          📦 Ваши заказы
+        </div>
+        
+        {loadingOrders ? (
+          <LoadingMessage $isDark={isDark}>
+            ⏳ Загрузка ваших заказов...
+          </LoadingMessage>
+        ) : userOrders.length > 0 ? (
           <div style={{ display: 'grid', gap: '12px' }}>
-            {userOrders
-              .filter((order: any) => order.order_status !== 'completed' && order.order_status !== 'cancelled')
-              .map((order: any) => (
+            {userOrders.map((order: any) => (
               <div
                 key={order.order_id}
                 style={{
@@ -570,8 +600,20 @@ const TrackingForm: React.FC<TrackingFormProps> = ({ isDark = false, onNavigate,
               </div>
             ))}
           </div>
-        </Container>
-      )}
+        ) : (
+          <div style={{
+            padding: '20px',
+            textAlign: 'center',
+            color: 'var(--text-secondary)',
+            fontSize: '0.9rem'
+          }}>
+            📭 У вас пока нет активных заказов
+            <div style={{ marginTop: '8px', fontSize: '0.8rem', opacity: 0.7 }}>
+              После подтверждения оплаты ваши заказы появятся здесь автоматически
+            </div>
+          </div>
+        )}
+      </Container>
 
       {/* Объединенный прогресс-бар (горизонтальный + детальный) */}
       {trackingData && !loading && (
