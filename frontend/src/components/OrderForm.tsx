@@ -1532,8 +1532,6 @@ const OrderForm: React.FC<OrderFormProps> = ({ onNavigate, toggleTheme, isDarkTh
         formData.items.forEach((item, index) => {
           if (!item.productLink.trim()) {
             newErrors[`item_${index}_link`] = 'Введите ссылку на товар';
-          } else if (!item.productLink.includes('poizon.com') && !item.productLink.includes('dewu.com')) {
-            newErrors[`item_${index}_link`] = 'Ссылка должна быть с Poizon или Dewu';
           }
           if (!item.productSize.trim()) {
             newErrors[`item_${index}_size`] = 'Введите размер товара';
