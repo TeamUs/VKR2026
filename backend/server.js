@@ -3561,13 +3561,13 @@ app.get('/api/profile', async (req, res) => {
     
     const user = userRows[0];
     
-    // Получаем статистику заказов (только одобренные/завершенные)
+    // Получаем статистику заказов (оплаченные и завершенные)
     const [orderStats] = await dbConnection.execute(`
       SELECT 
         COUNT(*) as total_orders,
-        COUNT(*) as completed_orders
+        COUNT(CASE WHEN status = 'completed' THEN 1 END) as completed_orders
       FROM orders 
-      WHERE telegram_id = ? AND status = 'completed'
+      WHERE telegram_id = ? AND (status = 'paid' OR status = 'completed')
     `, [telegram_id]);
     
     // Получаем статистику рефералов
@@ -3590,13 +3590,14 @@ app.get('/api/profile', async (req, res) => {
       WHERE telegram_id = ? AND status = 'completed'
     `, [telegram_id]);
 
-    // Получаем экономию от заказов (только завершенные заказы, как и для покупок юаней)
+    // Получаем экономию от заказов (заказы со статусом 'paid' или 'completed')
+    // Экономия начисляется после подтверждения оплаты (status = 'paid')
     const [orderSavingsStats] = await dbConnection.execute(`
       SELECT 
         COUNT(*) as total_orders,
         COALESCE(SUM(estimated_savings), 0) as total_order_savings
       FROM orders 
-      WHERE telegram_id = ? AND status = 'completed'
+      WHERE telegram_id = ? AND (status = 'paid' OR status = 'completed')
     `, [telegram_id]);
 
     // Получаем данные геймификации из новой системы
@@ -3863,12 +3864,23 @@ app.get('/api/orders-history', async (req, res) => {
       return res.status(400).json({ error: 'Telegram ID обязателен' });
     }
     
-    // Получаем заказы с товарами (только завершенные)
+    // Получаем заказы с товарами (оплаченные и завершенные)
+    // Показываем заказы со статусом 'paid' (в процессе) и 'completed' (завершенные)
+    // Добавляем статус доставки из delivery_tracking
     const [orders] = await dbConnection.execute(`
-      SELECT order_id, full_name, phone_number, pickup_point_address, created_at, estimated_savings
-      FROM orders 
-      WHERE telegram_id = ? AND status = 'completed'
-      ORDER BY created_at DESC
+      SELECT 
+        o.order_id, 
+        o.full_name, 
+        o.phone_number, 
+        o.pickup_point_address, 
+        o.created_at, 
+        o.estimated_savings, 
+        o.status as order_status,
+        dt.status as delivery_status
+      FROM orders o
+      LEFT JOIN delivery_tracking dt ON o.order_id = dt.order_id
+      WHERE o.telegram_id = ? AND (o.status = 'paid' OR o.status = 'completed')
+      ORDER BY o.created_at DESC
     `, [telegram_id]);
 
     // Для каждого заказа получаем товары
@@ -4161,7 +4173,7 @@ app.get('/api/admin/stats', async (req, res) => {
       FROM (
         SELECT SUM(savings) as yuan_savings, 0 as order_savings FROM yuan_purchases WHERE status = 'completed'
         UNION ALL
-        SELECT 0 as yuan_savings, SUM(estimated_savings) as order_savings FROM orders WHERE status = 'completed'
+        SELECT 0 as yuan_savings, SUM(estimated_savings) as order_savings FROM orders WHERE (status = 'paid' OR status = 'completed')
       ) as combined_savings
     `);
     const totalSavings = totalSavingsResult[0].total_savings || 0;
@@ -4241,7 +4253,7 @@ app.get('/api/admin/users', async (req, res) => {
         COUNT(DISTINCT CASE WHEN o.status = 'completed' THEN o.order_id END) as orders_count,
         COUNT(DISTINCT CASE WHEN yp.status = 'completed' THEN yp.id END) as yuan_purchases_count,
         COALESCE(SUM(CASE WHEN yp.status = 'completed' THEN yp.savings ELSE 0 END), 0) as yuan_savings,
-        COALESCE(SUM(CASE WHEN o.status = 'completed' THEN o.estimated_savings ELSE 0 END), 0) as order_savings,
+        COALESCE(SUM(CASE WHEN (o.status = 'paid' OR o.status = 'completed') THEN o.estimated_savings ELSE 0 END), 0) as order_savings,
         COALESCE(SUM(CASE WHEN yp.status = 'completed' THEN yp.savings ELSE 0 END), 0) + COALESCE(SUM(CASE WHEN o.status = 'completed' THEN o.estimated_savings ELSE 0 END), 0) as total_savings,
         COUNT(DISTINCT r.telegram_id) as referrals_count
       FROM users u
@@ -4480,9 +4492,11 @@ app.post('/api/admin/confirm-order', async (req, res) => {
     const { orderId, type } = req.body; // type: 'order' или 'yuan'
     
     if (type === 'order') {
+      // При подтверждении оплаты статус меняется на 'paid', а не 'completed'
+      // 'completed' - это финальный статус после доставки
       await dbConnection.execute(
         'UPDATE orders SET status = ? WHERE order_id = ?',
-        ['completed', orderId]
+        ['paid', orderId]
       );
     } else if (type === 'yuan') {
       await dbConnection.execute(
@@ -4503,11 +4517,11 @@ app.post('/api/admin/confirm-order', async (req, res) => {
       try {
         if (gamificationService) {
           if (type === 'order') {
-            // Обновляем total_orders в таблице users (учитываем только завершенные заказы)
+            // Обновляем total_orders в таблице users (учитываем оплаченные и завершенные заказы)
             const [orderStats] = await dbConnection.execute(`
               SELECT COUNT(*) as total_orders
               FROM orders 
-              WHERE telegram_id = ? AND status = 'completed'
+              WHERE telegram_id = ? AND (status = 'paid' OR status = 'completed')
             `, [telegramId]);
             
             const totalOrders = orderStats[0]?.total_orders || 0;
@@ -5852,7 +5866,8 @@ app.get('/api/user/orders', async (req, res) => {
 
     await ensureDBConnection();
 
-    // Получаем все заказы пользователя с информацией о доставке
+    // Получаем все незавершенные заказы пользователя с информацией о доставке
+    // Показываем заказы со статусом 'paid' или 'pending', но не 'completed' или 'cancelled'
     const [rows] = await dbConnection.execute(`
       SELECT 
         o.order_id,
@@ -5861,13 +5876,14 @@ app.get('/api/user/orders', async (req, res) => {
         o.pickup_point,
         o.pickup_point_address,
         o.estimated_savings,
+        o.status as order_status,
         o.created_at,
         dt.internal_tracking_number,
         dt.status as delivery_status,
         dt.last_updated
       FROM orders o
       LEFT JOIN delivery_tracking dt ON o.order_id = dt.order_id
-      WHERE o.telegram_id = ?
+      WHERE o.telegram_id = ? AND o.status NOT IN ('completed', 'cancelled')
       ORDER BY o.created_at DESC
     `, [telegramId]);
 
@@ -6073,6 +6089,14 @@ app.post('/api/admin/orders/:orderId/update-status', async (req, res) => {
       `UPDATE delivery_tracking SET status = ?, last_updated = CURRENT_TIMESTAMP WHERE order_id = ?`,
       [status, orderId]
     );
+    
+    // Если статус доставки "Доставлен", автоматически завершаем заказ (меняем order.status на 'completed')
+    if (status === 'Доставлен') {
+      await dbConnection.execute(
+        `UPDATE orders SET status = 'completed' WHERE order_id = ?`,
+        [orderId]
+      );
+    }
 
     // Получаем информацию о заказе для уведомления
     const [orderRows] = await dbConnection.execute(`

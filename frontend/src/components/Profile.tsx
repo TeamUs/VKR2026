@@ -2444,7 +2444,7 @@ const Profile: React.FC<ProfileProps> = ({ telegramId, isDarkTheme, toggleTheme,
           </HistoryTitle>
           <HistoryList $isExpanded={true}>
             {userOrders
-              .filter(order => order.delivery_status !== 'Доставлен')
+              .filter(order => order.order_status !== 'completed' && order.order_status !== 'cancelled')
               .map((order, index) => (
                 <HistoryItem key={`order-${order.order_id}-${index}`} $isDark={isDarkTheme}>
                   <HistoryItemHeader>
@@ -2502,8 +2502,11 @@ const Profile: React.FC<ProfileProps> = ({ telegramId, isDarkTheme, toggleTheme,
                   <HistoryItemDate $isDark={isDarkTheme}>
                     {new Date(item.created_at).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' })}, {new Date(item.created_at).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}
                   </HistoryItemDate>
-                  <HistoryItemStatus $status={item.status || 'completed'}>
-                    ЗАВЕРШЕНО
+                  <HistoryItemStatus $status={getStatusColor(item.delivery_status || (item.order_status === 'completed' ? 'Доставлен' : 'Создан'))}>
+                    {item.type === 'order' 
+                      ? `${getStatusEmoji(item.delivery_status || (item.order_status === 'completed' ? 'Доставлен' : 'Создан'))} ${item.delivery_status || (item.order_status === 'completed' ? 'Доставлен' : 'В процессе')}`
+                      : '✅ ЗАВЕРШЕНО'
+                    }
                   </HistoryItemStatus>
                 </HistoryItemHeader>
                 
