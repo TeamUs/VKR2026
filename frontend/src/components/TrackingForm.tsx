@@ -451,7 +451,9 @@ const TrackingForm: React.FC<TrackingFormProps> = ({ isDark = false, onNavigate,
           </div>
           
           <div style={{ display: 'grid', gap: '12px' }}>
-            {userOrders.map((order: any) => (
+            {userOrders
+              .filter((order: any) => order.order_status !== 'completed' && order.order_status !== 'cancelled')
+              .map((order: any) => (
               <div
                 key={order.order_id}
                 style={{
