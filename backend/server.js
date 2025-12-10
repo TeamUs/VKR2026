@@ -5871,7 +5871,7 @@ app.get('/api/user/orders', async (req, res) => {
     await ensureDBConnection();
 
     // Получаем все незавершенные заказы пользователя с информацией о доставке
-    // Показываем заказы со статусом 'paid' или 'pending', но не 'completed' или 'cancelled'
+    // Показываем заказы со статусом 'pending' (ожидает оплаты), 'paid' (оплачен), но не 'completed' (доставлен) или 'cancelled' (отменен)
     const [rows] = await dbConnection.execute(`
       SELECT 
         o.order_id,
@@ -5890,6 +5890,16 @@ app.get('/api/user/orders', async (req, res) => {
       WHERE o.telegram_id = ? AND o.status NOT IN ('completed', 'cancelled')
       ORDER BY o.created_at DESC
     `, [telegramId]);
+
+    console.log(`📦 Заказы пользователя ${telegramId}: найдено ${rows.length} незавершенных заказов`);
+    if (rows.length > 0) {
+      console.log('📋 Пример заказа:', {
+        order_id: rows[0].order_id,
+        order_status: rows[0].order_status,
+        delivery_status: rows[0].delivery_status,
+        tracking_number: rows[0].internal_tracking_number
+      });
+    }
 
     res.json({
       success: true,
