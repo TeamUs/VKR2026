@@ -285,9 +285,20 @@ const TrackingForm: React.FC<TrackingFormProps> = ({ isDark = false, onNavigate,
   const [loadingOrders, setLoadingOrders] = useState(false);
   const [expandedOrder, setExpandedOrder] = useState<number | null>(null);
 
-  // Загрузка заказов пользователя при открытии
+  // Загрузка заказов пользователя при открытии и при возврате на страницу
   useEffect(() => {
     loadUserOrders();
+    
+    // Обновляем заказы при возврате на страницу (когда пользователь переключается между вкладками)
+    const handleFocus = () => {
+      loadUserOrders();
+    };
+    
+    window.addEventListener('focus', handleFocus);
+    
+    return () => {
+      window.removeEventListener('focus', handleFocus);
+    };
   }, []);
 
   const loadUserOrders = async () => {
@@ -484,12 +495,12 @@ const TrackingForm: React.FC<TrackingFormProps> = ({ isDark = false, onNavigate,
                   <div style={{ 
                     padding: '4px 8px',
                     borderRadius: '6px',
-                    background: getStatusColor(order.delivery_status),
+                    background: getStatusColor(order.delivery_status || (order.order_status === 'paid' ? 'Оплачено' : 'Создан')),
                     color: 'white',
                     fontSize: '0.7rem',
                     fontWeight: 'bold'
                   }}>
-                    {getStatusEmoji(order.delivery_status)} {order.delivery_status || 'Создан'}
+                    {getStatusEmoji(order.delivery_status || (order.order_status === 'paid' ? 'Оплачено' : 'Создан'))} {order.delivery_status || (order.order_status === 'paid' ? 'Оплачено' : 'Создан')}
                   </div>
                 </div>
 
@@ -749,9 +760,11 @@ const TrackingForm: React.FC<TrackingFormProps> = ({ isDark = false, onNavigate,
 };
 
 // Вспомогательные функции для статусов
-function getStatusColor(status: string) {
+function getStatusColor(status: string | null | undefined) {
+  if (!status) return 'linear-gradient(135deg, #95a5a6, #7f8c8d)';
   switch (status) {
     case 'Создан': return 'linear-gradient(135deg, #95a5a6, #7f8c8d)';
+    case 'Оплачено': return 'linear-gradient(135deg, #3498db, #2980b9)';
     case 'Доставка внутри Китая': return 'linear-gradient(135deg, #3498db, #2980b9)';
     case 'На складе в Китае': return 'linear-gradient(135deg, #f39c12, #e67e22)';
     case 'Отправлен на таможню': return 'linear-gradient(135deg, #9b59b6, #8e44ad)';
@@ -761,9 +774,11 @@ function getStatusColor(status: string) {
   }
 }
 
-function getStatusEmoji(status: string) {
+function getStatusEmoji(status: string | null | undefined) {
+  if (!status) return '📝';
   switch (status) {
     case 'Создан': return '📝';
+    case 'Оплачено': return '💳';
     case 'Доставка внутри Китая': return '🚚';
     case 'На складе в Китае': return '📦';
     case 'Отправлен на таможню': return '🏛️';

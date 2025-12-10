@@ -3895,7 +3895,10 @@ app.get('/api/orders-history', async (req, res) => {
       return {
         ...order,
         items: items,
-        itemsCount: items.length
+        itemsCount: items.length,
+        // Добавляем первый товар для отображения в истории (для обратной совместимости)
+        product_link: items[0]?.product_link || '',
+        product_size: items[0]?.product_size || ''
       };
     }));
     
@@ -4808,9 +4811,10 @@ async function updateUserStatsAfterConfirmation(telegramId, orderId, type) {
 async function updateUserAchievementsAndLevels(telegramId, type) {
   try {
     // Получаем текущую статистику пользователя
+    // Экономия считается для заказов со статусом 'paid' или 'completed'
     const [userStats] = await dbConnection.execute(`
       SELECT 
-        COUNT(DISTINCT CASE WHEN o.status = 'completed' THEN o.order_id END) as total_orders,
+        COUNT(DISTINCT CASE WHEN (o.status = 'paid' OR o.status = 'completed') THEN o.order_id END) as total_orders,
         COUNT(DISTINCT CASE WHEN yp.status = 'completed' THEN yp.id END) as total_yuan_purchases,
         COALESCE(SUM(CASE WHEN yp.status = 'completed' THEN yp.savings ELSE 0 END), 0) as total_savings
       FROM users u

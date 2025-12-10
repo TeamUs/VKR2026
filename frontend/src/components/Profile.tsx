@@ -1255,6 +1255,31 @@ const Profile: React.FC<ProfileProps> = ({ telegramId, isDarkTheme, toggleTheme,
     
     updateDailyLogin();
     // ========== End Daily Login ==========
+    
+    // Обновляем данные при возврате на страницу
+    const handleFocus = () => {
+      fetchYuanHistory(telegramId);
+      fetchOrdersHistory(telegramId);
+      fetchUserOrders(telegramId);
+      fetchProfileData(telegramId);
+    };
+    
+    window.addEventListener('focus', handleFocus);
+    
+    // Также обновляем данные периодически (каждые 30 секунд), если страница видима
+    const interval = setInterval(() => {
+      if (!document.hidden) {
+        fetchYuanHistory(telegramId);
+        fetchOrdersHistory(telegramId);
+        fetchUserOrders(telegramId);
+        fetchProfileData(telegramId);
+      }
+    }, 30000);
+    
+    return () => {
+      window.removeEventListener('focus', handleFocus);
+      clearInterval(interval);
+    };
   }, [telegramId]);
 
   // ========== УБРАНО: generateAllAchievements() перезаписывает данные из API ==========
@@ -2451,8 +2476,8 @@ const Profile: React.FC<ProfileProps> = ({ telegramId, isDarkTheme, toggleTheme,
                     <HistoryItemDate $isDark={isDarkTheme}>
                       Заказ #{order.order_id}
                     </HistoryItemDate>
-                    <HistoryItemStatus $status={getStatusColor(order.delivery_status)}>
-                      {getStatusEmoji(order.delivery_status)} {order.delivery_status || 'Создан'}
+                    <HistoryItemStatus $status={getStatusColor(order.delivery_status || (order.order_status === 'paid' ? 'Оплачено' : 'Создан'))}>
+                      {getStatusEmoji(order.delivery_status || (order.order_status === 'paid' ? 'Оплачено' : 'Создан'))} {order.delivery_status || (order.order_status === 'paid' ? 'Оплачено' : 'Создан')}
                     </HistoryItemStatus>
                   </HistoryItemHeader>
                   <div style={{ marginTop: '12px' }}>
@@ -2502,9 +2527,28 @@ const Profile: React.FC<ProfileProps> = ({ telegramId, isDarkTheme, toggleTheme,
                   <HistoryItemDate $isDark={isDarkTheme}>
                     {new Date(item.created_at).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' })}, {new Date(item.created_at).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}
                   </HistoryItemDate>
-                  <HistoryItemStatus $status={getStatusColor(item.delivery_status || (item.order_status === 'completed' ? 'Доставлен' : 'Создан'))}>
+                  <HistoryItemStatus $status={getStatusColor(item.delivery_status || (item.order_status === 'completed' ? 'Доставлен' : (item.order_status === 'paid' ? 'Оплачено' : 'Создан')))}>
                     {item.type === 'order' 
-                      ? `${getStatusEmoji(item.delivery_status || (item.order_status === 'completed' ? 'Доставлен' : 'Создан'))} ${item.delivery_status || (item.order_status === 'completed' ? 'Доставлен' : 'В процессе')}`
+                      ? (() => {
+                          // Определяем статус для отображения
+                          let statusText = 'Создан';
+                          let statusEmoji = '📝';
+                          
+                          if (item.delivery_status) {
+                            // Если есть статус доставки, используем его
+                            statusText = item.delivery_status;
+                            statusEmoji = getStatusEmoji(item.delivery_status);
+                          } else if (item.order_status === 'paid') {
+                            // Если заказ оплачен, но статус доставки не установлен
+                            statusText = 'Оплачено';
+                            statusEmoji = '💳';
+                          } else if (item.order_status === 'completed') {
+                            statusText = 'Доставлен';
+                            statusEmoji = '✅';
+                          }
+                          
+                          return `${statusEmoji} ${statusText}`;
+                        })()
                       : '✅ ЗАВЕРШЕНО'
                     }
                   </HistoryItemStatus>
@@ -2827,6 +2871,7 @@ const Profile: React.FC<ProfileProps> = ({ telegramId, isDarkTheme, toggleTheme,
 function getStatusColor(status: string) {
   switch (status) {
     case 'Создан': return 'linear-gradient(135deg, #95a5a6, #7f8c8d)';
+    case 'Оплачено': return 'linear-gradient(135deg, #3498db, #2980b9)';
     case 'Доставка внутри Китая': return 'linear-gradient(135deg, #3498db, #2980b9)';
     case 'На складе в Китае': return 'linear-gradient(135deg, #f39c12, #e67e22)';
     case 'Отправлен на таможню': return 'linear-gradient(135deg, #9b59b6, #8e44ad)';
@@ -2839,6 +2884,7 @@ function getStatusColor(status: string) {
 function getStatusEmoji(status: string) {
   switch (status) {
     case 'Создан': return '📝';
+    case 'Оплачено': return '💳';
     case 'Доставка внутри Китая': return '🚚';
     case 'На складе в Китае': return '📦';
     case 'Отправлен на таможню': return '🏛️';
