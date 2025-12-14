@@ -2739,6 +2739,8 @@ app.get('/api/user/orders', async (req, res) => {
     console.log(`🔍 Все заказы пользователя ${normalizedTelegramId} (последние 10):`, testQuery);
     
     // Получаем все незавершенные заказы пользователя
+    // Показываем заказы, у которых delivery_status != 'Доставлен' или delivery_status отсутствует
+    // И заказ не отменен (status != 'cancelled')
     // Пробуем разные варианты сравнения для telegram_id для совместимости
     const [rows] = await dbConnection.execute(`
       SELECT 
@@ -2758,7 +2760,8 @@ app.get('/api/user/orders', async (req, res) => {
       WHERE (o.telegram_id = ? 
          OR CAST(o.telegram_id AS CHAR) = ?
          OR o.telegram_id = CAST(? AS UNSIGNED))
-        AND o.status NOT IN ('completed', 'cancelled')
+        AND o.status != 'cancelled'
+        AND (dt.status IS NULL OR dt.status != 'Доставлен')
       ORDER BY o.created_at DESC
     `, [normalizedTelegramId, normalizedTelegramId, normalizedTelegramId]);
 
@@ -6211,15 +6214,8 @@ app.post('/api/admin/orders/:orderId/update-status', async (req, res) => {
       [status, orderId]
     );
     
-    // Если статус доставки "Доставлен", автоматически завершаем заказ (меняем order.status на 'completed')
-    if (status === 'Доставлен') {
-      console.log(`✅ Автоматически меняем статус заказа #${orderId} на 'completed' (заказ доставлен)`);
-      await dbConnection.execute(
-        `UPDATE orders SET status = 'completed' WHERE order_id = ?`,
-        [orderId]
-      );
-      console.log(`✅ Статус заказа #${orderId} успешно изменен на 'completed'`);
-    }
+    // УБРАНО: Автоматическое изменение order.status на 'completed' при delivery_status = 'Доставлен'
+    // Теперь статус заказа и статус доставки управляются независимо
 
     // Получаем информацию о заказе для уведомления
     const [orderRows] = await dbConnection.execute(`
