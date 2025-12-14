@@ -371,8 +371,9 @@ class GamificationService {
     try {
       await connection.beginTransaction();
 
+      // Используем SELECT FOR UPDATE для блокировки строки и предотвращения race condition
       const [users] = await connection.query(
-        'SELECT last_daily_login, login_streak FROM users WHERE telegram_id = ?',
+        'SELECT last_daily_login, login_streak FROM users WHERE telegram_id = ? FOR UPDATE',
         [telegramId]
       );
 
@@ -464,12 +465,14 @@ class GamificationService {
       }
 
       // Обновляем данные пользователя
+      // Используем DATE(?) чтобы гарантировать, что сохраняется только дата без времени
       await connection.query(
-        'UPDATE users SET last_daily_login = ?, login_streak = ? WHERE telegram_id = ?',
+        'UPDATE users SET last_daily_login = DATE(?), login_streak = ? WHERE telegram_id = ?',
         [todayStr, newStreak, telegramId]
       );
 
       await connection.commit();
+      console.log(`[Daily Login] ✅ Обновлено last_daily_login=${todayStr}, login_streak=${newStreak} для ${telegramId}`);
 
       // Проверяем достижения для всех возможных стриков
       // Проверяем достижения по возрастанию стрика
