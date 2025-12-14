@@ -6403,8 +6403,21 @@ app.post('/api/gamification/daily-login', async (req, res) => {
     
     const result = await gamificationService.updateDailyLogin(telegramId);
     
+    // Если запрос был пропущен из-за concurrent access, не отправляем уведомления
+    if (result.skipped) {
+      console.log(`[Daily Login] Запрос пропущен для ${telegramId}: ${result.reason}`);
+      return res.json(result);
+    }
+    
+    // Если уже заходил сегодня, не отправляем никаких уведомлений
+    if (result.alreadyLoggedToday) {
+      console.log(`[Daily Login] Пользователь ${telegramId} уже заходил сегодня. Стрик: ${result.streak}`);
+      return res.json(result);
+    }
+    
     // Отправляем уведомления о достижениях, если они были разблокированы
     if (result.unlockedAchievements && result.unlockedAchievements.length > 0) {
+      console.log(`[Daily Login] Разблокировано ${result.unlockedAchievements.length} достижений для ${telegramId}`);
       for (const achievement of result.unlockedAchievements) {
         if (achievement.achievement) {
           let achievementMsg = `🏆 <b>Достижение разблокировано!</b>\n\n` +
@@ -6418,6 +6431,7 @@ app.post('/api/gamification/daily-login', async (req, res) => {
           
           try {
             await sendTelegramMessage(telegramId, achievementMsg);
+            console.log(`[Daily Login] Отправлено уведомление о достижении ${achievement.achievement.key} для ${telegramId}`);
           } catch (msgError) {
             console.warn('⚠️ Не удалось отправить уведомление о достижении:', msgError);
           }
@@ -6425,13 +6439,17 @@ app.post('/api/gamification/daily-login', async (req, res) => {
       }
     }
     
-    // Если это новый день логина, отправляем уведомление о стрике (только если нет новых достижений)
-    if (!result.alreadyLoggedToday && result.streak >= 5 && (!result.unlockedAchievements || result.unlockedAchievements.length === 0)) {
+    // Отправляем уведомление о стрике ТОЛЬКО если:
+    // 1. Это новый день логина (alreadyLoggedToday === false)
+    // 2. Стрик >= 5 дней
+    // 3. Нет новых достижений (чтобы не дублировать уведомления)
+    if (!result.alreadyLoggedToday && result.streak && result.streak >= 5 && (!result.unlockedAchievements || result.unlockedAchievements.length === 0)) {
       const streakMsg = `🔥 <b>Серия входов: ${result.streak} дней!</b>\n\n` +
         `Продолжайте заходить каждый день для получения достижений!`;
       
       try {
         await sendTelegramMessage(telegramId, streakMsg);
+        console.log(`[Daily Login] Отправлено уведомление о стрике ${result.streak} дней для ${telegramId}`);
       } catch (msgError) {
         console.warn('⚠️ Не удалось отправить уведомление о стрике:', msgError);
       }
