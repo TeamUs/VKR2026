@@ -530,8 +530,8 @@ const HistoryItem = styled.div<{ $isDark: boolean }>`
   background: ${props => props.$isDark ? 'rgba(35, 35, 35, 0.8)' : 'rgba(255, 255, 255, 0.7)'};
   border-radius: 12px;
   padding: 16px;
-  margin-bottom: 12px;
-  border: 1px solid ${props => props.$isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)'};
+  margin-bottom: 16px;
+  border: 1px solid ${props => props.$isDark ? 'rgba(255, 255, 255, 0.15)' : 'rgba(0, 0, 0, 0.15)'};
   box-shadow: 
     0 2px 8px rgba(0, 0, 0, 0.15),
     0 1px 3px rgba(0, 0, 0, 0.1);
@@ -579,25 +579,27 @@ const HistoryItemStatus = styled.div<{ $status: string }>`
 const HistoryItemType = styled.div<{ $isDark: boolean }>`
   display: flex;
   align-items: center;
-  gap: 6px;
-  margin-bottom: 8px;
+  gap: 8px;
+  margin-bottom: 12px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid ${props => props.$isDark ? 'rgba(255, 255, 255, 0.12)' : 'rgba(0, 0, 0, 0.12)'};
   
   .type-icon {
-    font-size: 14px;
+    font-size: 16px;
   }
   
   .type-text {
     font-family: 'Inter', Arial, sans-serif;
-    font-size: 12px;
+    font-size: 13px;
     color: ${props => props.$isDark ? 'var(--text-primary)' : '#666666'};
-    font-weight: 500;
+    font-weight: 600;
   }
 `;
 
 const HistoryItemDetails = styled.div`
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 0;
 `;
 
 const HistoryDetail = styled.div<{ $isDark: boolean }>`
@@ -609,28 +611,39 @@ const HistoryDetail = styled.div<{ $isDark: boolean }>`
   gap: 12px;
   width: 100%;
   box-sizing: border-box;
-  margin-bottom: 6px;
+  padding: 10px 0;
+  border-bottom: 1px solid ${props => props.$isDark ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.08)'};
+  
+  &:last-child {
+    border-bottom: none;
+    padding-bottom: 0;
+  }
+  
+  &:first-of-type {
+    padding-top: 0;
+  }
   
   span:first-child {
-    color: ${props => props.$isDark ? 'var(--text-primary)' : '#666666'};
-    font-weight: 400;
-    font-size: 13px;
+    color: ${props => props.$isDark ? 'rgba(255, 255, 255, 0.7)' : '#666666'};
+    font-weight: 500;
+    font-size: 12px;
     flex-shrink: 0;
     min-width: fit-content;
     white-space: nowrap;
+    padding-right: 8px;
   }
   
   span:last-child {
     color: ${props => props.$isDark ? 'var(--text-primary)' : '#333333'};
-    font-weight: 500;
+    font-weight: 400;
     font-size: 13px;
     text-align: right;
     flex: 1;
     min-width: 0;
     word-wrap: break-word;
     overflow-wrap: break-word;
-    word-break: break-word;
-    hyphens: auto;
+    word-break: break-all;
+    line-height: 1.4;
   }
 `;
 
@@ -2611,10 +2624,13 @@ const Profile: React.FC<ProfileProps> = ({ telegramId, isDarkTheme, toggleTheme,
                       </HistoryDetail>
                       <HistoryDetail $isDark={isDarkTheme}>
                         <span>Ссылка:</span>
-                        <span style={{ fontSize: '12px' }}>
-                          {item.product_link && item.product_link.length > 50 
-                            ? `${item.product_link.substring(0, 50)}...` 
-                            : item.product_link}
+                        <span style={{ 
+                          fontSize: '11px',
+                          fontFamily: 'JetBrains Mono, monospace',
+                          wordBreak: 'break-all',
+                          overflowWrap: 'break-word'
+                        }}>
+                          {item.product_link || 'Не указана'}
                         </span>
                       </HistoryDetail>
                     </>
