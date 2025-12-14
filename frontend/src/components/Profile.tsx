@@ -1275,25 +1275,9 @@ const Profile: React.FC<ProfileProps> = ({ telegramId, isDarkTheme, toggleTheme,
     fetchOrdersHistory(telegramId);
     fetchUserOrders(telegramId);
     
-    // ========== GAMIFICATION: Обновляем ежедневный логин ==========
-    const updateDailyLogin = async () => {
-      try {
-        const response = await fetch('/api/gamification/daily-login', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ telegramId })
-        });
-        
-        if (response.ok) {
-          const result = await response.json();
-          console.log('✅ Ежедневный логин обновлен:', result);
-        }
-      } catch (error) {
-        console.error('❌ Ошибка обновления ежедневного логина:', error);
-      }
-    };
-    
-    updateDailyLogin();
+    // ========== GAMIFICATION: Ежедневный логин ==========
+    // Ежедневный вход теперь вызывается только при запуске приложения (App.tsx),
+    // чтобы избежать дублирования вызовов и повторных уведомлений
     // ========== End Daily Login ==========
     
     // Обновляем данные при возврате на страницу

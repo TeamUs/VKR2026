@@ -831,6 +831,18 @@ const App: React.FC = () => {
           return;
         }
         
+        // Проверяем, не вызывали ли уже сегодня (защита от повторных вызовов при перезагрузке)
+        const lastCallKey = `dailyLogin_${telegramId}_${new Date().toISOString().split('T')[0]}`;
+        const lastCall = sessionStorage.getItem(lastCallKey);
+        
+        if (lastCall === 'called') {
+          console.log('[App] Ежедневный вход уже вызывался сегодня, пропускаем');
+          return;
+        }
+        
+        // Отмечаем, что вызов был сделан
+        sessionStorage.setItem(lastCallKey, 'called');
+        
         const response = await fetch('/api/gamification/daily-login', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -840,16 +852,28 @@ const App: React.FC = () => {
         if (response.ok) {
           const result = await response.json();
           console.log('[App] Ежедневный вход обновлен:', result);
+          
+          // Если уже заходил сегодня, удаляем ключ из sessionStorage, чтобы можно было проверить завтра
+          if (result.alreadyLoggedToday) {
+            console.log('[App] Пользователь уже заходил сегодня, обновляем метку');
+          }
         } else {
+          // Если ошибка, удаляем ключ, чтобы можно было повторить
+          sessionStorage.removeItem(lastCallKey);
           console.warn('[App] Ошибка обновления ежедневного входа:', response.status);
         }
       } catch (error) {
         console.error('[App] Ошибка при обновлении ежедневного входа:', error);
+        // При ошибке не удаляем ключ, чтобы не спамить запросами
       }
     };
     
-    // Вызываем ежедневный вход при запуске приложения
-    updateDailyLogin();
+    // Небольшая задержка, чтобы убедиться, что Telegram WebApp инициализирован
+    const timer = setTimeout(() => {
+      updateDailyLogin();
+    }, 500);
+    
+    return () => clearTimeout(timer);
   }, []); // Выполняется только один раз при монтировании компонента
 
   useEffect(() => {
