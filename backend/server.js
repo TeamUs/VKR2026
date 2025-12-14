@@ -121,6 +121,14 @@ app.use(cors({
 app.use(express.json({ limit: '200mb' }));
 app.use(express.urlencoded({ limit: '200mb', extended: true }));
 
+// Middleware для логирования всех запросов к /api/user/orders
+app.use('/api/user/orders', (req, res, next) => {
+  console.log('📍 MIDDLEWARE: Запрос к /api/user/orders');
+  console.log('📍 MIDDLEWARE: Method:', req.method);
+  console.log('📍 MIDDLEWARE: Headers x-telegram-init-data:', !!req.headers['x-telegram-init-data']);
+  next();
+});
+
 // Статическая раздача загруженных файлов (отзывы)
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
@@ -5853,10 +5861,19 @@ app.get('/api/tracking/:trackingNumber', async (req, res) => {
 
 // Получение всех заказов пользователя для профиля
 app.get('/api/user/orders', async (req, res) => {
+  console.log('🚀 ========== /api/user/orders ЗАПРОС ПОЛУЧЕН ==========');
+  console.log('🚀 Время:', new Date().toISOString());
+  console.log('🚀 URL:', req.url);
+  console.log('🚀 Method:', req.method);
+  console.log('🚀 Headers:', JSON.stringify(req.headers, null, 2));
+  console.log('🚀 Query:', JSON.stringify(req.query, null, 2));
+  
   try {
     // Получаем данные из Telegram WebApp
     const initData = req.headers['x-telegram-init-data'];
     console.log('🔍 /api/user/orders - initData присутствует:', !!initData);
+    console.log('🔍 /api/user/orders - initData длина:', initData?.length || 0);
+    console.log('🔍 /api/user/orders - initData первые 100 символов:', initData?.substring(0, 100) || 'нет');
     
     if (!initData) {
       console.error('❌ /api/user/orders - initData отсутствует');
@@ -5985,13 +6002,20 @@ app.get('/api/user/orders', async (req, res) => {
       }
     }
 
+    console.log('✅ /api/user/orders - Успешно возвращаем', rows.length, 'заказов');
     res.json({
       success: true,
       orders: rows
     });
+    console.log('✅ /api/user/orders - Ответ отправлен');
 
   } catch (error) {
-    console.error('Ошибка получения заказов пользователя:', error);
+    console.error('❌ ========== ОШИБКА в /api/user/orders ==========');
+    console.error('❌ Время:', new Date().toISOString());
+    console.error('❌ Error:', error);
+    console.error('❌ Error message:', error?.message);
+    console.error('❌ Error stack:', error?.stack);
+    console.error('❌ ===============================================');
     res.status(500).json({ error: 'Ошибка получения заказов' });
   }
 });
