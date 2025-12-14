@@ -126,7 +126,9 @@ app.use('/api/user/orders', (req, res, next) => {
   console.log('📍 MIDDLEWARE: Запрос к /api/user/orders');
   console.log('📍 MIDDLEWARE: Method:', req.method);
   console.log('📍 MIDDLEWARE: Headers x-telegram-init-data:', !!req.headers['x-telegram-init-data']);
+  console.log('📍 MIDDLEWARE: Вызываем next()...');
   next();
+  console.log('📍 MIDDLEWARE: next() вызван, продолжаем...');
 });
 
 // Статическая раздача загруженных файлов (отзывы)
@@ -2647,6 +2649,164 @@ app.post('/api/referral', async (req, res) => {
     res.status(500).json({ error: 'Ошибка обработки реферала' });
   }
 });
+
+// ========== ВАЖНО: Этот маршрут должен быть ПЕРЕД /api/user/:telegramId ==========
+// Получение всех заказов пользователя для профиля
+app.get('/api/user/orders', async (req, res) => {
+  console.log('🚀 ========== /api/user/orders ОБРАБОТЧИК ВЫЗВАН ==========');
+  console.log('🚀 Время:', new Date().toISOString());
+  console.log('🚀 URL:', req.url);
+  console.log('🚀 Method:', req.method);
+  console.log('🚀 Headers x-telegram-init-data присутствует:', !!req.headers['x-telegram-init-data']);
+  console.log('🚀 Query:', JSON.stringify(req.query, null, 2));
+  
+  try {
+    // Получаем данные из Telegram WebApp
+    const initData = req.headers['x-telegram-init-data'];
+    console.log('🔍 /api/user/orders - initData присутствует:', !!initData);
+    console.log('🔍 /api/user/orders - initData длина:', initData?.length || 0);
+    console.log('🔍 /api/user/orders - initData первые 100 символов:', initData?.substring(0, 100) || 'нет');
+    
+    if (!initData) {
+      console.error('❌ /api/user/orders - initData отсутствует');
+      return res.status(401).json({ error: 'Не авторизован' });
+    }
+
+    let telegramId;
+    try {
+      // Пытаемся распарсить initData
+      if (typeof initData === 'string' && initData.includes('=') && initData.includes('user')) {
+        const urlParams = new URLSearchParams(initData);
+        const userDataStr = urlParams.get('user');
+        if (userDataStr) {
+          const userData = JSON.parse(decodeURIComponent(userDataStr));
+          telegramId = userData.id?.toString();
+          console.log('✅ /api/user/orders - telegram_id из initData:', telegramId);
+          console.log('📋 Полные данные user из initData:', JSON.stringify(userData, null, 2));
+        } else {
+          console.error('❌ /api/user/orders - user параметр отсутствует в initData');
+          console.error('📋 initData (первые 200 символов):', initData.substring(0, 200));
+        }
+      } else {
+        console.error('❌ /api/user/orders - initData имеет неверный формат:', typeof initData, initData?.substring(0, 100));
+      }
+    } catch (parseError) {
+      console.error('❌ /api/user/orders - Ошибка парсинга initData:', parseError);
+      console.error('📋 initData (первые 200 символов):', initData?.substring(0, 200));
+    }
+
+    if (!telegramId) {
+      console.error('❌ /api/user/orders - telegram_id не найден');
+      return res.status(401).json({ error: 'Не авторизован' });
+    }
+
+    await ensureDBConnection();
+
+    // Нормализуем telegram_id (приводим к строке для сравнения)
+    const normalizedTelegramId = String(telegramId).trim();
+    console.log(`📋 Ищем заказы для telegram_id: "${normalizedTelegramId}" (тип: ${typeof normalizedTelegramId})`);
+
+    // Сначала проверим, сколько всего заказов у пользователя (ищем и по строке, и по числу)
+    // Пробуем разные варианты сравнения для telegram_id
+    const [allOrdersCount] = await dbConnection.execute(`
+      SELECT COUNT(*) as total 
+      FROM orders 
+      WHERE telegram_id = ? 
+         OR CAST(telegram_id AS CHAR) = ?
+         OR telegram_id = CAST(? AS UNSIGNED)
+    `, [normalizedTelegramId, normalizedTelegramId, normalizedTelegramId]);
+    console.log(`📊 Всего заказов у пользователя ${normalizedTelegramId}: ${allOrdersCount[0]?.total || 0}`);
+
+    // Проверим заказы по статусам
+    const [statusCounts] = await dbConnection.execute(`
+      SELECT status, COUNT(*) as count 
+      FROM orders 
+      WHERE telegram_id = ? 
+         OR CAST(telegram_id AS CHAR) = ?
+         OR telegram_id = CAST(? AS UNSIGNED)
+      GROUP BY status
+    `, [normalizedTelegramId, normalizedTelegramId, normalizedTelegramId]);
+    console.log(`📊 Статусы заказов пользователя ${normalizedTelegramId}:`, statusCounts);
+
+    // Сначала проверим, какие заказы есть у пользователя с разными статусами
+    const [testQuery] = await dbConnection.execute(`
+      SELECT order_id, status, created_at
+      FROM orders
+      WHERE (telegram_id = ? OR CAST(telegram_id AS CHAR) = ?)
+      ORDER BY created_at DESC
+      LIMIT 10
+    `, [normalizedTelegramId, normalizedTelegramId]);
+    console.log(`🔍 Все заказы пользователя ${normalizedTelegramId} (последние 10):`, testQuery);
+    
+    // Получаем все незавершенные заказы пользователя
+    // Пробуем разные варианты сравнения для telegram_id для совместимости
+    const [rows] = await dbConnection.execute(`
+      SELECT 
+        o.order_id,
+        o.full_name,
+        o.phone_number,
+        o.pickup_point,
+        o.pickup_point_address,
+        o.estimated_savings,
+        o.status as order_status,
+        o.created_at,
+        dt.internal_tracking_number,
+        dt.status as delivery_status,
+        dt.last_updated
+      FROM orders o
+      LEFT JOIN delivery_tracking dt ON o.order_id = dt.order_id
+      WHERE (o.telegram_id = ? 
+         OR CAST(o.telegram_id AS CHAR) = ?
+         OR o.telegram_id = CAST(? AS UNSIGNED))
+        AND o.status NOT IN ('completed', 'cancelled')
+      ORDER BY o.created_at DESC
+    `, [normalizedTelegramId, normalizedTelegramId, normalizedTelegramId]);
+
+    console.log(`📦 Заказы пользователя ${telegramId}: найдено ${rows.length} незавершенных заказов`);
+    if (rows.length > 0) {
+      console.log('📋 Детали всех найденных заказов:');
+      rows.forEach((order, index) => {
+        console.log(`  Заказ ${index + 1}:`, {
+          order_id: order.order_id,
+          order_status: order.order_status,
+          delivery_status: order.delivery_status,
+          tracking_number: order.internal_tracking_number,
+          created_at: order.created_at
+        });
+      });
+    } else {
+      console.log(`⚠️ Не найдено незавершенных заказов для пользователя ${telegramId}`);
+      // Проверим, есть ли вообще заказы с другими статусами
+      const [allOrders] = await dbConnection.execute(`
+        SELECT order_id, status, created_at 
+        FROM orders 
+        WHERE telegram_id = ?
+        ORDER BY created_at DESC
+        LIMIT 5
+      `, [telegramId]);
+      if (allOrders.length > 0) {
+        console.log('📋 Последние заказы пользователя (все статусы):', allOrders);
+      }
+    }
+
+    console.log('✅ /api/user/orders - Успешно возвращаем', rows.length, 'заказов');
+    res.json({
+      success: true,
+      orders: rows
+    });
+    console.log('✅ /api/user/orders - Ответ отправлен');
+
+  } catch (error) {
+    console.error('❌ ========== ОШИБКА в /api/user/orders ==========');
+    console.error('❌ Время:', new Date().toISOString());
+    console.error('❌ Error:', error);
+    console.error('❌ Error message:', error?.message);
+    console.error('❌ Error stack:', error?.stack);
+    console.error('❌ ===============================================');
+    res.status(500).json({ error: 'Ошибка получения заказов' });
+  }
+});
+// ========== КОНЕЦ маршрута /api/user/orders ==========
 
 // Получение информации о пользователе
 app.get('/api/user/:telegramId', async (req, res) => {
@@ -5856,167 +6016,6 @@ app.get('/api/tracking/:trackingNumber', async (req, res) => {
   } catch (error) {
     console.error('❌ Ошибка получения статуса доставки:', error);
     res.status(500).json({ error: 'Ошибка получения статуса доставки' });
-  }
-});
-
-// Получение всех заказов пользователя для профиля
-app.get('/api/user/orders', async (req, res) => {
-  console.log('🚀 ========== /api/user/orders ЗАПРОС ПОЛУЧЕН ==========');
-  console.log('🚀 Время:', new Date().toISOString());
-  console.log('🚀 URL:', req.url);
-  console.log('🚀 Method:', req.method);
-  console.log('🚀 Headers:', JSON.stringify(req.headers, null, 2));
-  console.log('🚀 Query:', JSON.stringify(req.query, null, 2));
-  
-  try {
-    // Получаем данные из Telegram WebApp
-    const initData = req.headers['x-telegram-init-data'];
-    console.log('🔍 /api/user/orders - initData присутствует:', !!initData);
-    console.log('🔍 /api/user/orders - initData длина:', initData?.length || 0);
-    console.log('🔍 /api/user/orders - initData первые 100 символов:', initData?.substring(0, 100) || 'нет');
-    
-    if (!initData) {
-      console.error('❌ /api/user/orders - initData отсутствует');
-      return res.status(401).json({ error: 'Не авторизован' });
-    }
-
-    let telegramId;
-    try {
-      // Пытаемся распарсить initData
-      if (typeof initData === 'string' && initData.includes('=') && initData.includes('user')) {
-        const urlParams = new URLSearchParams(initData);
-        const userDataStr = urlParams.get('user');
-        if (userDataStr) {
-          const userData = JSON.parse(decodeURIComponent(userDataStr));
-          telegramId = userData.id?.toString();
-          console.log('✅ /api/user/orders - telegram_id из initData:', telegramId);
-          console.log('📋 Полные данные user из initData:', JSON.stringify(userData, null, 2));
-        } else {
-          console.error('❌ /api/user/orders - user параметр отсутствует в initData');
-          console.error('📋 initData (первые 200 символов):', initData.substring(0, 200));
-        }
-      } else {
-        console.error('❌ /api/user/orders - initData имеет неверный формат:', typeof initData, initData?.substring(0, 100));
-      }
-    } catch (parseError) {
-      console.error('❌ /api/user/orders - Ошибка парсинга initData:', parseError);
-      console.error('📋 initData (первые 200 символов):', initData?.substring(0, 200));
-    }
-
-    if (!telegramId) {
-      console.error('❌ /api/user/orders - telegram_id не найден');
-      return res.status(401).json({ error: 'Не авторизован' });
-    }
-
-    await ensureDBConnection();
-
-    // Нормализуем telegram_id (приводим к строке для сравнения)
-    const normalizedTelegramId = String(telegramId).trim();
-    console.log(`📋 Ищем заказы для telegram_id: "${normalizedTelegramId}" (тип: ${typeof normalizedTelegramId})`);
-
-    // Сначала проверим, сколько всего заказов у пользователя (ищем и по строке, и по числу)
-    // Пробуем разные варианты сравнения для telegram_id
-    const [allOrdersCount] = await dbConnection.execute(`
-      SELECT COUNT(*) as total 
-      FROM orders 
-      WHERE telegram_id = ? 
-         OR CAST(telegram_id AS CHAR) = ?
-         OR telegram_id = CAST(? AS UNSIGNED)
-    `, [normalizedTelegramId, normalizedTelegramId, normalizedTelegramId]);
-    console.log(`📊 Всего заказов у пользователя ${normalizedTelegramId}: ${allOrdersCount[0]?.total || 0}`);
-
-    // Проверим заказы по статусам
-    const [statusCounts] = await dbConnection.execute(`
-      SELECT status, COUNT(*) as count 
-      FROM orders 
-      WHERE telegram_id = ? 
-         OR CAST(telegram_id AS CHAR) = ?
-         OR telegram_id = CAST(? AS UNSIGNED)
-      GROUP BY status
-    `, [normalizedTelegramId, normalizedTelegramId, normalizedTelegramId]);
-    console.log(`📊 Статусы заказов пользователя ${normalizedTelegramId}:`, statusCounts);
-
-    // Получаем все незавершенные заказы пользователя с информацией о доставке
-    // Показываем заказы со статусом 'pending' (ожидает оплаты), 'paid' (оплачен), но не 'completed' (доставлен) или 'cancelled' (отменен)
-    // ВАЖНО: Показываем заказы, которые одобрены администратором (status = 'paid') или еще ожидают оплаты (status = 'pending')
-    // Используем CAST для совместимости (telegram_id может храниться как строка или число)
-    
-    // Сначала проверим, какие заказы есть у пользователя с разными статусами
-    const [testQuery] = await dbConnection.execute(`
-      SELECT order_id, status, created_at
-      FROM orders
-      WHERE (telegram_id = ? OR CAST(telegram_id AS CHAR) = ?)
-      ORDER BY created_at DESC
-      LIMIT 10
-    `, [normalizedTelegramId, normalizedTelegramId]);
-    console.log(`🔍 Все заказы пользователя ${normalizedTelegramId} (последние 10):`, testQuery);
-    
-    // Получаем все незавершенные заказы пользователя
-    // Пробуем разные варианты сравнения для telegram_id для совместимости
-    const [rows] = await dbConnection.execute(`
-      SELECT 
-        o.order_id,
-        o.full_name,
-        o.phone_number,
-        o.pickup_point,
-        o.pickup_point_address,
-        o.estimated_savings,
-        o.status as order_status,
-        o.created_at,
-        dt.internal_tracking_number,
-        dt.status as delivery_status,
-        dt.last_updated
-      FROM orders o
-      LEFT JOIN delivery_tracking dt ON o.order_id = dt.order_id
-      WHERE (o.telegram_id = ? 
-         OR CAST(o.telegram_id AS CHAR) = ?
-         OR o.telegram_id = CAST(? AS UNSIGNED))
-        AND o.status NOT IN ('completed', 'cancelled')
-      ORDER BY o.created_at DESC
-    `, [normalizedTelegramId, normalizedTelegramId, normalizedTelegramId]);
-
-    console.log(`📦 Заказы пользователя ${telegramId}: найдено ${rows.length} незавершенных заказов`);
-    if (rows.length > 0) {
-      console.log('📋 Детали всех найденных заказов:');
-      rows.forEach((order, index) => {
-        console.log(`  Заказ ${index + 1}:`, {
-          order_id: order.order_id,
-          order_status: order.order_status,
-          delivery_status: order.delivery_status,
-          tracking_number: order.internal_tracking_number,
-          created_at: order.created_at
-        });
-      });
-    } else {
-      console.log(`⚠️ Не найдено незавершенных заказов для пользователя ${telegramId}`);
-      // Проверим, есть ли вообще заказы с другими статусами
-      const [allOrders] = await dbConnection.execute(`
-        SELECT order_id, status, created_at 
-        FROM orders 
-        WHERE telegram_id = ?
-        ORDER BY created_at DESC
-        LIMIT 5
-      `, [telegramId]);
-      if (allOrders.length > 0) {
-        console.log('📋 Последние заказы пользователя (все статусы):', allOrders);
-      }
-    }
-
-    console.log('✅ /api/user/orders - Успешно возвращаем', rows.length, 'заказов');
-    res.json({
-      success: true,
-      orders: rows
-    });
-    console.log('✅ /api/user/orders - Ответ отправлен');
-
-  } catch (error) {
-    console.error('❌ ========== ОШИБКА в /api/user/orders ==========');
-    console.error('❌ Время:', new Date().toISOString());
-    console.error('❌ Error:', error);
-    console.error('❌ Error message:', error?.message);
-    console.error('❌ Error stack:', error?.stack);
-    console.error('❌ ===============================================');
-    res.status(500).json({ error: 'Ошибка получения заказов' });
   }
 });
 
