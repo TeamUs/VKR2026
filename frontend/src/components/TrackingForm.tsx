@@ -285,42 +285,11 @@ const TrackingForm: React.FC<TrackingFormProps> = ({ isDark = false, onNavigate,
   const [loadingOrders, setLoadingOrders] = useState(false);
   const [expandedOrder, setExpandedOrder] = useState<number | null>(null);
 
-  // Загрузка заказов пользователя при открытии и при возврате на страницу
+  // Загрузка заказов пользователя только при открытии раздела
   useEffect(() => {
-    // Загружаем заказы сразу при монтировании компонента
+    // Загружаем заказы только при монтировании компонента (при открытии раздела)
     console.log('🔄 TrackingForm: компонент смонтирован, загружаем заказы...');
     loadUserOrders();
-    
-    // Обновляем заказы при возврате на страницу (когда пользователь переключается между вкладками)
-    const handleFocus = () => {
-      console.log('🔄 TrackingForm: страница получила фокус, обновляем заказы...');
-      loadUserOrders();
-    };
-    
-    // Также обновляем при видимости страницы
-    const handleVisibilityChange = () => {
-      if (!document.hidden) {
-        console.log('🔄 TrackingForm: страница стала видимой, обновляем заказы...');
-        loadUserOrders();
-      }
-    };
-    
-    window.addEventListener('focus', handleFocus);
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-    
-    // Периодическое обновление каждые 10 секунд
-    const interval = setInterval(() => {
-      if (!document.hidden) {
-        console.log('🔄 TrackingForm: периодическое обновление заказов...');
-        loadUserOrders();
-      }
-    }, 10000);
-    
-    return () => {
-      window.removeEventListener('focus', handleFocus);
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-      clearInterval(interval);
-    };
   }, []);
 
   const loadUserOrders = async () => {
@@ -546,7 +515,7 @@ const TrackingForm: React.FC<TrackingFormProps> = ({ isDark = false, onNavigate,
             ⏳ Загрузка ваших заказов...
           </LoadingMessage>
         ) : userOrders && userOrders.length > 0 ? (
-          <div style={{ display: 'grid', gap: '12px' }}>
+          <div style={{ display: 'grid', gap: '12px', width: '100%' }}>
             {userOrders.map((order: any) => {
               console.log('🎨 Рендерим заказ:', order.order_id, 'status:', order.order_status, 'delivery_status:', order.delivery_status);
               return (
@@ -559,20 +528,32 @@ const TrackingForm: React.FC<TrackingFormProps> = ({ isDark = false, onNavigate,
                   border: '1px solid var(--border-color)',
                   cursor: 'pointer',
                   transition: 'all 0.3s ease',
-                  backdropFilter: 'blur(10px)'
+                  backdropFilter: 'blur(10px)',
+                  width: '100%',
+                  boxSizing: 'border-box',
+                  overflow: 'hidden'
                 }}
                 onClick={() => setExpandedOrder(expandedOrder === order.order_id ? null : order.order_id)}
               >
                 {/* Свернутый вид */}
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <div>
-                    <div style={{ fontSize: '0.9rem', fontWeight: 'bold', color: 'var(--text-primary)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px' }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ 
+                      fontSize: '0.9rem', 
+                      fontWeight: 'bold', 
+                      color: 'var(--text-primary)',
+                      wordWrap: 'break-word',
+                      overflowWrap: 'break-word'
+                    }}>
                       Заказ #{order.order_id}
                     </div>
                     <div style={{ 
-                      fontSize: '0.8rem', 
+                      fontSize: '0.75rem', 
                       color: 'var(--text-secondary)',
-                      fontFamily: 'JetBrains Mono, monospace'
+                      fontFamily: 'JetBrains Mono, monospace',
+                      wordWrap: 'break-word',
+                      overflowWrap: 'break-word',
+                      marginTop: '4px'
                     }}>
                       {order.internal_tracking_number || 'Нет трек-номера'}
                     </div>
@@ -582,8 +563,10 @@ const TrackingForm: React.FC<TrackingFormProps> = ({ isDark = false, onNavigate,
                     borderRadius: '6px',
                     background: getStatusColor(order.delivery_status || (order.order_status === 'paid' ? 'Оплачено' : 'Создан')),
                     color: 'white',
-                    fontSize: '0.7rem',
-                    fontWeight: 'bold'
+                    fontSize: '0.65rem',
+                    fontWeight: 'bold',
+                    whiteSpace: 'nowrap',
+                    flexShrink: 0
                   }}>
                     {getStatusEmoji(order.delivery_status || (order.order_status === 'paid' ? 'Оплачено' : 'Создан'))} {order.delivery_status || (order.order_status === 'paid' ? 'Оплачено' : 'Создан')}
                   </div>
@@ -591,21 +574,46 @@ const TrackingForm: React.FC<TrackingFormProps> = ({ isDark = false, onNavigate,
 
                 {/* Развернутый вид */}
                 {expandedOrder === order.order_id && (
-                  <div style={{ marginTop: '12px', paddingTop: '12px', borderTop: '1px solid var(--border-color)' }}>
-                    <div style={{ marginBottom: '8px' }}>
+                  <div style={{ 
+                    marginTop: '12px', 
+                    paddingTop: '12px', 
+                    borderTop: '1px solid var(--border-color)',
+                    fontSize: '0.85rem'
+                  }}>
+                    <div style={{ 
+                      marginBottom: '8px',
+                      wordWrap: 'break-word',
+                      overflowWrap: 'break-word'
+                    }}>
                       <strong>👤 Клиент:</strong> {order.full_name || 'Не указано'}
                     </div>
-                    <div style={{ marginBottom: '8px' }}>
+                    <div style={{ 
+                      marginBottom: '8px',
+                      wordWrap: 'break-word',
+                      overflowWrap: 'break-word'
+                    }}>
                       <strong>📱 Телефон:</strong> {order.phone_number || 'Не указан'}
                     </div>
-                    <div style={{ marginBottom: '8px' }}>
+                    <div style={{ 
+                      marginBottom: '8px',
+                      wordWrap: 'break-word',
+                      overflowWrap: 'break-word'
+                    }}>
                       <strong>📍 ПВЗ:</strong> {order.pickup_point || 'Не указан'}
                     </div>
-                    <div style={{ marginBottom: '8px' }}>
+                    <div style={{ 
+                      marginBottom: '8px',
+                      wordWrap: 'break-word',
+                      overflowWrap: 'break-word'
+                    }}>
                       <strong>📅 Создан:</strong> {new Date(order.created_at).toLocaleDateString('ru-RU')}
                     </div>
                     {order.last_updated && (
-                      <div style={{ marginBottom: '12px' }}>
+                      <div style={{ 
+                        marginBottom: '12px',
+                        wordWrap: 'break-word',
+                        overflowWrap: 'break-word'
+                      }}>
                         <strong>⏰ Обновлен:</strong> {new Date(order.last_updated).toLocaleString('ru-RU')}
                       </div>
                     )}
