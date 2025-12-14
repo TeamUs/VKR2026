@@ -236,18 +236,22 @@ class GamificationService {
       );
 
       if (achievements.length === 0) {
-        throw new Error('Achievement not found');
+        console.warn(`⚠️ Достижение с ключом "${achievementKey}" не найдено в базе данных`);
+        await connection.rollback();
+        return { success: false, error: 'Achievement not found', achievementKey };
       }
 
       const achievement = achievements[0];
+      console.log(`[Achievement] Найдено достижение: ${achievement.name} (${achievementKey}) для ${telegramId}`);
 
-      // Unlock achievement
+      // Unlock achievement - записываем в БД
       await connection.query(
         'INSERT INTO user_achievements (telegram_id, achievement_key, unlocked_at, xp_awarded) VALUES (?, ?, NOW(), ?)',
         [telegramId, achievementKey, achievement.xp_reward]
       );
+      console.log(`[Achievement] ✅ Достижение ${achievementKey} записано в БД для пользователя ${telegramId}`);
 
-      // Award XP bonus
+      // Award XP bonus - начисляем XP за достижение
       let xpResult = null;
       if (achievement.xp_reward > 0) {
         try {
@@ -260,12 +264,16 @@ class GamificationService {
           );
           // Если awardXP был пропущен из-за concurrent access, это нормально
           if (xpResult && xpResult.skipped) {
-            console.log(`⚠️ XP награда пропущена для достижения ${achievementKey} (одновременный доступ)`);
+            console.warn(`⚠️ XP награда пропущена для достижения ${achievementKey} (одновременный доступ)`);
+          } else if (xpResult && xpResult.success) {
+            console.log(`[Achievement] ✅ Начислено ${achievement.xp_reward} XP за достижение ${achievementKey} для ${telegramId}`);
           }
         } catch (err) {
           // Игнорируем ошибки при награждении XP (они могут быть из-за concurrent access)
           console.warn(`⚠️ Не удалось наградить XP за достижение ${achievementKey}:`, err.message);
         }
+      } else {
+        console.log(`[Achievement] Достижение ${achievementKey} не имеет XP награды`);
       }
 
       // Apply additional reward if exists (temporary discount 600₽ instead of 1000₽)
@@ -386,34 +394,65 @@ class GamificationService {
 
       // Если last_daily_login существует, сравниваем даты
       if (lastLoginDate) {
-        // Преобразуем last_daily_login в UTC дату (начало дня)
-        const lastLoginUTC = new Date(lastLoginDate);
-        const lastLoginDay = new Date(Date.UTC(
-          lastLoginUTC.getUTCFullYear(), 
-          lastLoginUTC.getUTCMonth(), 
-          lastLoginUTC.getUTCDate()
-        ));
-        const lastLoginStr = lastLoginDay.toISOString().split('T')[0];
+        // lastLoginDate может быть строкой (DATE) или объектом Date
+        // Преобразуем в строку для сравнения
+        let lastLoginStr;
+        if (lastLoginDate instanceof Date) {
+          // Если это объект Date, преобразуем в UTC дату
+          const lastLoginUTC = new Date(Date.UTC(
+            lastLoginDate.getUTCFullYear(), 
+            lastLoginDate.getUTCMonth(), 
+            lastLoginDate.getUTCDate()
+          ));
+          lastLoginStr = lastLoginUTC.toISOString().split('T')[0];
+        } else if (typeof lastLoginDate === 'string') {
+          // Если это строка, используем как есть (формат YYYY-MM-DD)
+          lastLoginStr = lastLoginDate.split('T')[0]; // На случай если есть время
+        } else {
+          // Если это другой формат, преобразуем через Date
+          const parsedDate = new Date(lastLoginDate);
+          const lastLoginUTC = new Date(Date.UTC(
+            parsedDate.getUTCFullYear(), 
+            parsedDate.getUTCMonth(), 
+            parsedDate.getUTCDate()
+          ));
+          lastLoginStr = lastLoginUTC.toISOString().split('T')[0];
+        }
+        
+        console.log(`[Daily Login] Сравнение дат для ${telegramId}: lastLogin="${lastLoginStr}", today="${todayStr}"`);
         
         // Если уже заходил сегодня (в тот же день UTC)
         if (lastLoginStr === todayStr) {
           alreadyLoggedToday = true;
+          console.log(`[Daily Login] Пользователь ${telegramId} уже заходил сегодня. Текущий стрик: ${currentStreak}`);
           await connection.commit();
           return { streak: currentStreak, alreadyLoggedToday: true, unlockedAchievements: [] };
         }
 
         // Вычисляем разницу в днях (в UTC)
+        const lastLoginDay = new Date(lastLoginStr + 'T00:00:00Z');
         const diffTime = todayUTC.getTime() - lastLoginDay.getTime();
         const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+        
+        console.log(`[Daily Login] Разница в днях для ${telegramId}: ${diffDays} дней`);
 
         if (diffDays === 1) {
           // Последовательный день (вчера был вход, сегодня вход)
           newStreak = currentStreak + 1;
+          console.log(`[Daily Login] Продолжение стрика для ${telegramId}: ${currentStreak} -> ${newStreak}`);
         } else if (diffDays > 1) {
           // Стрик прерван (пропущен хотя бы один день)
           newStreak = 1;
+          console.log(`[Daily Login] Стрик прерван для ${telegramId}. Новый стрик: ${newStreak}`);
+        } else if (diffDays === 0) {
+          // diffDays === 0 (уже обработано выше, но на всякий случай)
+          alreadyLoggedToday = true;
+          console.log(`[Daily Login] Пользователь ${telegramId} уже заходил сегодня (diffDays=0). Текущий стрик: ${currentStreak}`);
+          await connection.commit();
+          return { streak: currentStreak, alreadyLoggedToday: true, unlockedAchievements: [] };
         } else {
-          // diffDays === 0 (уже обработано выше) или < 0 (не должно быть)
+          // diffDays < 0 (не должно быть - будущая дата)
+          console.warn(`[Daily Login] Странная ситуация: diffDays=${diffDays} для ${telegramId}. lastLogin=${lastLoginStr}, today=${todayStr}`);
           alreadyLoggedToday = true;
           await connection.commit();
           return { streak: currentStreak, alreadyLoggedToday: true, unlockedAchievements: [] };
@@ -421,6 +460,7 @@ class GamificationService {
       } else {
         // Первый вход когда-либо
         newStreak = 1;
+        console.log(`[Daily Login] Первый вход для ${telegramId}. Новый стрик: ${newStreak}`);
       }
 
       // Обновляем данные пользователя
@@ -442,19 +482,36 @@ class GamificationService {
         { streak: 365, key: 'year_of_dragon' }
       ];
 
+      console.log(`[Daily Login] Проверка достижений для стрика ${newStreak} пользователя ${telegramId}`);
+      
       for (const check of achievementChecks) {
         if (newStreak === check.streak) {
+          console.log(`[Daily Login] Стрик ${newStreak} соответствует достижению ${check.key}`);
           try {
             const result = await this.checkAndUnlockAchievement(telegramId, check.key);
+            console.log(`[Daily Login] Результат проверки достижения ${check.key}:`, {
+              success: result.success,
+              alreadyUnlocked: result.alreadyUnlocked,
+              hasAchievement: !!result.achievement
+            });
+            
             if (result.success && !result.alreadyUnlocked && result.achievement) {
               unlockedAchievements.push(result);
+              console.log(`[Daily Login] ✅ Достижение ${check.key} разблокировано для ${telegramId}`);
+            } else if (result.alreadyUnlocked) {
+              console.log(`[Daily Login] Достижение ${check.key} уже было разблокировано ранее для ${telegramId}`);
             }
           } catch (err) {
-            console.warn(`⚠️ Ошибка проверки достижения ${check.key} (игнорируем):`, err.message);
+            console.error(`❌ Ошибка проверки достижения ${check.key} для ${telegramId}:`, err);
+            // Продолжаем работу, даже если достижение не найдено или произошла ошибка
           }
           // Проверяем только одно достижение за раз (то, которое соответствует текущему стрику)
           break;
         }
+      }
+      
+      if (unlockedAchievements.length === 0) {
+        console.log(`[Daily Login] Для стрика ${newStreak} нет новых достижений для ${telegramId}`);
       }
 
       return { 
