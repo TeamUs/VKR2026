@@ -642,8 +642,9 @@ const HistoryDetail = styled.div<{ $isDark: boolean }>`
     min-width: 0;
     word-wrap: break-word;
     overflow-wrap: break-word;
-    word-break: break-all;
-    line-height: 1.4;
+    word-break: normal;
+    line-height: 1.5;
+    hyphens: auto;
   }
 `;
 
