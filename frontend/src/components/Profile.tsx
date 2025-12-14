@@ -2560,17 +2560,18 @@ const Profile: React.FC<ProfileProps> = ({ telegramId, isDarkTheme, toggleTheme,
                           let statusText = 'Создан';
                           let statusEmoji = '📝';
                           
-                          if (item.delivery_status) {
-                            // Если есть статус доставки, используем его
+                          // Если заказ завершен (completed), всегда показываем "Завершено"
+                          if (item.order_status === 'completed') {
+                            statusText = 'Завершено';
+                            statusEmoji = '✅';
+                          } else if (item.delivery_status && item.delivery_status !== 'Доставлен') {
+                            // Если есть статус доставки (но не "Доставлен"), используем его
                             statusText = item.delivery_status;
                             statusEmoji = getStatusEmoji(item.delivery_status);
                           } else if (item.order_status === 'paid') {
-                            // Если заказ оплачен, но статус доставки не установлен
+                            // Если заказ оплачен, но статус доставки не установлен или "Доставлен"
                             statusText = 'Оплачено';
                             statusEmoji = '💳';
-                          } else if (item.order_status === 'completed') {
-                            statusText = 'Завершено';
-                            statusEmoji = '✅';
                           }
                           
                           return `${statusEmoji} ${statusText}`;
