@@ -818,6 +818,40 @@ const App: React.FC = () => {
     }
   };
 
+  // Вызов ежедневного входа при запуске приложения
+  useEffect(() => {
+    const updateDailyLogin = async () => {
+      try {
+        const tg = window.Telegram?.WebApp;
+        const user = tg?.initDataUnsafe?.user;
+        const telegramId = user?.id?.toString();
+        
+        if (!telegramId) {
+          console.log('[App] Telegram ID не найден, пропускаем ежедневный вход');
+          return;
+        }
+        
+        const response = await fetch('/api/gamification/daily-login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ telegramId })
+        });
+        
+        if (response.ok) {
+          const result = await response.json();
+          console.log('[App] Ежедневный вход обновлен:', result);
+        } else {
+          console.warn('[App] Ошибка обновления ежедневного входа:', response.status);
+        }
+      } catch (error) {
+        console.error('[App] Ошибка при обновлении ежедневного входа:', error);
+      }
+    };
+    
+    // Вызываем ежедневный вход при запуске приложения
+    updateDailyLogin();
+  }, []); // Выполняется только один раз при монтировании компонента
+
   useEffect(() => {
     console.log('[App] useEffect запущен');
     

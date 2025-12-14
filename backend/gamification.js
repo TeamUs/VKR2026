@@ -372,64 +372,96 @@ class GamificationService {
         throw new Error('User not found');
       }
 
-      const today = new Date().toISOString().split('T')[0];
-      const lastLogin = users[0].last_daily_login ? users[0].last_daily_login.toISOString().split('T')[0] : null;
+      // Получаем текущую дату (по UTC) в формате YYYY-MM-DD (начало дня 00:00:00)
+      const now = new Date();
+      const todayUTC = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+      const todayStr = todayUTC.toISOString().split('T')[0];
+      
+      const lastLoginDate = users[0].last_daily_login;
       const currentStreak = users[0].login_streak || 0;
 
       let newStreak = currentStreak;
+      let alreadyLoggedToday = false;
+      let unlockedAchievements = [];
 
-      if (lastLogin === today) {
-        // Already logged in today
-        await connection.commit();
-        return { streak: currentStreak, alreadyLoggedToday: true };
-      }
+      // Если last_daily_login существует, сравниваем даты
+      if (lastLoginDate) {
+        // Преобразуем last_daily_login в UTC дату (начало дня)
+        const lastLoginUTC = new Date(lastLoginDate);
+        const lastLoginDay = new Date(Date.UTC(
+          lastLoginUTC.getUTCFullYear(), 
+          lastLoginUTC.getUTCMonth(), 
+          lastLoginUTC.getUTCDate()
+        ));
+        const lastLoginStr = lastLoginDay.toISOString().split('T')[0];
+        
+        // Если уже заходил сегодня (в тот же день UTC)
+        if (lastLoginStr === todayStr) {
+          alreadyLoggedToday = true;
+          await connection.commit();
+          return { streak: currentStreak, alreadyLoggedToday: true, unlockedAchievements: [] };
+        }
 
-      if (!lastLogin) {
-        // First login ever
-        newStreak = 1;
-      } else {
-        const lastDate = new Date(lastLogin);
-        const todayDate = new Date(today);
-        const diffDays = Math.floor((todayDate - lastDate) / (1000 * 60 * 60 * 24));
+        // Вычисляем разницу в днях (в UTC)
+        const diffTime = todayUTC.getTime() - lastLoginDay.getTime();
+        const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
 
         if (diffDays === 1) {
-          // Consecutive day
+          // Последовательный день (вчера был вход, сегодня вход)
           newStreak = currentStreak + 1;
-        } else {
-          // Streak broken
+        } else if (diffDays > 1) {
+          // Стрик прерван (пропущен хотя бы один день)
           newStreak = 1;
+        } else {
+          // diffDays === 0 (уже обработано выше) или < 0 (не должно быть)
+          alreadyLoggedToday = true;
+          await connection.commit();
+          return { streak: currentStreak, alreadyLoggedToday: true, unlockedAchievements: [] };
         }
+      } else {
+        // Первый вход когда-либо
+        newStreak = 1;
       }
 
+      // Обновляем данные пользователя
       await connection.query(
         'UPDATE users SET last_daily_login = ?, login_streak = ? WHERE telegram_id = ?',
-        [today, newStreak, telegramId]
+        [todayStr, newStreak, telegramId]
       );
 
       await connection.commit();
 
-      // Check for streak achievements (игнорируем ошибки при одновременном доступе)
-      if (newStreak === 3) {
-        try {
-          await this.checkAndUnlockAchievement(telegramId, 'daily_ritual');
-        } catch (err) {
-          console.warn('⚠️ Ошибка проверки достижения daily_ritual (игнорируем):', err.message);
-        }
-      } else if (newStreak === 14) {
-        try {
-          await this.checkAndUnlockAchievement(telegramId, 'lunar_cycle');
-        } catch (err) {
-          console.warn('⚠️ Ошибка проверки достижения lunar_cycle (игнорируем):', err.message);
-        }
-      } else if (newStreak === 365) {
-        try {
-          await this.checkAndUnlockAchievement(telegramId, 'year_of_dragon');
-        } catch (err) {
-          console.warn('⚠️ Ошибка проверки достижения year_of_dragon (игнорируем):', err.message);
+      // Проверяем достижения для всех возможных стриков
+      // Проверяем достижения по возрастанию стрика
+      const achievementChecks = [
+        { streak: 3, key: 'daily_ritual' },
+        { streak: 7, key: 'weekly_devotion' },
+        { streak: 14, key: 'lunar_cycle' },
+        { streak: 30, key: 'monthly_master' },
+        { streak: 100, key: 'century_streak' },
+        { streak: 365, key: 'year_of_dragon' }
+      ];
+
+      for (const check of achievementChecks) {
+        if (newStreak === check.streak) {
+          try {
+            const result = await this.checkAndUnlockAchievement(telegramId, check.key);
+            if (result.success && !result.alreadyUnlocked && result.achievement) {
+              unlockedAchievements.push(result);
+            }
+          } catch (err) {
+            console.warn(`⚠️ Ошибка проверки достижения ${check.key} (игнорируем):`, err.message);
+          }
+          // Проверяем только одно достижение за раз (то, которое соответствует текущему стрику)
+          break;
         }
       }
 
-      return { streak: newStreak, alreadyLoggedToday: false };
+      return { 
+        streak: newStreak, 
+        alreadyLoggedToday: false,
+        unlockedAchievements: unlockedAchievements
+      };
 
     } catch (error) {
       await connection.rollback();
