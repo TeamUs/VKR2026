@@ -6403,12 +6403,38 @@ app.post('/api/gamification/daily-login', async (req, res) => {
     
     const result = await gamificationService.updateDailyLogin(telegramId);
     
-    // Если это новый день логина, отправляем уведомление
-    if (!result.alreadyLoggedToday && result.streak >= 5) {
+    // Отправляем уведомления о достижениях, если они были разблокированы
+    if (result.unlockedAchievements && result.unlockedAchievements.length > 0) {
+      for (const achievement of result.unlockedAchievements) {
+        if (achievement.achievement) {
+          let achievementMsg = `🏆 <b>Достижение разблокировано!</b>\n\n` +
+            `${achievement.achievement.icon} <b>${achievement.achievement.name}</b>\n` +
+            `📝 ${achievement.achievement.description}\n\n` +
+            `🎁 Награда: +${achievement.achievement.xpReward} XP`;
+          
+          if (achievement.achievement.additionalReward) {
+            achievementMsg += `\n✨ Бонус: ${achievement.achievement.additionalReward}`;
+          }
+          
+          try {
+            await sendTelegramMessage(telegramId, achievementMsg);
+          } catch (msgError) {
+            console.warn('⚠️ Не удалось отправить уведомление о достижении:', msgError);
+          }
+        }
+      }
+    }
+    
+    // Если это новый день логина, отправляем уведомление о стрике (только если нет новых достижений)
+    if (!result.alreadyLoggedToday && result.streak >= 5 && (!result.unlockedAchievements || result.unlockedAchievements.length === 0)) {
       const streakMsg = `🔥 <b>Серия входов: ${result.streak} дней!</b>\n\n` +
         `Продолжайте заходить каждый день для получения достижений!`;
       
-      await sendTelegramMessage(telegramId, streakMsg);
+      try {
+        await sendTelegramMessage(telegramId, streakMsg);
+      } catch (msgError) {
+        console.warn('⚠️ Не удалось отправить уведомление о стрике:', msgError);
+      }
     }
     
     res.json(result);
