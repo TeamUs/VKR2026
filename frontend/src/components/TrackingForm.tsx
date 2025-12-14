@@ -251,6 +251,9 @@ const TrackingInfo = styled.div<{ $isDark?: boolean }>`
   border: 1px solid ${props => props.$isDark ? 'var(--border-color-dark)' : 'var(--border-color)'};
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
   backdrop-filter: blur(10px);
+  width: 100%;
+  box-sizing: border-box;
+  overflow: hidden;
 `;
 
 const InfoRow = styled.div<{ $isDark?: boolean }>`
@@ -259,18 +262,27 @@ const InfoRow = styled.div<{ $isDark?: boolean }>`
   align-items: flex-start;
   padding: 8px 0;
   color: ${props => props.$isDark ? 'var(--text-primary-dark)' : 'var(--text-primary)'};
-  font-size: 0.9rem;
+  font-size: 0.85rem;
+  gap: 12px;
+  width: 100%;
+  box-sizing: border-box;
 
   span:first-child {
     color: ${props => props.$isDark ? 'var(--text-secondary-dark)' : 'var(--text-secondary)'};
     flex-shrink: 0;
+    min-width: fit-content;
+    white-space: nowrap;
   }
 
   span:last-child {
     font-weight: bold;
     text-align: right;
     flex: 1;
-    margin-left: 16px;
+    min-width: 0;
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+    word-break: break-word;
+    hyphens: auto;
   }
 `;
 
@@ -690,7 +702,11 @@ const TrackingForm: React.FC<TrackingFormProps> = ({ isDark = false, onNavigate,
             borderRadius: '0',
             border: 'none',
             boxShadow: 'none',
-            position: 'relative'
+            position: 'relative',
+            width: 'calc(100% - 32px)',
+            maxWidth: '100%',
+            boxSizing: 'border-box',
+            overflow: 'hidden'
           }}
         >
           {/* Заголовок */}
@@ -730,7 +746,17 @@ const TrackingForm: React.FC<TrackingFormProps> = ({ isDark = false, onNavigate,
             </InfoRow>
             <InfoRow $isDark={isDark}>
               <span>⏰ Последнее обновление:</span>
-              <span>{new Date(trackingData.lastUpdated).toLocaleString('ru-RU')}</span>
+              <span style={{ fontSize: '0.8rem' }}>
+                {new Date(trackingData.lastUpdated).toLocaleDateString('ru-RU', { 
+                  day: '2-digit', 
+                  month: '2-digit', 
+                  year: 'numeric' 
+                })}, {new Date(trackingData.lastUpdated).toLocaleTimeString('ru-RU', { 
+                  hour: '2-digit', 
+                  minute: '2-digit',
+                  second: '2-digit'
+                })}
+              </span>
             </InfoRow>
           </TrackingInfo>
 
