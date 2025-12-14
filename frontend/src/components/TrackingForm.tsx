@@ -287,17 +287,39 @@ const TrackingForm: React.FC<TrackingFormProps> = ({ isDark = false, onNavigate,
 
   // Загрузка заказов пользователя при открытии и при возврате на страницу
   useEffect(() => {
+    // Загружаем заказы сразу при монтировании компонента
+    console.log('🔄 TrackingForm: компонент смонтирован, загружаем заказы...');
     loadUserOrders();
     
     // Обновляем заказы при возврате на страницу (когда пользователь переключается между вкладками)
     const handleFocus = () => {
+      console.log('🔄 TrackingForm: страница получила фокус, обновляем заказы...');
       loadUserOrders();
     };
     
+    // Также обновляем при видимости страницы
+    const handleVisibilityChange = () => {
+      if (!document.hidden) {
+        console.log('🔄 TrackingForm: страница стала видимой, обновляем заказы...');
+        loadUserOrders();
+      }
+    };
+    
     window.addEventListener('focus', handleFocus);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    
+    // Периодическое обновление каждые 10 секунд
+    const interval = setInterval(() => {
+      if (!document.hidden) {
+        console.log('🔄 TrackingForm: периодическое обновление заказов...');
+        loadUserOrders();
+      }
+    }, 10000);
     
     return () => {
       window.removeEventListener('focus', handleFocus);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      clearInterval(interval);
     };
   }, []);
 
@@ -306,43 +328,74 @@ const TrackingForm: React.FC<TrackingFormProps> = ({ isDark = false, onNavigate,
     setError(''); // Очищаем предыдущие ошибки
     try {
       const initData = (window as any).Telegram?.WebApp?.initData;
+      console.log('🔍 TrackingForm: initData присутствует:', !!initData);
+      console.log('🔍 TrackingForm: initData (первые 100 символов):', initData?.substring(0, 100));
+      
       if (!initData) {
+        console.error('❌ TrackingForm: initData отсутствует');
         setError('Требуется авторизация через Telegram');
         setUserOrders([]);
         return;
       }
       
+      console.log('📤 TrackingForm: Отправляем запрос /api/user/orders');
       const response = await fetch('/api/user/orders', {
         headers: { 'x-telegram-init-data': initData }
       });
+      console.log('📥 TrackingForm: Получен ответ, статус:', response.status, response.statusText);
       
       if (response.ok) {
         const data = await response.json();
         const orders = data.orders || [];
         console.log('📦 Загружены заказы пользователя:', orders.length, 'заказов');
-        console.log('📋 Заказы:', orders);
+        console.log('📋 Полные данные заказов:', JSON.stringify(orders, null, 2));
+        
         // Бэкенд уже возвращает только незавершенные заказы (status NOT IN ('completed', 'cancelled'))
         // Но добавим дополнительную проверку на всякий случай
         const activeOrders = orders.filter((order: any) => {
           const status = order.order_status;
-          const isValid = status && status !== 'completed' && status !== 'cancelled';
+          // Принимаем заказы со статусом 'pending', 'paid' или любым другим кроме 'completed' и 'cancelled'
+          const isValid = status && 
+                         status !== 'completed' && 
+                         status !== 'cancelled' &&
+                         status !== null &&
+                         status !== undefined;
           if (!isValid) {
             console.warn('⚠️ Пропущен заказ с неверным статусом:', order.order_id, 'status:', status);
           }
           return isValid;
         });
+        
         console.log('✅ Активные заказы для отображения:', activeOrders.length, 'заказов');
         if (activeOrders.length > 0) {
-          console.log('📋 Детали заказов:', activeOrders.map((o: any) => ({
-            id: o.order_id,
-            status: o.order_status,
-            delivery_status: o.delivery_status,
-            tracking: o.internal_tracking_number
-          })));
+          console.log('📋 Детали заказов для отображения:');
+          activeOrders.forEach((o: any) => {
+            console.log(`  - Заказ #${o.order_id}:`, {
+              status: o.order_status,
+              delivery_status: o.delivery_status,
+              tracking: o.internal_tracking_number,
+              created: o.created_at
+            });
+          });
+        } else {
+          console.warn('⚠️ Нет активных заказов для отображения. Всего загружено:', orders.length);
+          if (orders.length > 0) {
+            console.warn('⚠️ Все загруженные заказы были отфильтрованы:');
+            orders.forEach((o: any) => {
+              console.warn(`  - Заказ #${o.order_id}: status=${o.order_status}`);
+            });
+          }
         }
+        
         setUserOrders(activeOrders);
       } else {
-        console.error('❌ Ошибка загрузки заказов, статус:', response.status);
+        const errorData = await response.json().catch(() => ({}));
+        console.error('❌ Ошибка загрузки заказов:', {
+          status: response.status,
+          statusText: response.statusText,
+          error: errorData
+        });
+        setError(errorData.error || 'Ошибка загрузки заказов');
         setUserOrders([]);
       }
     } catch (error) {
@@ -492,9 +545,11 @@ const TrackingForm: React.FC<TrackingFormProps> = ({ isDark = false, onNavigate,
           <LoadingMessage $isDark={isDark}>
             ⏳ Загрузка ваших заказов...
           </LoadingMessage>
-        ) : userOrders.length > 0 ? (
+        ) : userOrders && userOrders.length > 0 ? (
           <div style={{ display: 'grid', gap: '12px' }}>
-            {userOrders.map((order: any) => (
+            {userOrders.map((order: any) => {
+              console.log('🎨 Рендерим заказ:', order.order_id, 'status:', order.order_status, 'delivery_status:', order.delivery_status);
+              return (
               <div
                 key={order.order_id}
                 style={{
@@ -598,7 +653,8 @@ const TrackingForm: React.FC<TrackingFormProps> = ({ isDark = false, onNavigate,
                   </div>
                 )}
               </div>
-            ))}
+            );
+            })}
           </div>
         ) : (
           <div style={{
