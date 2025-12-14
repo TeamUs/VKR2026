@@ -6213,10 +6213,12 @@ app.post('/api/admin/orders/:orderId/update-status', async (req, res) => {
     
     // Если статус доставки "Доставлен", автоматически завершаем заказ (меняем order.status на 'completed')
     if (status === 'Доставлен') {
+      console.log(`✅ Автоматически меняем статус заказа #${orderId} на 'completed' (заказ доставлен)`);
       await dbConnection.execute(
         `UPDATE orders SET status = 'completed' WHERE order_id = ?`,
         [orderId]
       );
+      console.log(`✅ Статус заказа #${orderId} успешно изменен на 'completed'`);
     }
 
     // Получаем информацию о заказе для уведомления

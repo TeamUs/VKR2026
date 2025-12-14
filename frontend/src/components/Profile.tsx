@@ -536,6 +536,9 @@ const HistoryItem = styled.div<{ $isDark: boolean }>`
     0 2px 8px rgba(0, 0, 0, 0.15),
     0 1px 3px rgba(0, 0, 0, 0.1);
   backdrop-filter: blur(10px);
+  width: 100%;
+  box-sizing: border-box;
+  overflow: hidden;
 `;
 
 const HistoryItemHeader = styled.div`
@@ -543,6 +546,9 @@ const HistoryItemHeader = styled.div`
   justify-content: space-between;
   align-items: center;
   margin-bottom: 12px;
+  gap: 12px;
+  width: 100%;
+  box-sizing: border-box;
 `;
 
 const HistoryItemDate = styled.div<{ $isDark: boolean }>`
@@ -550,6 +556,10 @@ const HistoryItemDate = styled.div<{ $isDark: boolean }>`
   font-size: 12px;
   color: ${props => props.$isDark ? 'var(--text-primary)' : '#999999'};
   font-weight: 400;
+  flex: 1;
+  min-width: 0;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
 `;
 
 const HistoryItemStatus = styled.div<{ $status: string }>`
@@ -562,6 +572,8 @@ const HistoryItemStatus = styled.div<{ $status: string }>`
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.3px;
+  flex-shrink: 0;
+  white-space: nowrap;
 `;
 
 const HistoryItemType = styled.div<{ $isDark: boolean }>`
@@ -591,20 +603,34 @@ const HistoryItemDetails = styled.div`
 const HistoryDetail = styled.div<{ $isDark: boolean }>`
   display: flex;
   justify-content: space-between;
-  align-items: center;
+  align-items: flex-start;
   font-family: 'Inter', Arial, sans-serif;
   font-size: 13px;
+  gap: 12px;
+  width: 100%;
+  box-sizing: border-box;
+  margin-bottom: 6px;
   
   span:first-child {
     color: ${props => props.$isDark ? 'var(--text-primary)' : '#666666'};
     font-weight: 400;
     font-size: 13px;
+    flex-shrink: 0;
+    min-width: fit-content;
+    white-space: nowrap;
   }
   
   span:last-child {
     color: ${props => props.$isDark ? 'var(--text-primary)' : '#333333'};
     font-weight: 500;
     font-size: 13px;
+    text-align: right;
+    flex: 1;
+    min-width: 0;
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+    word-break: break-word;
+    hyphens: auto;
   }
 `;
 
@@ -2527,7 +2553,7 @@ const Profile: React.FC<ProfileProps> = ({ telegramId, isDarkTheme, toggleTheme,
                   <HistoryItemDate $isDark={isDarkTheme}>
                     {new Date(item.created_at).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' })}, {new Date(item.created_at).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}
                   </HistoryItemDate>
-                  <HistoryItemStatus $status={getStatusColor(item.delivery_status || (item.order_status === 'completed' ? 'Доставлен' : (item.order_status === 'paid' ? 'Оплачено' : 'Создан')))}>
+                  <HistoryItemStatus $status={getStatusColor(item.delivery_status || (item.order_status === 'completed' ? 'Завершено' : (item.order_status === 'paid' ? 'Оплачено' : 'Создан')))}>
                     {item.type === 'order' 
                       ? (() => {
                           // Определяем статус для отображения
@@ -2543,7 +2569,7 @@ const Profile: React.FC<ProfileProps> = ({ telegramId, isDarkTheme, toggleTheme,
                             statusText = 'Оплачено';
                             statusEmoji = '💳';
                           } else if (item.order_status === 'completed') {
-                            statusText = 'Доставлен';
+                            statusText = 'Завершено';
                             statusEmoji = '✅';
                           }
                           
@@ -2584,8 +2610,10 @@ const Profile: React.FC<ProfileProps> = ({ telegramId, isDarkTheme, toggleTheme,
                       </HistoryDetail>
                       <HistoryDetail $isDark={isDarkTheme}>
                         <span>Ссылка:</span>
-                        <span style={{ fontSize: '12px', wordBreak: 'break-all' }}>
-                          {item.product_link?.substring(0, 50)}...
+                        <span style={{ fontSize: '12px' }}>
+                          {item.product_link && item.product_link.length > 50 
+                            ? `${item.product_link.substring(0, 50)}...` 
+                            : item.product_link}
                         </span>
                       </HistoryDetail>
                     </>
