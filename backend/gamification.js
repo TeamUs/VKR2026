@@ -371,34 +371,53 @@ class GamificationService {
     try {
       await connection.beginTransaction();
 
-      // Используем SELECT FOR UPDATE для блокировки строки и предотвращения race condition
-      const [users] = await connection.query(
-        'SELECT last_daily_login, login_streak FROM users WHERE telegram_id = ? FOR UPDATE',
-        [telegramId]
-      );
-
-      if (users.length === 0) {
-        throw new Error('User not found');
-      }
-
       // Получаем текущую дату (по UTC) в формате YYYY-MM-DD (начало дня 00:00:00)
       const now = new Date();
       const todayUTC = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
       const todayStr = todayUTC.toISOString().split('T')[0];
       
+      // Используем SELECT FOR UPDATE для блокировки строки и предотвращения race condition
+      // Сравниваем даты прямо в SQL для точности
+      const [users] = await connection.query(
+        `SELECT 
+          DATE(last_daily_login) as last_daily_login, 
+          login_streak,
+          CASE WHEN DATE(last_daily_login) = DATE(?) THEN 1 ELSE 0 END as is_today
+        FROM users 
+        WHERE telegram_id = ? 
+        FOR UPDATE`,
+        [todayStr, telegramId]
+      );
+
+      if (users.length === 0) {
+        throw new Error('User not found');
+      }
+      
       const lastLoginDate = users[0].last_daily_login;
       const currentStreak = users[0].login_streak || 0;
+      const isToday = users[0].is_today === 1;
 
       let newStreak = currentStreak;
       let alreadyLoggedToday = false;
       let unlockedAchievements = [];
 
-      // Если last_daily_login существует, сравниваем даты
+      // Проверяем, заходил ли пользователь сегодня (используем результат SQL сравнения)
+      if (isToday && lastLoginDate) {
+        alreadyLoggedToday = true;
+        console.log(`[Daily Login] ✅ Пользователь ${telegramId} уже заходил сегодня (проверка через SQL). Текущий стрик: ${currentStreak}`);
+        await connection.commit();
+        return { streak: currentStreak, alreadyLoggedToday: true, unlockedAchievements: [] };
+      }
+      
+      // Если last_daily_login существует, сравниваем даты для вычисления стрика
       if (lastLoginDate) {
-        // lastLoginDate может быть строкой (DATE) или объектом Date
-        // Преобразуем в строку для сравнения
+        // lastLoginDate теперь всегда строка в формате YYYY-MM-DD благодаря DATE() в SQL
+        // Преобразуем в строку для надежности
         let lastLoginStr;
-        if (lastLoginDate instanceof Date) {
+        if (typeof lastLoginDate === 'string') {
+          // Если это строка, используем как есть (формат YYYY-MM-DD)
+          lastLoginStr = lastLoginDate.split('T')[0].trim(); // На случай если есть время или пробелы
+        } else if (lastLoginDate instanceof Date) {
           // Если это объект Date, преобразуем в UTC дату
           const lastLoginUTC = new Date(Date.UTC(
             lastLoginDate.getUTCFullYear(), 
@@ -406,9 +425,6 @@ class GamificationService {
             lastLoginDate.getUTCDate()
           ));
           lastLoginStr = lastLoginUTC.toISOString().split('T')[0];
-        } else if (typeof lastLoginDate === 'string') {
-          // Если это строка, используем как есть (формат YYYY-MM-DD)
-          lastLoginStr = lastLoginDate.split('T')[0]; // На случай если есть время
         } else {
           // Если это другой формат, преобразуем через Date
           const parsedDate = new Date(lastLoginDate);
@@ -421,14 +437,7 @@ class GamificationService {
         }
         
         console.log(`[Daily Login] Сравнение дат для ${telegramId}: lastLogin="${lastLoginStr}", today="${todayStr}"`);
-        
-        // Если уже заходил сегодня (в тот же день UTC)
-        if (lastLoginStr === todayStr) {
-          alreadyLoggedToday = true;
-          console.log(`[Daily Login] Пользователь ${telegramId} уже заходил сегодня. Текущий стрик: ${currentStreak}`);
-          await connection.commit();
-          return { streak: currentStreak, alreadyLoggedToday: true, unlockedAchievements: [] };
-        }
+        console.log(`[Daily Login] SQL проверка (isToday): ${isToday}`);
 
         // Вычисляем разницу в днях (в UTC)
         const lastLoginDay = new Date(lastLoginStr + 'T00:00:00Z');

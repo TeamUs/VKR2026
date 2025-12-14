@@ -831,17 +831,19 @@ const App: React.FC = () => {
           return;
         }
         
-        // Проверяем, не вызывали ли уже сегодня (защита от повторных вызовов при перезагрузке)
-        const lastCallKey = `dailyLogin_${telegramId}_${new Date().toISOString().split('T')[0]}`;
-        const lastCall = sessionStorage.getItem(lastCallKey);
+        // Проверяем, не вызывали ли уже сегодня (защита от повторных вызовов)
+        // Используем localStorage, чтобы проверка работала даже после перезагрузки страницы
+        const today = new Date().toISOString().split('T')[0];
+        const lastCallKey = `dailyLogin_${telegramId}`;
+        const lastCallDate = localStorage.getItem(lastCallKey);
         
-        if (lastCall === 'called') {
+        if (lastCallDate === today) {
           console.log('[App] Ежедневный вход уже вызывался сегодня, пропускаем');
           return;
         }
         
-        // Отмечаем, что вызов был сделан
-        sessionStorage.setItem(lastCallKey, 'called');
+        // Отмечаем текущую дату
+        localStorage.setItem(lastCallKey, today);
         
         const response = await fetch('/api/gamification/daily-login', {
           method: 'POST',
@@ -853,13 +855,15 @@ const App: React.FC = () => {
           const result = await response.json();
           console.log('[App] Ежедневный вход обновлен:', result);
           
-          // Если уже заходил сегодня, удаляем ключ из sessionStorage, чтобы можно было проверить завтра
+          // Если уже заходил сегодня, обновляем метку в localStorage текущей датой
           if (result.alreadyLoggedToday) {
             console.log('[App] Пользователь уже заходил сегодня, обновляем метку');
+            localStorage.setItem(lastCallKey, today);
           }
+          // Если вход был успешным, метка уже установлена выше
         } else {
           // Если ошибка, удаляем ключ, чтобы можно было повторить
-          sessionStorage.removeItem(lastCallKey);
+          localStorage.removeItem(lastCallKey);
           console.warn('[App] Ошибка обновления ежедневного входа:', response.status);
         }
       } catch (error) {
