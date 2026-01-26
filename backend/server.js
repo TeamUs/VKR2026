@@ -3696,31 +3696,46 @@ app.delete('/api/admin/purchases/images/:filename', async (req, res) => {
 
 // Получение профиля пользователя
 app.get('/api/profile', async (req, res) => {
+  const startTime = Date.now();
+  console.log('🔍 /api/profile - Запрос получен');
+  console.log('🔍 /api/profile - Headers:', {
+    'x-telegram-init-data': !!req.headers['x-telegram-init-data'],
+    'origin': req.headers['origin'],
+    'user-agent': req.headers['user-agent']?.substring(0, 50)
+  });
+  console.log('🔍 /api/profile - Query:', req.query);
   try {
     await ensureDBConnection();
+    console.log('✅ /api/profile - Соединение с БД установлено');
     
     let telegram_id = req.query.telegram_id;
     
     // Если telegram_id не передан в query, пытаемся получить из Telegram WebApp initData
     if (!telegram_id) {
       const initData = req.headers['x-telegram-init-data'];
+      console.log('🔍 /api/profile - initData присутствует:', !!initData);
       if (initData) {
         try {
           const urlParams = new URLSearchParams(initData);
           const userData = urlParams.get('user');
+          console.log('🔍 /api/profile - userData из initData:', userData ? 'присутствует' : 'отсутствует');
           if (userData) {
             const user = JSON.parse(decodeURIComponent(userData));
             telegram_id = user.id?.toString();
+            console.log('🔍 /api/profile - telegram_id из initData:', telegram_id);
           }
         } catch (error) {
-          console.error('Ошибка парсинга initData:', error);
+          console.error('❌ /api/profile - Ошибка парсинга initData:', error);
         }
       }
     }
     
     if (!telegram_id) {
+      console.log('❌ /api/profile - telegram_id не найден ни в query, ни в initData');
       return res.status(401).json({ error: 'Не авторизован' });
     }
+    
+    console.log('🔍 /api/profile - Ищем пользователя:', telegram_id);
     
     // Получаем данные пользователя
     const [userRows] = await dbConnection.execute(`
@@ -3730,8 +3745,11 @@ app.get('/api/profile', async (req, res) => {
     `, [telegram_id]);
     
     if (userRows.length === 0) {
+      console.log('❌ /api/profile - Пользователь не найден в БД:', telegram_id);
       return res.status(404).json({ error: 'Пользователь не найден' });
     }
+    
+    console.log('✅ /api/profile - Пользователь найден:', telegram_id);
     
     const user = userRows[0];
     
