@@ -590,6 +590,7 @@ async function sendTelegramMessage(chatId, message) {
       return false;
     }
 
+    console.log(`📤 sendTelegramMessage: отправляем сообщение пользователю ${chatId} (${message.substring(0, 50)}...)`);
     const response = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
       method: 'POST',
       headers: {
@@ -603,13 +604,15 @@ async function sendTelegramMessage(chatId, message) {
     });
 
     if (response.ok) {
+      console.log(`✅ Сообщение пользователю ${chatId} отправлено успешно`);
       return true;
     } else {
-      console.error('❌ Ошибка отправки сообщения:', await response.text());
+      const errorText = await response.text();
+      console.error(`❌ Ошибка отправки сообщения пользователю ${chatId}:`, errorText);
       return false;
     }
   } catch (error) {
-    console.error('❌ Ошибка отправки сообщения в Telegram:', error);
+    console.error(`❌ Ошибка отправки сообщения в Telegram пользователю ${chatId}:`, error);
     return false;
   }
 }
@@ -4681,8 +4684,10 @@ app.post('/api/admin/confirm-order', async (req, res) => {
     
     // Отправляем уведомление пользователю
     const telegramId = await getTelegramIdByOrderId(orderId, type);
+    console.log(`🔍 Подтверждение заказа: orderId=${orderId}, type=${type}, telegramId=${telegramId}`);
     if (telegramId) {
-      await sendUserNotification(telegramId, 'confirm', type, orderId);
+      const notificationResult = await sendUserNotification(telegramId, 'confirm', type, orderId);
+      console.log(`📤 Результат отправки уведомления: ${notificationResult}`);
       
       // Обновляем статистику пользователя только после подтверждения
       await updateUserStatsAfterConfirmation(telegramId, orderId, type);
@@ -4869,7 +4874,13 @@ async function getTelegramIdByOrderId(orderId, type) {
 
 async function sendUserNotification(telegramId, action, type, orderId) {
   try {
+    console.log(`📤 sendUserNotification вызвана: telegramId=${telegramId}, action=${action}, type=${type}, orderId=${orderId}`);
     const botToken = process.env.BOT_TOKEN;
+    
+    if (!botToken) {
+      console.error('❌ BOT_TOKEN не настроен, уведомление не отправлено');
+      return false;
+    }
     
     let message = '';
     if (action === 'confirm') {
@@ -4882,6 +4893,7 @@ async function sendUserNotification(telegramId, action, type, orderId) {
       message = `😔 К сожалению, ваш заказ #${orderId} был отменен. Очень жаль, надеемся в следующий раз закажете еще! Если у вас есть вопросы, обращайтесь к нашему менеджеру.`;
     }
     
+    console.log(`📤 Отправляем уведомление пользователю ${telegramId}: ${message.substring(0, 50)}...`);
     const url = `https://api.telegram.org/bot${botToken}/sendMessage`;
     const data = JSON.stringify({
       chat_id: telegramId,
@@ -4905,10 +4917,10 @@ async function sendUserNotification(telegramId, action, type, orderId) {
         });
         res.on('end', () => {
           if (res.statusCode === 200) {
-            console.log('✅ Уведомление пользователю отправлено');
+            console.log(`✅ Уведомление пользователю ${telegramId} отправлено успешно`);
             resolve(true);
           } else {
-            console.error('❌ Ошибка отправки уведомления:', responseData);
+            console.error(`❌ Ошибка отправки уведомления пользователю ${telegramId}:`, responseData);
             resolve(false);
           }
         });
