@@ -506,6 +506,49 @@ function commissionForLevel(level) {
   }
 }
 
+function xpKey(source, sourceId) {
+  return `${String(source)}:${sourceId === null || sourceId === undefined ? 'null' : String(sourceId)}`;
+}
+
+async function getExistingUserState(conn, telegramId) {
+  // XP keys (for idempotency checks)
+  const [xpKeysRows] = await conn.query(
+    'SELECT source, source_id FROM xp_history WHERE telegram_id = ?',
+    [telegramId]
+  );
+  const existingXpKeys = new Set(xpKeysRows.map((r) => xpKey(r.source, r.source_id)));
+
+  // Existing XP sum
+  const [[xpSumRow]] = await conn.query(
+    'SELECT COALESCE(SUM(xp_amount), 0) AS total_xp FROM xp_history WHERE telegram_id = ?',
+    [telegramId]
+  );
+  const existingXpTotal = Number(xpSumRow?.total_xp || 0);
+
+  // Already unlocked achievements
+  const [uaRows] = await conn.query(
+    'SELECT achievement_key FROM user_achievements WHERE telegram_id = ?',
+    [telegramId]
+  );
+  const existingAchievementKeys = new Set(uaRows.map((r) => String(r.achievement_key)));
+
+  // Current user fields we may update
+  const [[userRow]] = await conn.query(
+    'SELECT commission, current_level FROM users WHERE telegram_id = ?',
+    [telegramId]
+  );
+  const currentCommission = Number(userRow?.commission ?? 1000);
+  const currentLevel = String(userRow?.current_level || 'Bronze');
+
+  return {
+    existingXpKeys,
+    existingXpTotal,
+    existingAchievementKeys,
+    currentCommission,
+    currentLevel
+  };
+}
+
 async function updateCommissionByLevelIfNoActiveReferral(conn, telegramId, level, dryRun) {
   try {
     const [[row]] = await conn.query('SELECT commission FROM users WHERE telegram_id = ?', [telegramId]);
@@ -653,7 +696,9 @@ async function main() {
     levelUpdates: 0,
     commissionsUpdated: 0,
     tempDiscountAppliedUsers: 0,
-    tempDiscountAppliedFailures: 0
+    tempDiscountAppliedFailures: 0,
+    levelsBefore: {},
+    levelsAfter: {}
   };
 
   console.log(`ℹ️ Backfill gamification: users=${users.length}, mode=${dryRun ? 'DRY-RUN' : 'APPLY'}`);
@@ -695,9 +740,22 @@ async function main() {
 
       await updateUserCachedStats(conn, facts, dryRun);
 
+      const existingState = await getExistingUserState(conn, telegramId);
+      summary.levelsBefore[existingState.currentLevel] = (summary.levelsBefore[existingState.currentLevel] || 0) + 1;
+
       // XP from actions
+      let xpWouldAdd = 0;
       for (const e of [...orderXpEvents, ...yuanXpEvents, ...referralXpEvents]) {
-        const res = await insertXpIfMissing(conn, e, dryRun);
+        if (dryRun) {
+          const key = xpKey(e.source, e.sourceId);
+          if (!existingState.existingXpKeys.has(key)) {
+            summary.xpRowsInserted += 1;
+            xpWouldAdd += Number(e.xpAmount || 0);
+          }
+          continue;
+        }
+
+        const res = await insertXpIfMissing(conn, e, false);
         if (res.inserted) summary.xpRowsInserted += 1;
       }
 
@@ -711,8 +769,16 @@ async function main() {
         if (!achievement) continue;
         const unlockedAt = unlockedAtForAchievement(key, facts);
         if (dryRun) {
-          summary.achievementsInserted += 1;
-          if (achievement.xpReward > 0) summary.xpRowsInserted += 1;
+          if (!existingState.existingAchievementKeys.has(achievement.key)) {
+            summary.achievementsInserted += 1;
+          }
+          if (achievement.xpReward > 0) {
+            const k = xpKey('achievement', achievement.id);
+            if (!existingState.existingXpKeys.has(k)) {
+              summary.xpRowsInserted += 1;
+              xpWouldAdd += Number(achievement.xpReward || 0);
+            }
+          }
           if (achievement.additionalReward) {
             const d = parseDiscountDurationDays(achievement.additionalReward) || 0;
             if (d > maxDiscountDays) maxDiscountDays = d;
@@ -730,19 +796,35 @@ async function main() {
       }
 
       // Recompute exact XP from xp_history (source of truth)
-      const xpRecalc = await recomputeUserXpFromHistory(conn, telegramId, dryRun);
-      if (xpRecalc && (xpRecalc.updated || xpRecalc.dryRun)) summary.xpRecomputedUsers += 1;
+      // In DRY-RUN we simulate "future XP" as existing_xp_total + xpWouldAdd.
+      let simulatedTotalXp = null;
+      if (dryRun) {
+        simulatedTotalXp = existingState.existingXpTotal + xpWouldAdd;
+        summary.xpRecomputedUsers += 1;
+      } else {
+        const xpRecalc = await recomputeUserXpFromHistory(conn, telegramId, false);
+        if (xpRecalc && xpRecalc.updated) summary.xpRecomputedUsers += 1;
+        simulatedTotalXp = xpRecalc?.totalXP ?? null;
+      }
 
       // Update level after XP recompute
-      const lvl = await updateUserLevel(conn, telegramId, dryRun);
-      if (lvl.updated) summary.levelUpdates += 1;
+      let finalLevel = existingState.currentLevel;
+      if (dryRun) {
+        finalLevel = calculateLevel(Number(simulatedTotalXp || 0));
+        if (finalLevel !== existingState.currentLevel) summary.levelUpdates += 1;
+      } else {
+        const lvl = await updateUserLevel(conn, telegramId, false);
+        if (lvl.updated) summary.levelUpdates += 1;
+        // Read back current level for accurate stats/commission
+        const [[row]] = await conn.query('SELECT current_level FROM users WHERE telegram_id = ?', [telegramId]);
+        finalLevel = String(row?.current_level || 'Bronze');
+      }
+      summary.levelsAfter[finalLevel] = (summary.levelsAfter[finalLevel] || 0) + 1;
 
       // Persist level-based commission (for correct display in profile),
       // but do NOT worsen current commission (referral/other better discounts keep priority).
       {
-        const [[row]] = await conn.query('SELECT current_level FROM users WHERE telegram_id = ?', [telegramId]);
-        const level = String(row?.current_level || 'Bronze');
-        const commRes = await updateCommissionByLevelIfNoActiveReferral(conn, telegramId, level, dryRun);
+        const commRes = await updateCommissionByLevelIfNoActiveReferral(conn, telegramId, finalLevel, dryRun);
         if (commRes && commRes.updated) summary.commissionsUpdated += 1;
       }
 
