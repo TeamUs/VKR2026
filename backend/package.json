@@ -5,7 +5,9 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "dev": "nodemon server.js"
+    "dev": "nodemon server.js",
+    "backfill:gamification": "node backfill-gamification.js",
+    "backfill:gamification:apply": "node backfill-gamification.js --apply"
   },
   "keywords": [
     "telegram",
