@@ -507,8 +507,6 @@ function commissionForLevel(level) {
 }
 
 async function updateCommissionByLevelIfNoActiveReferral(conn, telegramId, level, dryRun) {
-  if (dryRun) return { updated: true, dryRun: true };
-
   try {
     const [[row]] = await conn.query('SELECT commission FROM users WHERE telegram_id = ?', [telegramId]);
     if (!row) return { updated: false };
@@ -519,6 +517,10 @@ async function updateCommissionByLevelIfNoActiveReferral(conn, telegramId, level
     // (e.g. referral 400 or 0), keep the better one.
     const finalCommission = Number.isFinite(current) ? Math.min(current, desired) : desired;
     if (Number.isFinite(current) && current === finalCommission) return { updated: false };
+
+    if (dryRun) {
+      return { updated: true, dryRun: true, from: current, to: finalCommission, levelCommission: desired };
+    }
 
     await conn.query('UPDATE users SET commission = ? WHERE telegram_id = ?', [finalCommission, telegramId]);
     return { updated: true, from: current, to: finalCommission, levelCommission: desired };
@@ -737,10 +739,10 @@ async function main() {
 
       // Persist level-based commission (for correct display in profile),
       // but do NOT worsen current commission (referral/other better discounts keep priority).
-      if (!dryRun) {
+      {
         const [[row]] = await conn.query('SELECT current_level FROM users WHERE telegram_id = ?', [telegramId]);
         const level = String(row?.current_level || 'Bronze');
-        const commRes = await updateCommissionByLevelIfNoActiveReferral(conn, telegramId, level, false);
+        const commRes = await updateCommissionByLevelIfNoActiveReferral(conn, telegramId, level, dryRun);
         if (commRes && commRes.updated) summary.commissionsUpdated += 1;
       }
 
