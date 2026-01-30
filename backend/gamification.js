@@ -394,12 +394,15 @@ class GamificationService {
     });
 
     return allAchievements.map(achievement => ({
+      id: achievement.id,
       key: achievement.achievement_key,
+      achievement_key: achievement.achievement_key,
       name: achievement.name,
       description: achievement.description,
       category: achievement.category,
       icon: achievement.icon,
       requirement: achievement.requirement,
+      xp_reward: achievement.xp_reward,
       xpReward: achievement.xp_reward,
       unlocked: !!unlockedMap[achievement.achievement_key],
       unlockedAt: unlockedMap[achievement.achievement_key] || null

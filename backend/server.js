@@ -4449,7 +4449,7 @@ app.get('/api/admin/users', async (req, res) => {
           ELSE 'offline'
         END as status,
         COUNT(DISTINCT CASE WHEN o.status = 'completed' THEN o.order_id END) as orders_count,
-        COUNT(DISTINCT CASE WHEN yp.status = 'completed' THEN yp.purchase_id END) as yuan_purchases_count,
+        COUNT(DISTINCT CASE WHEN yp.status = 'completed' THEN yp.id END) as yuan_purchases_count,
         COALESCE(SUM(CASE WHEN yp.status = 'completed' THEN yp.savings ELSE 0 END), 0) as yuan_savings,
         COALESCE(SUM(CASE WHEN (o.status = 'paid' OR o.status = 'completed') THEN o.estimated_savings ELSE 0 END), 0) as order_savings,
         COALESCE(SUM(CASE WHEN yp.status = 'completed' THEN yp.savings ELSE 0 END), 0) + COALESCE(SUM(CASE WHEN o.status = 'completed' THEN o.estimated_savings ELSE 0 END), 0) as total_savings,
@@ -4702,7 +4702,7 @@ app.post('/api/admin/confirm-order', async (req, res) => {
       );
     } else if (type === 'yuan') {
       await dbConnection.execute(
-        'UPDATE yuan_purchases SET status = ? WHERE purchase_id = ?',
+        'UPDATE yuan_purchases SET status = ? WHERE id = ?',
         ['completed', orderId]
       );
     }
@@ -4782,7 +4782,7 @@ app.post('/api/admin/confirm-order', async (req, res) => {
           } else if (type === 'yuan') {
             // Покупка юаней подтверждена - даем XP (1 за 100₽)
             const [yuanData] = await dbConnection.execute(
-              'SELECT amount_rub FROM yuan_purchases WHERE purchase_id = ?',
+              'SELECT amount_rub FROM yuan_purchases WHERE id = ?',
               [orderId]
             );
             
@@ -4857,7 +4857,7 @@ app.post('/api/admin/cancel-order', async (req, res) => {
       );
     } else if (type === 'yuan') {
       await dbConnection.execute(
-        'UPDATE yuan_purchases SET status = ? WHERE purchase_id = ?',
+        'UPDATE yuan_purchases SET status = ? WHERE id = ?',
         ['cancelled', orderId]
       );
     }
@@ -4886,7 +4886,7 @@ async function getTelegramIdByOrderId(orderId, type) {
       return result[0]?.telegram_id;
     } else if (type === 'yuan') {
       const [result] = await dbConnection.execute(
-        'SELECT telegram_id FROM yuan_purchases WHERE purchase_id = ?',
+        'SELECT telegram_id FROM yuan_purchases WHERE id = ?',
         [orderId]
       );
       return result[0]?.telegram_id;
@@ -4990,7 +4990,7 @@ async function updateUserStatsAfterConfirmation(telegramId, orderId, type) {
     } else if (type === 'yuan') {
       // Получаем данные покупки юаней
       const [yuanData] = await dbConnection.execute(`
-        SELECT savings FROM yuan_purchases WHERE purchase_id = ? AND telegram_id = ?
+        SELECT savings FROM yuan_purchases WHERE id = ? AND telegram_id = ?
       `, [orderId, telegramId]);
       
       if (yuanData.length > 0) {
@@ -5153,7 +5153,7 @@ app.get('/api/admin/users-list', async (req, res) => {
             u.full_name,
             u.created_at,
             COUNT(DISTINCT o.order_id) as orders_count,
-            COUNT(DISTINCT yp.purchase_id) as yuan_purchases_count
+            COUNT(DISTINCT yp.id) as yuan_purchases_count
           FROM users u
           LEFT JOIN orders o ON u.telegram_id = o.telegram_id AND o.status = 'completed'
           LEFT JOIN yuan_purchases yp ON u.telegram_id = yp.telegram_id AND yp.status = 'completed'
@@ -5391,7 +5391,7 @@ app.get('/api/admin/user-history/:telegramId', async (req, res) => {
             u.created_at,
             u.referred_by,
             COUNT(DISTINCT o.order_id) as total_orders,
-            COUNT(DISTINCT yp.purchase_id) as total_yuan_purchases,
+            COUNT(DISTINCT yp.id) as total_yuan_purchases,
             COALESCE(SUM(CASE WHEN o.status = 'completed' THEN o.estimated_savings ELSE 0 END), 0) as total_savings_orders,
             COALESCE(SUM(CASE WHEN yp.status = 'completed' THEN yp.savings ELSE 0 END), 0) as total_savings_yuan
           FROM users u

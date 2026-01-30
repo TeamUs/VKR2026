@@ -1785,7 +1785,7 @@ const Profile: React.FC<ProfileProps> = ({ telegramId, isDarkTheme, toggleTheme,
                   requirement: ach.requirement || '',
                   unlocked: Boolean(ach.unlocked),
                   unlockedAt: ach.unlocked_at || null,
-                  xpReward: ach.xp_reward || 0
+                  xpReward: ach.xpReward ?? ach.xp_reward ?? 0
                 });
               });
             });
@@ -1802,7 +1802,7 @@ const Profile: React.FC<ProfileProps> = ({ telegramId, isDarkTheme, toggleTheme,
               requirement: ach.requirement || '',
               unlocked: Boolean(ach.unlocked),
               unlockedAt: ach.unlocked_at || null,
-              xpReward: ach.xp_reward || 0
+              xpReward: ach.xpReward ?? ach.xp_reward ?? 0
             })));
           }
           
