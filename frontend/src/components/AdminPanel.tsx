@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, Component } from 'react';
 import styled, { keyframes } from 'styled-components';
+import { MonitoringContent } from './MonitoringContent';
 
-// Error Boundary для раздела мониторинга
 class MonitoringErrorBoundary extends Component<{ children: React.ReactNode }> {
   state = { hasError: false };
   static getDerivedStateFromError() { return { hasError: true }; }
@@ -1374,11 +1374,12 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
     setMonitoringError(null);
     setSystemStatus(null);
     try {
-      const response = await fetch('/api/admin/system-status', {
-        headers: {
-          'X-Telegram-User-Id': window.Telegram?.WebApp?.initDataUnsafe?.user?.id?.toString() || ''
-        }
-      });
+      const headers: Record<string, string> = {
+        'X-Telegram-User-Id': (typeof window !== 'undefined' && window.Telegram?.WebApp?.initDataUnsafe?.user?.id)?.toString() || ''
+      };
+      const initData = typeof window !== 'undefined' ? window.Telegram?.WebApp?.initData : '';
+      if (initData) headers['x-telegram-init-data'] = initData;
+      const response = await fetch('/api/admin/system-status', { headers });
       const data = await response.json();
       if (response.ok && data && data.success !== false) {
         setSystemStatus(data.data || {});
@@ -3532,138 +3533,11 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
           <Section id="monitoring-section" $isDark={isDarkTheme}>
             <SectionTitle>🔧 Мониторинг системы</SectionTitle>
             <MonitoringErrorBoundary>
-            {systemStatus && typeof systemStatus === 'object' ? (
-              <div style={{ display: 'grid', gap: '20px' }}>
-                {(['pm2Backend', 'frontend', 'nginx', 'telegramApi', 'database', 'server', 'sync', 'api'] as const).map((key) => {
-                  const cardStyle = {
-                    padding: '16px',
-                    backgroundColor: 'var(--bg-card)',
-                    borderRadius: '12px',
-                    border: '1px solid var(--border-color)'
-                  };
-                  const renderStatusBadge = (ok: boolean) => (
-                    <span style={{ color: ok ? 'var(--success-color)' : 'var(--error-color)', fontWeight: 'bold' }}>
-                      {ok ? '✅' : '❌'}
-                    </span>
-                  );
-                  if (key === 'pm2Backend') {
-                    const s = systemStatus.pm2Backend || systemStatus.server;
-                    return (
-                      <div key={key} style={cardStyle}>
-                        <h3 style={{ color: 'var(--text-primary)', marginBottom: '12px' }}>⚙️ PM2 Backend</h3>
-                        <div style={{ display: 'grid', gap: '8px' }}>
-                          <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Статус:</span><span>{renderStatusBadge(s?.status === 'running')} {s?.status === 'running' ? 'Работает' : 'Остановлен'}</span></div>
-                          <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Время работы:</span><span>{s?.uptime ? `${Math.floor(s.uptime / 3600)}ч ${Math.floor((s.uptime % 3600) / 60)}м` : '—'}</span></div>
-                          <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Память:</span><span>{s?.memoryMB ?? (s?.memory?.heapUsed ? (s.memory.heapUsed / 1024 / 1024).toFixed(1) : '—')} MB</span></div>
-                          <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Node.js:</span><span>{s?.nodeVersion ?? '—'}</span></div>
-                        </div>
-                      </div>
-                    );
-                  }
-                  if (key === 'frontend') {
-                    const s = systemStatus.frontend;
-                    const buildTime = s?.buildTimeLocal ?? (s?.buildTime ? new Date(s.buildTime).toLocaleString('ru-RU') : null);
-                    return (
-                      <div key={key} style={cardStyle}>
-                        <h3 style={{ color: 'var(--text-primary)', marginBottom: '12px' }}>🌐 Frontend</h3>
-                        <div style={{ display: 'grid', gap: '8px' }}>
-                          <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Последняя сборка:</span><span>{buildTime ?? '—'}</span></div>
-                        </div>
-                      </div>
-                    );
-                  }
-                  if (key === 'nginx') {
-                    const s = systemStatus.nginx;
-                    const ok = s?.status === 'running';
-                    return (
-                      <div key={key} style={cardStyle}>
-                        <h3 style={{ color: 'var(--text-primary)', marginBottom: '12px' }}>🔀 Nginx</h3>
-                        <div style={{ display: 'grid', gap: '8px' }}>
-                          <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Статус:</span><span>{renderStatusBadge(!!ok)} {s?.status === 'running' ? 'Работает' : s?.status === 'stopped' ? 'Остановлен' : 'Неизвестно'}</span></div>
-                        </div>
-                      </div>
-                    );
-                  }
-                  if (key === 'telegramApi') {
-                    const s = systemStatus.telegramApi;
-                    const ok = s?.status === 'ok';
-                    return (
-                      <div key={key} style={cardStyle}>
-                        <h3 style={{ color: 'var(--text-primary)', marginBottom: '12px' }}>📱 Telegram API</h3>
-                        <div style={{ display: 'grid', gap: '8px' }}>
-                          <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Статус:</span><span>{renderStatusBadge(!!ok)} {ok ? 'OK' : (s?.message ?? 'Ошибка')}</span></div>
-                        </div>
-                      </div>
-                    );
-                  }
-                  if (key === 'database') {
-                    const s = systemStatus.database;
-                    const ok = s?.status === 'connected';
-                    return (
-                      <div key={key} style={cardStyle}>
-                        <h3 style={{ color: 'var(--text-primary)', marginBottom: '12px' }}>🗄️ База данных</h3>
-                        <div style={{ display: 'grid', gap: '8px' }}>
-                          <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Статус:</span><span>{renderStatusBadge(!!ok)} {ok ? 'Подключена' : 'Отключена'}</span></div>
-                          <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Время отклика:</span><span>{s?.responseTime ?? 0}мс</span></div>
-                        </div>
-                      </div>
-                    );
-                  }
-                  if (key === 'server') {
-                    const s = systemStatus.server;
-                    return (
-                      <div key={key} style={cardStyle}>
-                        <h3 style={{ color: 'var(--text-primary)', marginBottom: '12px' }}>🖥️ Сервер</h3>
-                        <div style={{ display: 'grid', gap: '8px' }}>
-                          <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Хост:</span><span>{s?.hostname ?? '—'}</span></div>
-                          <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Память:</span><span>{s?.memoryUsedPercent ?? '—'}% ({s?.memoryUsedMB ?? '—'} MB)</span></div>
-                          <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Нагрузка:</span><span>{s?.loadAvg ? s.loadAvg.join(', ') : '—'}</span></div>
-                        </div>
-                      </div>
-                    );
-                  }
-                  if (key === 'sync') {
-                    const s = systemStatus.sync;
-                    return (
-                      <div key={key} style={cardStyle}>
-                        <h3 style={{ color: 'var(--text-primary)', marginBottom: '12px' }}>🔄 Синхронизация (Git)</h3>
-                        <div style={{ display: 'grid', gap: '8px' }}>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: '4px' }}><span>Последний коммит:</span><span style={{ wordBreak: 'break-all' }}>{s?.lastCommit ?? '—'}</span></div>
-                        </div>
-                      </div>
-                    );
-                  }
-                  if (key === 'api') {
-                    return (
-                      <div key={key} style={cardStyle}>
-                        <h3 style={{ color: 'var(--text-primary)', marginBottom: '12px' }}>📡 API</h3>
-                        <div style={{ display: 'grid', gap: '8px' }}>
-                          <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Время ответа:</span><span>{systemStatus.api?.responseTime ?? systemStatus.responseTime ?? 0}мс</span></div>
-                          <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Обновлено:</span><span>{new Date(systemStatus.timestamp).toLocaleString('ru-RU')}</span></div>
-                        </div>
-                      </div>
-                    );
-                  }
-                  return null;
-                })}
-              </div>
-            ) : monitoringError ? (
-              <div style={{ textAlign: 'center', padding: '40px', color: 'var(--text-primary)' }}>
-                <div style={{ fontSize: '2rem', marginBottom: '16px' }}>⚠️</div>
-                <p>{monitoringError}</p>
-                <button
-                  onClick={loadSystemStatus}
-                  style={{ marginTop: '16px', padding: '8px 16px', borderRadius: '8px', cursor: 'pointer' }}
-                >
-                  Повторить
-                </button>
-              </div>
-            ) : (
-              <div style={{ textAlign: 'center', padding: '40px' }}>
-                <div style={{ fontSize: '2rem', marginBottom: '16px' }}>⏳</div>
-                <p>Загрузка статуса системы...</p>
-              </div>
-            )}
+              <MonitoringContent
+                systemStatus={systemStatus}
+                monitoringError={monitoringError}
+                onRetry={loadSystemStatus}
+              />
             </MonitoringErrorBoundary>
           </Section>
         )}
