@@ -930,19 +930,21 @@ class GamificationService {
       if (!result.alreadyUnlocked) unlocked.push(result);
     }
 
-    // Дракон-сберегатель - 2,000₽ экономии
-    const [totalSavings] = await this.pool.query(
-      'SELECT total_savings FROM users WHERE telegram_id = ?',
-      [telegramId]
-    );
-    
-    if (totalSavings[0]?.total_savings >= 2000) {
+    // Дракон-сберегатель и Имперская экономия — считаем экономию так же, как в профиле:
+    // yuan_purchases.savings (completed) + orders.estimated_savings (paid/completed)
+    // users.total_savings может быть не синхронизирована со старыми данными
+    const [savingsRows] = await this.pool.query(`
+      SELECT 
+        (SELECT COALESCE(SUM(savings), 0) FROM yuan_purchases WHERE telegram_id = ? AND status = 'completed') +
+        (SELECT COALESCE(SUM(estimated_savings), 0) FROM orders WHERE telegram_id = ? AND status IN ('paid', 'completed')) as total_savings
+    `, [telegramId, telegramId]);
+    const realTotalSavings = parseFloat(savingsRows[0]?.total_savings) || 0;
+
+    if (realTotalSavings >= 2000) {
       const result = await this.checkAndUnlockAchievement(telegramId, 'dragon_saver');
       if (!result.alreadyUnlocked) unlocked.push(result);
     }
-
-    // Имперская экономия - 50,000₽ экономии
-    if (totalSavings[0]?.total_savings >= 50000) {
+    if (realTotalSavings >= 50000) {
       const result = await this.checkAndUnlockAchievement(telegramId, 'imperial_economy');
       if (!result.alreadyUnlocked) unlocked.push(result);
     }

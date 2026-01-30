@@ -4830,6 +4830,18 @@ app.post('/api/admin/confirm-order', async (req, res) => {
               }
             }
           }
+          // Проверяем достижения по экономии (2 000₽, 50 000₽) — после подтверждения заказа или юаней
+          const savingsAchievements = await gamificationService.checkSavingsAchievements(telegramId);
+          for (const sa of savingsAchievements) {
+            if (!sa.alreadyUnlocked && sa.achievement) {
+              let msg = `🏆 <b>Достижение разблокировано!</b>\n\n` +
+                `${sa.achievement.icon} <b>${sa.achievement.name}</b>\n` +
+                `📝 ${sa.achievement.description}\n\n` +
+                `🎁 Награда: +${sa.achievement.xpReward} XP`;
+              if (sa.achievement.additionalReward) msg += `\n✨ Бонус: ${sa.achievement.additionalReward}`;
+              await sendTelegramMessage(telegramId, msg);
+            }
+          }
         }
       } catch (gamificationError) {
         console.error('❌ Ошибка начисления XP при подтверждении:', gamificationError);
