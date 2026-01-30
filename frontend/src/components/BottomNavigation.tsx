@@ -22,7 +22,7 @@ const NavigationContainer = styled.div<{ $isDark: boolean; $hideNavigation?: boo
   border-top: 1px solid ${props => props.$isDark ? 'rgba(196, 77, 77, 0.3)' : 'rgba(162, 59, 59, 0.2)'};
   backdrop-filter: blur(25px) saturate(1.3) brightness(1.1);
   z-index: 9999;
-  padding: 4px 0 6px 0;
+  padding: 4px 0 calc(6px + env(safe-area-inset-bottom, 0px)) 0;
   display: ${props => props.$hideNavigation ? 'none' : 'block'};
   margin: 0;
 `;
