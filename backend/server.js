@@ -5257,6 +5257,7 @@ app.get('/api/admin/users-list', async (req, res) => {
 
 // Мониторинг системы
 app.get('/api/admin/system-status', async (req, res) => {
+  console.log('📊 /api/admin/system-status - запрос получен');
   try {
     const startTime = Date.now();
 
@@ -5359,9 +5360,10 @@ app.get('/api/admin/system-status', async (req, res) => {
       responseTime
     };
 
+    console.log('📊 /api/admin/system-status - успешно');
     res.json({ success: true, data: systemStats });
   } catch (error) {
-    console.error('Ошибка получения статуса системы:', error);
+    console.error('❌ Ошибка получения статуса системы:', error);
     res.status(500).json({ error: 'Ошибка получения статуса системы' });
   }
 });
