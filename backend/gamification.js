@@ -97,11 +97,22 @@ class GamificationService {
         [newXP, telegramId]
       );
 
-      // Log XP history
-      await connection.query(
-        'INSERT INTO xp_history (telegram_id, xp_amount, source, source_id, description) VALUES (?, ?, ?, ?, ?)',
-        [telegramId, xpAmount, source, sourceId, description]
-      );
+      // Log XP history (поддержка: source/source_id или reason/entity_type/entity_id)
+      try {
+        await connection.query(
+          'INSERT INTO xp_history (telegram_id, xp_amount, source, source_id, description) VALUES (?, ?, ?, ?, ?)',
+          [telegramId, xpAmount, source, sourceId != null ? String(sourceId) : null, description]
+        );
+      } catch (xpErr) {
+        if (xpErr.code === 'ER_BAD_FIELD_ERROR') {
+          await connection.query(
+            'INSERT INTO xp_history (telegram_id, xp_amount, reason, entity_type, entity_id, description) VALUES (?, ?, ?, ?, ?, ?)',
+            [telegramId, xpAmount, source, source, sourceId != null ? String(sourceId) : null, description]
+          );
+        } else {
+          throw xpErr;
+        }
+      }
 
       // Check for level up
       const newLevel = this.calculateLevel(newXP);
@@ -218,11 +229,24 @@ class GamificationService {
     try {
       await connection.beginTransaction();
 
-      // Check if already unlocked
-      const [existing] = await connection.query(
-        'SELECT * FROM user_achievements WHERE telegram_id = ? AND achievement_key = ?',
-        [telegramId, achievementKey]
-      );
+      // Check if already unlocked (поддержка telegram_id/achievement_key или user_id/achievement_id)
+      let existing = [];
+      try {
+        [existing] = await connection.query(
+          'SELECT * FROM user_achievements WHERE telegram_id = ? AND achievement_key = ?',
+          [telegramId, achievementKey]
+        );
+      } catch (e) {
+        if (e.code === 'ER_BAD_FIELD_ERROR') {
+          const [achRows] = await connection.query('SELECT id FROM achievements WHERE achievement_key = ?', [achievementKey]);
+          if (achRows.length > 0) {
+            [existing] = await connection.query(
+              'SELECT * FROM user_achievements WHERE user_id = ? AND achievement_id = ?',
+              [telegramId, achRows[0].id]
+            );
+          }
+        } else throw e;
+      }
 
       if (existing.length > 0) {
         await connection.commit();
@@ -245,10 +269,22 @@ class GamificationService {
       console.log(`[Achievement] Найдено достижение: ${achievement.name} (${achievementKey}) для ${telegramId}`);
 
       // Unlock achievement - записываем в БД
-      await connection.query(
-        'INSERT INTO user_achievements (telegram_id, achievement_key, unlocked_at, xp_awarded) VALUES (?, ?, NOW(), ?)',
-        [telegramId, achievementKey, achievement.xp_reward]
-      );
+      // Поддержка двух схем: (telegram_id, achievement_key) или (user_id, achievement_id)
+      try {
+        await connection.query(
+          'INSERT INTO user_achievements (telegram_id, achievement_key, unlocked_at, xp_awarded) VALUES (?, ?, NOW(), ?)',
+          [telegramId, achievementKey, achievement.xp_reward]
+        );
+      } catch (insertErr) {
+        if (insertErr.code === 'ER_BAD_FIELD_ERROR' || insertErr.code === 'ER_NO_SUCH_TABLE') {
+          await connection.query(
+            'INSERT INTO user_achievements (user_id, achievement_id, unlocked_at) VALUES (?, ?, NOW())',
+            [telegramId, achievement.id]
+          );
+        } else {
+          throw insertErr;
+        }
+      }
       console.log(`[Achievement] ✅ Достижение ${achievementKey} записано в БД для пользователя ${telegramId}`);
 
       // Award XP bonus - начисляем XP за достижение
@@ -336,10 +372,21 @@ class GamificationService {
       'SELECT * FROM achievements ORDER BY category, id'
     );
 
-    const [userAchievements] = await this.pool.query(
-      'SELECT achievement_key, unlocked_at FROM user_achievements WHERE telegram_id = ?',
-      [telegramId]
-    );
+    let userAchievements = [];
+    try {
+      [userAchievements] = await this.pool.query(
+        'SELECT achievement_key, unlocked_at FROM user_achievements WHERE telegram_id = ?',
+        [telegramId]
+      );
+    } catch (e) {
+      if (e.code === 'ER_BAD_FIELD_ERROR') {
+        [userAchievements] = await this.pool.query(
+          `SELECT a.achievement_key, ua.unlocked_at FROM user_achievements ua 
+           JOIN achievements a ON a.id = ua.achievement_id WHERE ua.user_id = ?`,
+          [telegramId]
+        );
+      } else throw e;
+    }
 
     const unlockedMap = {};
     userAchievements.forEach(ua => {
@@ -660,15 +707,12 @@ class GamificationService {
       }
     }
 
-    // Dragon Summoner - Реферал сделал свой первый заказ
-    // Если это первый заказ пользователя (totalOrders === 1) и у него есть реферер
-    // Достижение разблокируется у РЕФЕРЕРА (того, кто пригласил)
+    // Dragon Summoner — реферал сделал свой первый заказ (реферер получает достижение)
     if (totalOrders === 1 && referredBy) {
-      const result = await this.checkAndUnlockAchievement(referredBy, 'dragon_summoner');
-      if (!result.alreadyUnlocked) {
-        // Добавляем информацию о том, кому разблокировано достижение
-        result.unlockedFor = referredBy; // Реферер получает достижение
-        unlocked.push(result);
+      const dragonResult = await this.checkAndUnlockAchievement(referredBy, 'dragon_summoner');
+      if (!dragonResult.alreadyUnlocked) {
+        dragonResult.unlockedFor = referredBy;
+        unlocked.push(dragonResult);
       }
     }
 
@@ -685,25 +729,19 @@ class GamificationService {
     await this.init();
     const unlocked = [];
 
-    // First Follower - First active referral (with order)
-    const [activeReferrals] = await this.pool.query(
-      'SELECT COUNT(DISTINCT u.telegram_id) as count FROM users u JOIN orders o ON u.telegram_id = o.telegram_id WHERE u.referred_by = ?',
-      [referrerId]
-    );
-
-    if (activeReferrals[0].count >= 1) {
-      const result = await this.checkAndUnlockAchievement(referrerId, 'first_follower');
-      if (!result.alreadyUnlocked) unlocked.push(result);
-    }
-
-    // Lucky Chain - 3 referrals
-    // Получаем общее количество рефералов
+    // Получаем общее количество рефералов (кто запустил приложение по ссылке)
     const [totalReferralsResult] = await this.pool.query(
       'SELECT COUNT(*) as count FROM users WHERE referred_by = ?',
       [referrerId]
     );
-
     const totalReferrals = totalReferralsResult[0]?.count || 0;
+
+    // First Follower — реферал запустил приложение по ссылке реферера (достаточно регистрации)
+
+    if (totalReferrals >= 1) {
+      const result = await this.checkAndUnlockAchievement(referrerId, 'first_follower');
+      if (!result.alreadyUnlocked) unlocked.push(result);
+    }
 
     if (totalReferrals >= 3) {
       const result = await this.checkAndUnlockAchievement(referrerId, 'lucky_chain');
@@ -752,15 +790,15 @@ class GamificationService {
     await this.init();
     const unlocked = [];
 
-    // Get purchase statistics
+    // Get purchase statistics (amount_cny в БД, не amount_yuan)
     const [purchaseStats] = await this.pool.query(
-      'SELECT COUNT(*) as count, COALESCE(SUM(amount_rub), 0) as total_rub, COALESCE(SUM(amount_yuan), 0) as total_yuan FROM yuan_purchases WHERE telegram_id = ? AND status = "completed"',
+      'SELECT COUNT(*) as count, COALESCE(SUM(amount_rub), 0) as total_rub, COALESCE(SUM(amount_cny), 0) as total_yuan FROM yuan_purchases WHERE telegram_id = ? AND status = "completed"',
       [telegramId]
     );
 
     const purchaseCount = purchaseStats[0]?.count || 0;
-    const totalRub = purchaseStats[0]?.total_rub || 0;
-    const totalYuan = purchaseStats[0]?.total_yuan || 0;
+    const totalRub = Number(purchaseStats[0]?.total_rub) || 0;
+    const totalYuan = Number(purchaseStats[0]?.total_yuan) || 0;
 
     // First Exchange - First yuan purchase
     if (purchaseCount === 1) {

@@ -2093,17 +2093,20 @@ app.post('/api/calculate-price', async (req, res) => {
         // Применяем награды от достижений
         // Проверяем временную скидку (600₽ вместо 1000₽) - применяется автоматически при разблокировке достижения
         // Здесь проверяем, активна ли временная скидка
-        const [discountData] = await dbConnection.execute(
-          'SELECT temp_discount_active, temp_discount_end_date FROM users WHERE telegram_id = ?',
-          [telegramId]
-        );
-        
-        if (discountData.length > 0 && discountData[0].temp_discount_active && 
-            discountData[0].temp_discount_end_date > new Date()) {
-          // Временная скидка активна - комиссия 600₽ вместо 1000₽
-          finalCommission = 600;
-          appliedRewards.push('Комиссия 600₽ вместо 1000₽ (временная скидка от достижения)');
+        let tempDiscountActive = false;
+        try {
+          const [discountData] = await dbConnection.execute(
+            'SELECT temp_discount_active, temp_discount_end_date FROM users WHERE telegram_id = ?',
+            [telegramId]
+          );
+          tempDiscountActive = discountData.length > 0 && 
+            discountData[0].temp_discount_active && 
+            discountData[0].temp_discount_end_date && 
+            new Date(discountData[0].temp_discount_end_date) > new Date();
+        } catch (e) {
+          if (e.code !== 'ER_BAD_FIELD_ERROR') throw e;
         }
+        const tempDiscountCommission = 600;
         
         // Применяем награды от уровня
         const [userData] = await dbConnection.execute(
@@ -2111,6 +2114,7 @@ app.post('/api/calculate-price', async (req, res) => {
           [telegramId]
         );
         
+        let levelCommission = commission; // по умолчанию
         if (userData.length > 0) {
           const userLevel = userData[0].current_level;
           
@@ -2123,32 +2127,29 @@ app.post('/api/calculate-price', async (req, res) => {
             );
             if (orderCount[0].count === 0) {
               // Первый заказ без комиссии (награда бронзового уровня)
-              finalCommission = 0;
+              levelCommission = 0;
               appliedRewards.push('Первый заказ без комиссии (Уровень Bronze)');
             }
           }
           
           switch (userLevel) {
-            case 'Silver':
-              // Комиссия 900₽ навсегда
-              finalCommission = 900;
-              appliedRewards.push('Комиссия 900₽ (Уровень Silver)');
-              break;
-            case 'Gold':
-              // Комиссия 700₽ навсегда
-              finalCommission = 700;
-              appliedRewards.push('Комиссия 700₽ (Уровень Gold)');
-              break;
-            case 'Platinum':
-              // Комиссия 400₽ навсегда
-              finalCommission = 400;
-              appliedRewards.push('Комиссия 400₽ (Уровень Platinum)');
-              break;
-            case 'Diamond':
-              // Комиссия 0₽ навсегда (полное освобождение)
-              finalCommission = 0;
-              appliedRewards.push('Комиссия 0₽ (Уровень Diamond)');
-              break;
+            case 'Silver': levelCommission = 900; break;
+            case 'Gold': levelCommission = 700; break;
+            case 'Platinum': levelCommission = 400; break;
+            case 'Diamond': levelCommission = 0; break;
+          }
+        }
+        
+        // Выбираем лучшую комиссию: временная (600₽) применяется только если выгоднее уровня
+        if (tempDiscountActive && tempDiscountCommission < levelCommission) {
+          finalCommission = tempDiscountCommission;
+          appliedRewards.push('Комиссия 600₽ вместо 1000₽ (временная скидка от достижения)');
+        } else {
+          finalCommission = levelCommission;
+          if (levelCommission < commission) {
+            const levelNames = { Silver: 'Silver', Gold: 'Gold', Platinum: 'Platinum', Diamond: 'Diamond' };
+            const lvl = userData[0]?.current_level;
+            if (lvl && levelNames[lvl]) appliedRewards.push(`Комиссия ${levelCommission}₽ (Уровень ${lvl})`);
           }
         }
         
@@ -4448,7 +4449,7 @@ app.get('/api/admin/users', async (req, res) => {
           ELSE 'offline'
         END as status,
         COUNT(DISTINCT CASE WHEN o.status = 'completed' THEN o.order_id END) as orders_count,
-        COUNT(DISTINCT CASE WHEN yp.status = 'completed' THEN yp.id END) as yuan_purchases_count,
+        COUNT(DISTINCT CASE WHEN yp.status = 'completed' THEN yp.purchase_id END) as yuan_purchases_count,
         COALESCE(SUM(CASE WHEN yp.status = 'completed' THEN yp.savings ELSE 0 END), 0) as yuan_savings,
         COALESCE(SUM(CASE WHEN (o.status = 'paid' OR o.status = 'completed') THEN o.estimated_savings ELSE 0 END), 0) as order_savings,
         COALESCE(SUM(CASE WHEN yp.status = 'completed' THEN yp.savings ELSE 0 END), 0) + COALESCE(SUM(CASE WHEN o.status = 'completed' THEN o.estimated_savings ELSE 0 END), 0) as total_savings,
@@ -4634,11 +4635,15 @@ app.get('/api/admin/user-details/:telegramId', async (req, res) => {
       [telegramId]
     );
     
-    // Достижения
-    const [achievements] = await dbConnection.execute(
-      'SELECT * FROM user_achievements WHERE telegram_id = ? ORDER BY unlocked_at DESC',
-      [telegramId]
-    );
+    // Достижения (через gamification для совместимости со схемами)
+    let achievements = [];
+    if (gamificationService) {
+      try {
+        achievements = await gamificationService.getUserAchievements(telegramId);
+      } catch (e) {
+        console.warn('Ошибка получения достижений для user-details:', e.message);
+      }
+    }
     
     res.json({
       user: userInfo[0],
@@ -4697,7 +4702,7 @@ app.post('/api/admin/confirm-order', async (req, res) => {
       );
     } else if (type === 'yuan') {
       await dbConnection.execute(
-        'UPDATE yuan_purchases SET status = ? WHERE id = ?',
+        'UPDATE yuan_purchases SET status = ? WHERE purchase_id = ?',
         ['completed', orderId]
       );
     }
@@ -4777,7 +4782,7 @@ app.post('/api/admin/confirm-order', async (req, res) => {
           } else if (type === 'yuan') {
             // Покупка юаней подтверждена - даем XP (1 за 100₽)
             const [yuanData] = await dbConnection.execute(
-              'SELECT amount_rub FROM yuan_purchases WHERE id = ?',
+              'SELECT amount_rub FROM yuan_purchases WHERE purchase_id = ?',
               [orderId]
             );
             
@@ -4852,7 +4857,7 @@ app.post('/api/admin/cancel-order', async (req, res) => {
       );
     } else if (type === 'yuan') {
       await dbConnection.execute(
-        'UPDATE yuan_purchases SET status = ? WHERE id = ?',
+        'UPDATE yuan_purchases SET status = ? WHERE purchase_id = ?',
         ['cancelled', orderId]
       );
     }
@@ -4881,7 +4886,7 @@ async function getTelegramIdByOrderId(orderId, type) {
       return result[0]?.telegram_id;
     } else if (type === 'yuan') {
       const [result] = await dbConnection.execute(
-        'SELECT telegram_id FROM yuan_purchases WHERE id = ?',
+        'SELECT telegram_id FROM yuan_purchases WHERE purchase_id = ?',
         [orderId]
       );
       return result[0]?.telegram_id;
@@ -4985,7 +4990,7 @@ async function updateUserStatsAfterConfirmation(telegramId, orderId, type) {
     } else if (type === 'yuan') {
       // Получаем данные покупки юаней
       const [yuanData] = await dbConnection.execute(`
-        SELECT savings FROM yuan_purchases WHERE id = ? AND telegram_id = ?
+        SELECT savings FROM yuan_purchases WHERE purchase_id = ? AND telegram_id = ?
       `, [orderId, telegramId]);
       
       if (yuanData.length > 0) {
@@ -5001,85 +5006,12 @@ async function updateUserStatsAfterConfirmation(telegramId, orderId, type) {
         
         console.log(`✅ Обновлена статистика пользователя ${telegramId}: +${savings} руб. экономии`);
         
-        // Обновляем достижения и уровни
-        await updateUserAchievementsAndLevels(telegramId, type);
+        // Уровень и достижения обновляются через gamification (XP-based) в confirm-order
+        // Здесь только обновляем total_savings — не перезаписываем current_level по заказам
       }
     }
   } catch (error) {
     console.error('❌ Ошибка обновления статистики пользователя:', error);
-  }
-}
-
-// Функция для обновления достижений и уровней пользователя
-async function updateUserAchievementsAndLevels(telegramId, type) {
-  try {
-    // Получаем текущую статистику пользователя
-    // Экономия считается для заказов со статусом 'paid' или 'completed'
-    const [userStats] = await dbConnection.execute(`
-      SELECT 
-        COUNT(DISTINCT CASE WHEN (o.status = 'paid' OR o.status = 'completed') THEN o.order_id END) as total_orders,
-        COUNT(DISTINCT CASE WHEN yp.status = 'completed' THEN yp.id END) as total_yuan_purchases,
-        COALESCE(SUM(CASE WHEN yp.status = 'completed' THEN yp.savings ELSE 0 END), 0) as total_savings
-      FROM users u
-      LEFT JOIN orders o ON u.telegram_id = o.telegram_id
-      LEFT JOIN yuan_purchases yp ON u.telegram_id = yp.telegram_id
-      WHERE u.telegram_id = ?
-    `, [telegramId]);
-    
-    if (userStats.length > 0) {
-      const stats = userStats[0];
-      const totalOrders = stats.total_orders || 0;
-      const totalYuanPurchases = stats.total_yuan_purchases || 0;
-      const totalSavings = stats.total_savings || 0;
-      
-      // Обновляем уровень пользователя
-      let currentLevel = 'Bronze';
-      let levelProgress = 0;
-      
-      if (totalOrders >= 21) {
-        currentLevel = 'Gold';
-        levelProgress = 100;
-      } else if (totalOrders >= 6) {
-        currentLevel = 'Silver';
-        levelProgress = Math.min(100, ((totalOrders - 6) / 15) * 100);
-      } else {
-        levelProgress = Math.min(100, (totalOrders / 6) * 100);
-      }
-      
-      // Обновляем уровень в базе
-      await dbConnection.execute(`
-        UPDATE users 
-        SET current_level = ?, total_orders = ?, updated_at = NOW()
-        WHERE telegram_id = ?
-      `, [currentLevel, totalOrders, telegramId]);
-      
-      // Проверяем и обновляем достижения
-      const achievements = [
-        { id: 'first_order', name: 'Первый заказ', max_progress: 1, condition: totalOrders >= 1 },
-        { id: 'loyal_customer', name: 'Постоянный клиент', max_progress: 5, condition: totalOrders >= 5 },
-        { id: 'yuan_buyer', name: 'Покупатель юаней', max_progress: 1, condition: totalYuanPurchases >= 1 },
-        { id: 'bronze_level', name: 'Бронзовый уровень', max_progress: 1, condition: currentLevel === 'Bronze' && totalOrders >= 1 },
-        { id: 'silver_level', name: 'Серебряный уровень', max_progress: 1, condition: currentLevel === 'Silver' },
-        { id: 'gold_level', name: 'Золотой уровень', max_progress: 1, condition: currentLevel === 'Gold' }
-      ];
-      
-      for (const achievement of achievements) {
-        if (achievement.condition) {
-          await dbConnection.execute(`
-            INSERT INTO user_achievements (telegram_id, achievement_id, achievement_name, achievement_description, progress, max_progress, completed, completed_at)
-            VALUES (?, ?, ?, ?, ?, ?, 1, NOW())
-            ON DUPLICATE KEY UPDATE
-              progress = VALUES(progress),
-              completed = VALUES(completed),
-              completed_at = VALUES(completed_at)
-          `, [telegramId, achievement.id, achievement.name, `Достижение: ${achievement.name}`, achievement.max_progress, achievement.max_progress]);
-        }
-      }
-      
-      console.log(`✅ Обновлены достижения и уровень пользователя ${telegramId}: ${currentLevel} (${levelProgress}%)`);
-    }
-  } catch (error) {
-    console.error('❌ Ошибка обновления достижений и уровней:', error);
   }
 }
 
@@ -5221,7 +5153,7 @@ app.get('/api/admin/users-list', async (req, res) => {
             u.full_name,
             u.created_at,
             COUNT(DISTINCT o.order_id) as orders_count,
-            COUNT(DISTINCT yp.id) as yuan_purchases_count
+            COUNT(DISTINCT yp.purchase_id) as yuan_purchases_count
           FROM users u
           LEFT JOIN orders o ON u.telegram_id = o.telegram_id AND o.status = 'completed'
           LEFT JOIN yuan_purchases yp ON u.telegram_id = yp.telegram_id AND yp.status = 'completed'
@@ -5459,7 +5391,7 @@ app.get('/api/admin/user-history/:telegramId', async (req, res) => {
             u.created_at,
             u.referred_by,
             COUNT(DISTINCT o.order_id) as total_orders,
-            COUNT(DISTINCT yp.id) as total_yuan_purchases,
+            COUNT(DISTINCT yp.purchase_id) as total_yuan_purchases,
             COALESCE(SUM(CASE WHEN o.status = 'completed' THEN o.estimated_savings ELSE 0 END), 0) as total_savings_orders,
             COALESCE(SUM(CASE WHEN yp.status = 'completed' THEN yp.savings ELSE 0 END), 0) as total_savings_yuan
           FROM users u
@@ -5519,18 +5451,15 @@ app.get('/api/admin/user-history/:telegramId', async (req, res) => {
           LIMIT 50
         `, [telegramId]);
 
-        // Получаем достижения
-        const [achievements] = await dbConnection.execute(`
-          SELECT 
-            achievement_name,
-            progress,
-            max_progress,
-            completed,
-            completed_at
-          FROM user_achievements 
-          WHERE telegram_id = ? 
-          ORDER BY completed_at DESC
-        `, [telegramId]);
+        // Получаем достижения через gamification
+        let achievements = [];
+        if (gamificationService) {
+          try {
+            achievements = await gamificationService.getUserAchievements(telegramId);
+          } catch (e) {
+            console.warn('Ошибка получения достижений:', e.message);
+          }
+        }
 
         const responseData = {
           user: user,
@@ -6429,18 +6358,8 @@ app.get('/api/gamification/:telegramId', async (req, res) => {
     const currentLevel = user.current_level || 'Bronze';
     const loginStreak = user.login_streak || 0;
     
-    // Получаем достижения из новой системы
-    const [achievements] = await dbConnection.query(`
-      SELECT 
-        a.*,
-        ua.unlocked_at,
-        ua.xp_awarded,
-        CASE WHEN ua.telegram_id IS NOT NULL THEN 1 ELSE 0 END as unlocked
-      FROM achievements a
-      LEFT JOIN user_achievements ua ON a.achievement_key = ua.achievement_key AND ua.telegram_id = ?
-      ORDER BY a.category, a.xp_reward
-    `, [telegramId]);
-    
+    // Получаем достижения через gamification (поддержка обеих схем БД)
+    const achievements = await gamificationService.getUserAchievements(telegramId);
     
     // Вычисляем прогресс уровня
     const levelProgress = gamificationService.getLevelProgress(xp);
@@ -6624,37 +6543,21 @@ app.get('/api/gamification/:telegramId/level-history', async (req, res) => {
   }
 });
 
-// Получить достижения по категориям (ОБНОВЛЕНО ДЛЯ НОВОЙ СИСТЕМЫ)
+// Получить достижения по категориям
 app.get('/api/gamification/:telegramId/achievements-by-category', async (req, res) => {
   try {
     const { telegramId } = req.params;
-    await ensureDBConnection();
-    
-    // Получаем достижения из новой системы
-    const [achievements] = await dbConnection.query(`
-      SELECT 
-        a.*,
-        ua.unlocked_at,
-        ua.xp_awarded,
-        CASE WHEN ua.telegram_id IS NOT NULL THEN 1 ELSE 0 END as unlocked
-      FROM achievements a
-      LEFT JOIN user_achievements ua ON a.achievement_key = ua.achievement_key AND ua.telegram_id = ?
-      ORDER BY a.category, a.xp_reward
-    `, [telegramId]);
-    
-    // Группируем по категориям
-    const grouped = achievements.reduce((acc, achievement) => {
-      if (!acc[achievement.category]) {
-        acc[achievement.category] = [];
-      }
-      acc[achievement.category].push(achievement);
+    if (!gamificationService) {
+      return res.status(500).json({ error: 'Сервис геймификации недоступен' });
+    }
+    const achievements = await gamificationService.getUserAchievements(telegramId);
+    const grouped = achievements.reduce((acc, a) => {
+      const cat = a.category || 'Прочее';
+      if (!acc[cat]) acc[cat] = [];
+      acc[cat].push({ ...a, unlocked: !!a.unlocked });
       return acc;
     }, {});
-    
-    res.json({ 
-      success: true,
-      achievementsByCategory: grouped 
-    });
+    res.json({ success: true, achievementsByCategory: grouped });
   } catch (error) {
     console.error('Error fetching achievements by category:', error);
     res.status(500).json({ error: 'Server error' });
