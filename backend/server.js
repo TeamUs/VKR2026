@@ -5293,12 +5293,12 @@ app.get('/api/admin/system-status', async (req, res) => {
     // 4. Nginx
     let nginx = { status: 'unknown' };
     try {
-      execSync('pgrep -x nginx > /dev/null 2>&1', { stdio: 'pipe' });
+      execSync('pgrep -x nginx > /dev/null 2>&1', { stdio: 'pipe', shell: '/bin/sh' });
       nginx = { status: 'running' };
     } catch (_) {
       try {
-        const out = execSync('systemctl is-active nginx 2>/dev/null || true', { encoding: 'utf8' });
-        nginx = { status: out.trim() === 'active' ? 'running' : 'stopped' };
+        const out = execSync('systemctl is-active nginx 2>/dev/null || true', { encoding: 'utf8', shell: '/bin/sh' });
+        nginx = { status: (out && out.trim() === 'active') ? 'running' : 'stopped' };
       } catch (_) {
         nginx = { status: 'unknown' };
       }
@@ -5332,12 +5332,14 @@ app.get('/api/admin/system-status', async (req, res) => {
     let sync = { lastCommit: null };
     try {
       const gitDir = path.join(__dirname, '../.git');
+      const projectRoot = path.dirname(__dirname);
       if (fs.existsSync(gitDir)) {
         const out = execSync('git log -1 --format="%h %ci %s" 2>/dev/null || true', {
-          cwd: path.dirname(__dirname),
-          encoding: 'utf8'
+          cwd: projectRoot,
+          encoding: 'utf8',
+          shell: '/bin/sh'
         });
-        if (out.trim()) sync = { lastCommit: out.trim() };
+        if (out && typeof out === 'string' && out.trim()) sync = { lastCommit: out.trim() };
       }
     } catch (_) {}
 
