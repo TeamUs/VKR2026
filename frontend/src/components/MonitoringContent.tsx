@@ -43,11 +43,6 @@ export function MonitoringContent({ systemStatus, monitoringError, onRetry }: Mo
     </div>
   );
 
-  const pm2Mem = pm2?.memory as { heapUsed?: number } | undefined;
-  const memVal = pm2?.memoryMB != null ? `${pm2.memoryMB}` : pm2Mem?.heapUsed != null
-    ? (pm2Mem.heapUsed / 1024 / 1024).toFixed(1)
-    : '—';
-
   const pm2 = s('pm2Backend') || s('server');
   const db = s('database');
   const fe = s('frontend');
@@ -56,6 +51,11 @@ export function MonitoringContent({ systemStatus, monitoringError, onRetry }: Mo
   const svr = s('server');
   const sync = s('sync');
   const api = s('api');
+
+  const pm2Mem = pm2?.memory as { heapUsed?: number } | undefined;
+  const memVal = pm2?.memoryMB != null ? `${pm2.memoryMB}` : pm2Mem?.heapUsed != null
+    ? (pm2Mem.heapUsed / 1024 / 1024).toFixed(1)
+    : '—';
 
   return (
     <div style={{ display: 'grid', gap: '20px' }}>
