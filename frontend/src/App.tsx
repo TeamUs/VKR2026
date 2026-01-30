@@ -404,16 +404,20 @@ const GlobalStyle = createGlobalStyle`
 
 const AppContainer = styled.div`
   min-height: 100vh;
+  min-height: 100dvh; /* Динамическая высота для веб-версии */
   background: var(--bg-primary);
   position: relative;
   animation: ${fadeIn} 0.8s ease-out forwards;
   transition: all 0.5s ease;
+  /* Telegram safe area (веб + десктоп) — верх не обрезается */
+  padding-top: calc(20px + var(--tg-content-safe-area-inset-top, var(--tg-safe-area-inset-top, env(safe-area-inset-top, 0px))));
+  box-sizing: border-box;
 `;
 
 // Китайский тумблер для переключения тем
 const ThemeToggle = styled.div`
   position: fixed;
-  top: 40px;
+  top: calc(40px + var(--tg-content-safe-area-inset-top, var(--tg-safe-area-inset-top, 0px)));
   right: 20px;
   width: 60px;
   height: 30px;
@@ -907,6 +911,24 @@ const App: React.FC = () => {
       tg.ready();
       tg.expand();
       
+      // Применяем safe area из Telegram (веб + десктоп — единое отображение)
+      const applySafeArea = () => {
+        const root = document.documentElement;
+        const safe = (tg as any).safeAreaInset;
+        const contentSafe = (tg as any).contentSafeAreaInset;
+        if (contentSafe && typeof contentSafe.top === 'number') {
+          root.style.setProperty('--tg-content-safe-area-inset-top', contentSafe.top + 'px');
+          root.style.setProperty('--tg-content-safe-area-inset-bottom', (contentSafe.bottom || 0) + 'px');
+        }
+        if (safe && typeof safe.top === 'number') {
+          root.style.setProperty('--tg-safe-area-inset-top', safe.top + 'px');
+          root.style.setProperty('--tg-safe-area-inset-bottom', (safe.bottom || 0) + 'px');
+        }
+      };
+      applySafeArea();
+      tg.onEvent?.('contentSafeAreaChanged', applySafeArea);
+      tg.onEvent?.('safeAreaChanged', applySafeArea);
+      
       // Получение данных пользователя
       const user = tg.initDataUnsafe?.user;
       if (user) {
@@ -963,6 +985,11 @@ const App: React.FC = () => {
       console.error('[App] Ошибка при инициализации:', error);
       // Даже при ошибке продолжаем работу
     }
+    
+    // Скролл в начало (важно для веб-версии — контент не обрезается сверху)
+    window.scrollTo(0, 0);
+    document.documentElement.scrollTop = 0;
+    document.body.scrollTop = 0;
     
     // Завершение загрузки - ВСЕГДА завершаем через 2 секунды, независимо от состояния
     // Это гарантирует, что приложение запустится даже при проблемах
@@ -1132,7 +1159,7 @@ const App: React.FC = () => {
   return (
     <>
       <GlobalStyle />
-      <AppContainer className="app-container" style={{ paddingBottom: '80px', paddingTop: '20px' }}>
+      <AppContainer className="app-container" style={{ paddingBottom: 'calc(80px + env(safe-area-inset-bottom, 0px))' }}>
 
         {/* Main tab content */}
         {activeTab === 'main' && (

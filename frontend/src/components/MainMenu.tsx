@@ -67,14 +67,16 @@ const dragonSway = keyframes`
 // Потрясающие технологичные компоненты в китайском стиле
 const MainContainer = styled.div`
   min-height: 100vh;
-  max-height: 100vh;
+  min-height: 100dvh;
   background: transparent;
   position: relative;
   z-index: 1;
   padding: 0px;
   animation: ${fadeIn} 0.8s ease-out forwards;
   transition: all 0.5s ease;
-  overflow: hidden;
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
   
   @media (max-width: 480px) {
     padding: 0px;
