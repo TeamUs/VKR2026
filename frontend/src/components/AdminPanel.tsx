@@ -3511,84 +3511,118 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
             
             {systemStatus ? (
               <div style={{ display: 'grid', gap: '20px' }}>
-                {/* Статус сервера */}
-                <div style={{ 
-                  padding: '16px', 
-                  backgroundColor: 'var(--bg-card)', 
-                  borderRadius: '12px',
-                  border: '1px solid var(--border-color)'
-                }}>
-                  <h3 style={{ color: 'var(--text-primary)', marginBottom: '12px' }}>🖥️ Сервер</h3>
-                  <div style={{ display: 'grid', gap: '8px' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                      <span>Статус:</span>
-                      <span style={{ color: 'var(--success-color)', fontWeight: 'bold' }}>
-                        {systemStatus.server.status === 'running' ? '✅ Работает' : '❌ Остановлен'}
-                      </span>
-                    </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                      <span>Время работы:</span>
-                      <span>{Math.floor(systemStatus.server.uptime / 3600)}ч {Math.floor((systemStatus.server.uptime % 3600) / 60)}м</span>
-                    </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                      <span>Память:</span>
-                      <span>{(systemStatus.server.memory.heapUsed / 1024 / 1024).toFixed(1)} MB</span>
-                    </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                      <span>Node.js:</span>
-                      <span>{systemStatus.server.nodeVersion}</span>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Статус БД */}
-                <div style={{ 
-                  padding: '16px', 
-                  backgroundColor: 'var(--bg-card)', 
-                  borderRadius: '12px',
-                  border: '1px solid var(--border-color)'
-                }}>
-                  <h3 style={{ color: 'var(--text-primary)', marginBottom: '12px' }}>🗄️ База данных</h3>
-                  <div style={{ display: 'grid', gap: '8px' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                      <span>Статус:</span>
-                      <span style={{ 
-                        color: systemStatus.database.status === 'connected' ? 'var(--success-color)' : 'var(--error-color)', 
-                        fontWeight: 'bold' 
-                      }}>
-                        {systemStatus.database.status === 'connected' ? '✅ Подключена' : '❌ Отключена'}
-                      </span>
-                    </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                      <span>Время отклика:</span>
-                      <span>{systemStatus.database.responseTime}мс</span>
-                    </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                      <span>Состояние:</span>
-                      <span>{systemStatus.database.connectionState}</span>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Общая информация */}
-                <div style={{ 
-                  padding: '16px', 
-                  backgroundColor: 'var(--bg-card)', 
-                  borderRadius: '12px',
-                  border: '1px solid var(--border-color)'
-                }}>
-                  <h3 style={{ color: 'var(--text-primary)', marginBottom: '12px' }}>📊 Общая информация</h3>
-                  <div style={{ display: 'grid', gap: '8px' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                      <span>Время ответа API:</span>
-                      <span>{systemStatus.responseTime}мс</span>
-                    </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                      <span>Последнее обновление:</span>
-                      <span>{new Date(systemStatus.timestamp).toLocaleString('ru-RU')}</span>
-                    </div>
-                  </div>
-                </div>
+                {(['pm2Backend', 'frontend', 'nginx', 'telegramApi', 'database', 'server', 'sync', 'api'] as const).map((key) => {
+                  const cardStyle = {
+                    padding: '16px',
+                    backgroundColor: 'var(--bg-card)',
+                    borderRadius: '12px',
+                    border: '1px solid var(--border-color)'
+                  };
+                  const StatusBadge = ({ ok }: { ok: boolean }) => (
+                    <span style={{ color: ok ? 'var(--success-color)' : 'var(--error-color)', fontWeight: 'bold' }}>
+                      {ok ? '✅' : '❌'}
+                    </span>
+                  );
+                  if (key === 'pm2Backend') {
+                    const s = systemStatus.pm2Backend || systemStatus.server;
+                    return (
+                      <div key={key} style={cardStyle}>
+                        <h3 style={{ color: 'var(--text-primary)', marginBottom: '12px' }}>⚙️ PM2 Backend</h3>
+                        <div style={{ display: 'grid', gap: '8px' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Статус:</span><span><StatusBadge ok={s?.status === 'running'} /> {s?.status === 'running' ? 'Работает' : 'Остановлен'}</span></div>
+                          <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Время работы:</span><span>{s?.uptime ? `${Math.floor(s.uptime / 3600)}ч ${Math.floor((s.uptime % 3600) / 60)}м` : '—'}</span></div>
+                          <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Память:</span><span>{s?.memoryMB ?? (s?.memory?.heapUsed ? (s.memory.heapUsed / 1024 / 1024).toFixed(1) : '—')} MB</span></div>
+                          <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Node.js:</span><span>{s?.nodeVersion ?? '—'}</span></div>
+                        </div>
+                      </div>
+                    );
+                  }
+                  if (key === 'frontend') {
+                    const s = systemStatus.frontend;
+                    const buildTime = s?.buildTimeLocal ?? (s?.buildTime ? new Date(s.buildTime).toLocaleString('ru-RU') : null);
+                    return (
+                      <div key={key} style={cardStyle}>
+                        <h3 style={{ color: 'var(--text-primary)', marginBottom: '12px' }}>🌐 Frontend</h3>
+                        <div style={{ display: 'grid', gap: '8px' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Последняя сборка:</span><span>{buildTime ?? '—'}</span></div>
+                        </div>
+                      </div>
+                    );
+                  }
+                  if (key === 'nginx') {
+                    const s = systemStatus.nginx;
+                    const ok = s?.status === 'running';
+                    return (
+                      <div key={key} style={cardStyle}>
+                        <h3 style={{ color: 'var(--text-primary)', marginBottom: '12px' }}>🔀 Nginx</h3>
+                        <div style={{ display: 'grid', gap: '8px' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Статус:</span><span><StatusBadge ok={ok} /> {s?.status === 'running' ? 'Работает' : s?.status === 'stopped' ? 'Остановлен' : 'Неизвестно'}</span></div>
+                        </div>
+                      </div>
+                    );
+                  }
+                  if (key === 'telegramApi') {
+                    const s = systemStatus.telegramApi;
+                    const ok = s?.status === 'ok';
+                    return (
+                      <div key={key} style={cardStyle}>
+                        <h3 style={{ color: 'var(--text-primary)', marginBottom: '12px' }}>📱 Telegram API</h3>
+                        <div style={{ display: 'grid', gap: '8px' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Статус:</span><span><StatusBadge ok={ok} /> {ok ? 'OK' : s?.message ?? 'Ошибка'}</span></div>
+                        </div>
+                      </div>
+                    );
+                  }
+                  if (key === 'database') {
+                    const s = systemStatus.database;
+                    const ok = s?.status === 'connected';
+                    return (
+                      <div key={key} style={cardStyle}>
+                        <h3 style={{ color: 'var(--text-primary)', marginBottom: '12px' }}>🗄️ База данных</h3>
+                        <div style={{ display: 'grid', gap: '8px' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Статус:</span><span><StatusBadge ok={ok} /> {ok ? 'Подключена' : 'Отключена'}</span></div>
+                          <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Время отклика:</span><span>{s?.responseTime ?? 0}мс</span></div>
+                        </div>
+                      </div>
+                    );
+                  }
+                  if (key === 'server') {
+                    const s = systemStatus.server;
+                    return (
+                      <div key={key} style={cardStyle}>
+                        <h3 style={{ color: 'var(--text-primary)', marginBottom: '12px' }}>🖥️ Сервер</h3>
+                        <div style={{ display: 'grid', gap: '8px' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Хост:</span><span>{s?.hostname ?? '—'}</span></div>
+                          <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Память:</span><span>{s?.memoryUsedPercent ?? '—'}% ({s?.memoryUsedMB ?? '—'} MB)</span></div>
+                          <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Нагрузка:</span><span>{s?.loadAvg ? s.loadAvg.join(', ') : '—'}</span></div>
+                        </div>
+                      </div>
+                    );
+                  }
+                  if (key === 'sync') {
+                    const s = systemStatus.sync;
+                    return (
+                      <div key={key} style={cardStyle}>
+                        <h3 style={{ color: 'var(--text-primary)', marginBottom: '12px' }}>🔄 Синхронизация (Git)</h3>
+                        <div style={{ display: 'grid', gap: '8px' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: '4px' }}><span>Последний коммит:</span><span style={{ wordBreak: 'break-all' }}>{s?.lastCommit ?? '—'}</span></div>
+                        </div>
+                      </div>
+                    );
+                  }
+                  if (key === 'api') {
+                    return (
+                      <div key={key} style={cardStyle}>
+                        <h3 style={{ color: 'var(--text-primary)', marginBottom: '12px' }}>📡 API</h3>
+                        <div style={{ display: 'grid', gap: '8px' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Время ответа:</span><span>{systemStatus.api?.responseTime ?? systemStatus.responseTime ?? 0}мс</span></div>
+                          <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Обновлено:</span><span>{new Date(systemStatus.timestamp).toLocaleString('ru-RU')}</span></div>
+                        </div>
+                      </div>
+                    );
+                  }
+                  return null;
+                })}
               </div>
             ) : (
               <div style={{ textAlign: 'center', padding: '40px' }}>

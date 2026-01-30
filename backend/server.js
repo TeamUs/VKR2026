@@ -4,6 +4,8 @@ const mysql = require('mysql2/promise');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
+const os = require('os');
+const { execSync } = require('child_process');
 const https = require('https');
 const axios = require('axios');
 // Используем встроенный fetch в Node.js 18+
@@ -5257,45 +5259,105 @@ app.get('/api/admin/users-list', async (req, res) => {
 app.get('/api/admin/system-status', async (req, res) => {
   try {
     const startTime = Date.now();
-    
-    // Проверяем соединение с БД
-    let dbStatus = 'disconnected';
-    let dbResponseTime = 0;
-    
+
+    // 1. PM2 Backend (текущий процесс Node)
+    const pm2Backend = {
+      status: 'running',
+      uptime: process.uptime(),
+      memoryMB: Math.round(process.memoryUsage().heapUsed / 1024 / 1024 * 10) / 10,
+      nodeVersion: process.version
+    };
+
+    // 2. База данных
+    let database = { status: 'disconnected', responseTime: 0 };
     if (dbConnection) {
       try {
-        const dbStartTime = Date.now();
+        const t0 = Date.now();
         await dbConnection.execute('SELECT 1');
-        dbResponseTime = Date.now() - dbStartTime;
-        dbStatus = 'connected';
-      } catch (error) {
-        dbStatus = 'error';
-        console.error('Database connection error:', error);
+        database = { status: 'connected', responseTime: Date.now() - t0 };
+      } catch (err) {
+        database = { status: 'error', responseTime: 0 };
       }
     }
 
-    // Получаем статистику системы
-    const systemStats = {
-      server: {
-        status: 'running',
-        uptime: process.uptime(),
-        memory: process.memoryUsage(),
-        nodeVersion: process.version,
-        platform: process.platform
-      },
-      database: {
-        status: dbStatus,
-        responseTime: dbResponseTime,
-        connectionState: dbConnection ? dbConnection.state : 'disconnected'
-      },
-      timestamp: new Date().toISOString(),
-      responseTime: Date.now() - startTime
+    // 3. Frontend — дата/время последней сборки
+    let frontend = { buildTime: null };
+    try {
+      const buildInfoPath = path.join(__dirname, '../frontend/dist/build-info.json');
+      if (fs.existsSync(buildInfoPath)) {
+        const info = JSON.parse(fs.readFileSync(buildInfoPath, 'utf8'));
+        frontend = { buildTime: info.buildTime, buildTimeLocal: info.buildTimeLocal || null };
+      }
+    } catch (_) {}
+
+    // 4. Nginx
+    let nginx = { status: 'unknown' };
+    try {
+      execSync('pgrep -x nginx > /dev/null 2>&1', { stdio: 'pipe' });
+      nginx = { status: 'running' };
+    } catch (_) {
+      try {
+        const out = execSync('systemctl is-active nginx 2>/dev/null || true', { encoding: 'utf8' });
+        nginx = { status: out.trim() === 'active' ? 'running' : 'stopped' };
+      } catch (_) {
+        nginx = { status: 'unknown' };
+      }
+    }
+
+    // 5. Telegram API
+    let telegramApi = { status: 'error' };
+    const botToken = process.env.BOT_TOKEN;
+    if (botToken) {
+      try {
+        const resp = await fetch(`https://api.telegram.org/bot${botToken}/getMe`);
+        const data = await resp.json();
+        telegramApi = data.ok ? { status: 'ok' } : { status: 'error', message: data.description || 'Invalid token' };
+      } catch (err) {
+        telegramApi = { status: 'error', message: err.message || 'Network error' };
+      }
+    }
+
+    // 6. Сервер (ОС)
+    const totalMem = os.totalmem();
+    const freeMem = os.freemem();
+    const server = {
+      platform: os.platform(),
+      hostname: os.hostname(),
+      loadAvg: os.loadavg().map((v) => Math.round(v * 100) / 100),
+      memoryUsedPercent: Math.round((1 - freeMem / totalMem) * 100),
+      memoryUsedMB: Math.round((totalMem - freeMem) / 1024 / 1024)
     };
 
-    res.json({ 
-      success: true, 
-      data: systemStats 
-    });
+    // 7. Синхронизация (последний коммит git)
+    let sync = { lastCommit: null };
+    try {
+      const gitDir = path.join(__dirname, '../.git');
+      if (fs.existsSync(gitDir)) {
+        const out = execSync('git log -1 --format="%h %ci %s" 2>/dev/null || true', {
+          cwd: path.dirname(__dirname),
+          encoding: 'utf8'
+        });
+        if (out.trim()) sync = { lastCommit: out.trim() };
+      }
+    } catch (_) {}
+
+    // 8. API — время ответа
+    const responseTime = Date.now() - startTime;
+
+    const systemStats = {
+      pm2Backend,
+      frontend,
+      nginx,
+      telegramApi,
+      database,
+      server,
+      sync,
+      api: { responseTime },
+      timestamp: new Date().toISOString(),
+      responseTime
+    };
+
+    res.json({ success: true, data: systemStats });
   } catch (error) {
     console.error('Ошибка получения статуса системы:', error);
     res.status(500).json({ error: 'Ошибка получения статуса системы' });
