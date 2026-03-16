@@ -5321,8 +5321,9 @@ app.post('/api/admin/update-user-commission', async (req, res) => {
       return res.status(400).json({ error: 'Необходимы telegram ID и комиссия' });
     }
 
-    if (commission < 0 || commission > 1) {
-      return res.status(400).json({ error: 'Комиссия должна быть от 0 до 1' });
+    const commissionRub = Number(commission);
+    if (Number.isNaN(commissionRub) || commissionRub < 0 || commissionRub > 50000) {
+      return res.status(400).json({ error: 'Комиссия должна быть от 0 до 50000 ₽' });
     }
 
     await ensureDBConnection();
@@ -5342,27 +5343,27 @@ app.post('/api/admin/update-user-commission', async (req, res) => {
         // Получаем старую комиссию для уведомления
         const oldCommission = users[0].commission || 1000;
 
-        // Обновляем комиссию
+        // Обновляем комиссию (в рублях)
         await dbConnection.execute(
           'UPDATE users SET commission = ? WHERE telegram_id = ?',
-          [commission, telegramId]
+          [commissionRub, telegramId]
         );
 
         // Отправляем уведомление пользователю
         const notificationMessage = `💰 <b>Изменение комиссии</b>\n\n` +
                                    `Ваша комиссия была изменена:\n` +
                                    `📉 <b>Было:</b> ${oldCommission} ₽\n` +
-                                   `📈 <b>Стало:</b> ${commission} ₽\n\n` +
+                                   `📈 <b>Стало:</b> ${commissionRub} ₽\n\n` +
                                    `⏰ <b>Время изменения:</b> ${new Date().toLocaleString('ru-RU')}\n\n` +
                                    `💡 Теперь при расчете стоимости заказов будет использоваться новая комиссия.`;
 
         await sendTelegramMessage(telegramId, notificationMessage);
 
         // Логируем изменение
-        await createSystemLog('info', `Комиссия пользователя ${telegramId} изменена на ${commission} ₽`, {
+        await createSystemLog('info', `Комиссия пользователя ${telegramId} изменена на ${commissionRub} ₽`, {
           telegramId,
           oldCommission: oldCommission,
-          newCommission: commission,
+          newCommission: commissionRub,
           username: users[0].username,
           fullName: users[0].full_name
         });
