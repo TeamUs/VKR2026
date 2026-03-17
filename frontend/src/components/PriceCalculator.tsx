@@ -1062,7 +1062,7 @@ const PriceCalculator: React.FC<PriceCalculatorProps> = ({ onNavigate, toggleThe
     HapticFeedback.medium();
 
     try {
-      const response = await fetch('/api/calculate-price', {
+      const response = await fetch('api/calculate-price', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

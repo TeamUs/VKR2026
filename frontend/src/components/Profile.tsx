@@ -1641,7 +1641,7 @@ const Profile: React.FC<ProfileProps> = ({ telegramId, isDarkTheme, toggleTheme,
   const fetchYuanHistory = async (userId?: string) => {
     const currentTelegramId = userId || telegramId;
     try {
-      const response = await fetch(`/api/yuan-purchases?telegram_id=${currentTelegramId}`);
+      const response = await fetch(`api/yuan-purchases?telegram_id=${currentTelegramId}`);
       if (response.ok) {
         const data = await response.json();
         setYuanHistory(data.purchases || []);
@@ -1654,7 +1654,7 @@ const Profile: React.FC<ProfileProps> = ({ telegramId, isDarkTheme, toggleTheme,
   const fetchOrdersHistory = async (userId?: string) => {
     const currentTelegramId = userId || telegramId;
     try {
-      const response = await fetch(`/api/orders-history?telegram_id=${currentTelegramId}`);
+      const response = await fetch(`api/orders-history?telegram_id=${currentTelegramId}`);
       if (response.ok) {
         const data = await response.json();
         setOrdersHistory(data.orders || []);
@@ -1668,7 +1668,7 @@ const Profile: React.FC<ProfileProps> = ({ telegramId, isDarkTheme, toggleTheme,
   const fetchUserOrders = async (userId?: string) => {
     setLoadingOrders(true);
     try {
-      const response = await fetch('/api/user/orders', {
+      const response = await fetch('api/user/orders', {
         headers: {
           'x-telegram-init-data': (window as any).Telegram?.WebApp?.initData || ''
         }
@@ -1695,7 +1695,7 @@ const Profile: React.FC<ProfileProps> = ({ telegramId, isDarkTheme, toggleTheme,
       setLoading(true);
       
       // Получаем РЕАЛЬНЫЕ данные профиля из БД
-      const profileResponse = await fetch('/api/profile', {
+      const profileResponse = await fetch('api/profile', {
         headers: {
           'x-telegram-init-data': (window as any).Telegram?.WebApp?.initData || ''
         }
@@ -1726,7 +1726,7 @@ const Profile: React.FC<ProfileProps> = ({ telegramId, isDarkTheme, toggleTheme,
         const telegramUser = telegramWebApp?.initDataUnsafe?.user;
         const currentTelegramIdForGamification = telegramUser?.id?.toString() || currentTelegramId || 'demo';
         
-        const gamificationResponse = await fetch(`/api/gamification/${currentTelegramIdForGamification}`);
+        const gamificationResponse = await fetch(`api/gamification/${currentTelegramIdForGamification}`);
         
         if (gamificationResponse.ok) {
           const gamificationData = await gamificationResponse.json();
@@ -1734,7 +1734,7 @@ const Profile: React.FC<ProfileProps> = ({ telegramId, isDarkTheme, toggleTheme,
           // Проверяем, был ли недавно повышен уровень (за последние 10 секунд)
           const checkRecentLevelUp = async () => {
             try {
-              const historyResponse = await fetch(`/api/gamification/${currentTelegramId}/level-history`);
+              const historyResponse = await fetch(`api/gamification/${currentTelegramId}/level-history`);
               if (historyResponse.ok) {
                 const historyData = await historyResponse.json();
                 if (historyData.history && historyData.history.length > 0) {
@@ -1769,7 +1769,7 @@ const Profile: React.FC<ProfileProps> = ({ telegramId, isDarkTheme, toggleTheme,
           
           // Сохраняем все достижения отдельно для модального окна (ОБНОВЛЕНО ДЛЯ НОВОЙ СИСТЕМЫ)
           // Получаем все достижения (не только разблокированные) для модального окна
-          const allAchievementsResponse = await fetch(`/api/gamification/${currentTelegramIdForGamification}/achievements-by-category`);
+          const allAchievementsResponse = await fetch(`api/gamification/${currentTelegramIdForGamification}/achievements-by-category`);
           if (allAchievementsResponse.ok) {
             const allAchievementsData = await allAchievementsResponse.json();
             const allAchievementsFlat: any[] = [];
@@ -1871,7 +1871,7 @@ const Profile: React.FC<ProfileProps> = ({ telegramId, isDarkTheme, toggleTheme,
    */
   const fetchUserAchievements = async () => {
     try {
-      const response = await fetch(`/api/user/achievements/${telegramId}`);
+      const response = await fetch(`api/user/achievements/${telegramId}`);
       const data = await response.json();
       
       if (data.success) {
@@ -1890,7 +1890,7 @@ const Profile: React.FC<ProfileProps> = ({ telegramId, isDarkTheme, toggleTheme,
    */
   const fetchUserStats = async () => {
     try {
-      const response = await fetch(`/api/user/stats/${telegramId}`);
+      const response = await fetch(`api/user/stats/${telegramId}`);
       const data = await response.json();
       
       if (data.success) {
@@ -1909,7 +1909,7 @@ const Profile: React.FC<ProfileProps> = ({ telegramId, isDarkTheme, toggleTheme,
    */
   const handleDailyLogin = async () => {
     try {
-      const response = await fetch('/api/daily-login', {
+      const response = await fetch('api/daily-login', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

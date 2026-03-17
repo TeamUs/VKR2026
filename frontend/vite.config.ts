@@ -19,7 +19,8 @@ function buildInfoPlugin() {
 }
 
 export default defineConfig({
-  base: './',
+  // Подпуть для деплоя ВКР на одном домене (например https://домен/vkr/)
+  base: process.env.VITE_APP_BASE_PATH || './',
   plugins: [
     buildInfoPlugin(),
     react({

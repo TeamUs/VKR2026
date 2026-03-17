@@ -1633,7 +1633,7 @@ const OrderForm: React.FC<OrderFormProps> = ({ onNavigate, toggleTheme, isDarkTh
         comments: formData.comments
       };
 
-      const response = await fetch('/api/orders', {
+      const response = await fetch('api/orders', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
