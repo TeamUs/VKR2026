@@ -58,49 +58,49 @@ async function getOrdersStats() {
     // Новые заказы за последние 24 часа
     const [newOrders] = await connection.execute(`
       SELECT COUNT(*) as count 
-      FROM orders 
+      FROM vkr_orders 
       WHERE created_at >= DATE_SUB(NOW(), INTERVAL 24 HOUR)
     `);
     
     // Заказы в ожидании
     const [pendingOrders] = await connection.execute(`
       SELECT COUNT(*) as count 
-      FROM orders 
+      FROM vkr_orders 
       WHERE status = 'pending'
     `);
     
     // Заказы в обработке
     const [processingOrders] = await connection.execute(`
       SELECT COUNT(*) as count 
-      FROM orders 
+      FROM vkr_orders 
       WHERE status = 'processing'
     `);
     
     // Заказы готовые к отправке
     const [readyOrders] = await connection.execute(`
       SELECT COUNT(*) as count 
-      FROM orders 
+      FROM vkr_orders 
       WHERE status = 'ready'
     `);
     
     // Заказы в пути
     const [shippedOrders] = await connection.execute(`
       SELECT COUNT(*) as count 
-      FROM orders 
+      FROM vkr_orders 
       WHERE status = 'shipped'
     `);
     
     // Новые пользователи за последние 24 часа
     const [newUsers] = await connection.execute(`
       SELECT COUNT(*) as count 
-      FROM users 
+      FROM vkr_users 
       WHERE created_at >= DATE_SUB(NOW(), INTERVAL 24 HOUR)
     `);
     
     // Покупки юаней за последние 24 часа
     const [newYuanPurchases] = await connection.execute(`
       SELECT COUNT(*) as count 
-      FROM yuan_purchases 
+      FROM vkr_yuan_purchases 
       WHERE created_at >= DATE_SUB(NOW(), INTERVAL 24 HOUR)
     `);
     
@@ -132,7 +132,7 @@ async function checkDiscountsExpiringSoon() {
     // Находим пользователей с скидками, истекающими в ближайшие 24 часа
     const [expiringUsers] = await connection.execute(`
       SELECT telegram_id, username, full_name, access_expires_at
-      FROM users 
+      FROM vkr_users 
       WHERE access_expires_at IS NOT NULL 
       AND access_expires_at > NOW() 
       AND access_expires_at <= DATE_ADD(NOW(), INTERVAL 24 HOUR)
@@ -187,7 +187,7 @@ async function checkExpiredDiscounts() {
     // Находим пользователей с истекшими скидками
     const [expiredUsers] = await connection.execute(`
       SELECT telegram_id, username, full_name, access_expires_at, commission
-      FROM users 
+      FROM vkr_users 
       WHERE access_expires_at IS NOT NULL 
       AND access_expires_at <= NOW() 
       AND commission = 400
@@ -198,7 +198,7 @@ async function checkExpiredDiscounts() {
       
       // Обновляем комиссию на стандартную
       await connection.execute(`
-        UPDATE users 
+        UPDATE vkr_users 
         SET commission = 1000, access_expires_at = NULL 
         WHERE access_expires_at IS NOT NULL 
         AND access_expires_at <= NOW() 
