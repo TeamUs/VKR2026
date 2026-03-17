@@ -320,7 +320,7 @@ const TrackingForm: React.FC<TrackingFormProps> = ({ isDark = false, onNavigate,
       }
       
       console.log('📤 TrackingForm: Отправляем запрос /api/user/orders');
-      const response = await fetch('/api/user/orders', {
+      const response = await fetch('api/user/orders', {
         headers: { 'x-telegram-init-data': initData }
       });
       console.log('📥 TrackingForm: Получен ответ, статус:', response.status, response.statusText);
@@ -404,7 +404,7 @@ const TrackingForm: React.FC<TrackingFormProps> = ({ isDark = false, onNavigate,
         return;
       }
       
-      const response = await fetch(`/api/tracking/${trackingNumber.trim()}`, {
+      const response = await fetch(`api/tracking/${trackingNumber.trim()}`, {
         headers: { 'x-telegram-init-data': initData }
       });
 

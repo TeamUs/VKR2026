@@ -859,7 +859,7 @@ const Reviews: React.FC<ReviewsProps> = ({ onNavigate, toggleTheme, isDarkTheme,
   const fetchReviews = async (page: number = 1) => {
     try {
       setIsLoading(true);
-      const response = await fetch(`/api/reviews?page=${page}&limit=${reviewsPerPage}`);
+      const response = await fetch(`api/reviews?page=${page}&limit=${reviewsPerPage}`);
 
         if (response.ok) {
         const data = await response.json();
@@ -907,7 +907,7 @@ const Reviews: React.FC<ReviewsProps> = ({ onNavigate, toggleTheme, isDarkTheme,
   // Функция для получения средней оценки
   const fetchAverageRating = async () => {
     try {
-      const response = await fetch('/api/reviews/average-rating');
+      const response = await fetch('api/reviews/average-rating');
       if (response.ok) {
         const data = await response.json();
         setAverageRating(data.averageRating || 0);

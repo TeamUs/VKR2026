@@ -367,15 +367,7 @@ const PurchasesGallery: React.FC<PurchasesGalleryProps> = ({ isDarkTheme, onModa
   const loadPurchaseImages = async () => {
     try {
       console.log('Загружаем изображения выкупов...');
-      
-      // В разработке frontend на 3001, backend на 3000
-      // В продакшене оба на одном домене
-      const isDevelopment = window.location.port === '3001';
-      const backendPort = isDevelopment ? '3000' : window.location.port;
-      const backendUrl = `${window.location.protocol}//${window.location.hostname}:${backendPort}`;
-      
-      // Загружаем список всех изображений через API
-      const response = await fetch(`${backendUrl}/api/purchases/images`);
+      const response = await fetch('api/purchases/images');
       if (!response.ok) {
         throw new Error('Ошибка получения списка изображений');
       }

@@ -399,7 +399,7 @@ const ExchangeRate: React.FC<ExchangeRateProps> = ({ onNavigate, isDarkTheme, to
 
     try {
       console.log('Fetching from /api/exchange-rate');
-      const response = await fetch('/api/exchange-rate');
+      const response = await fetch('api/exchange-rate');
       console.log('Response status:', response.status);
       
       const data = await response.json();

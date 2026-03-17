@@ -534,18 +534,21 @@ const ReferralSystem: React.FC<ReferralSystemProps> = ({ onNavigate, toggleTheme
   const [success, setSuccess] = useState('');
   const [showCopyModal, setShowCopyModal] = useState(false);
 
+  // Username бота для реферальной ссылки (для ВКР задаётся VITE_BOT_USERNAME в .env.production)
+  const botUsername = import.meta.env.VITE_BOT_USERNAME || 'poizonic_bot';
+
   useEffect(() => {
     // Генерируем реферальную ссылку как в боте
     const generateReferralLink = () => {
       const telegramId = (window as any).Telegram?.WebApp?.initDataUnsafe?.user?.id || 'user';
-      const refLink = `https://t.me/poizonic_bot?start=${telegramId}`;
+      const refLink = `https://t.me/${botUsername}?start=${telegramId}`;
       setReferralCode(telegramId.toString());
       setReferralLink(refLink);
     };
 
     generateReferralLink();
     loadReferralStats();
-  }, []);
+  }, [botUsername]);
 
   const loadReferralStats = async () => {
     try {
@@ -559,7 +562,7 @@ const ReferralSystem: React.FC<ReferralSystemProps> = ({ onNavigate, toggleTheme
       }
 
       console.log('📡 Отправляем запрос к API с Telegram ID:', telegramId);
-      const response = await fetch('/api/referral-stats', {
+      const response = await fetch('api/referral-stats', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

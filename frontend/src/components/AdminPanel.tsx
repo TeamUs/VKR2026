@@ -1059,7 +1059,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
       const loadPurchases = async () => {
         setLoadingPurchases(true);
         try {
-          const response = await fetch('/api/purchases/images');
+          const response = await fetch('api/purchases/images');
           if (response.ok) {
             const data = await response.json();
             setExistingPurchases(data || []);
@@ -1082,11 +1082,11 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
       const headers = { 'X-Telegram-User-Id': window.Telegram?.WebApp?.initDataUnsafe?.user?.id?.toString() || '' };
 
       const [statsRes, usersRes, ordersRes, yuanRes, pendingRes] = await Promise.all([
-        fetch('/api/admin/stats', { headers }).then(res => res.json()),
-        fetch('/api/admin/users', { headers }).then(res => res.json()),
-        fetch('/api/admin/orders', { headers }).then(res => res.json()),
-        fetch('/api/admin/yuan-purchases', { headers }).then(res => res.json()),
-        fetch('/api/admin/pending-orders', { headers }).then(res => res.json()),
+        fetch('api/admin/stats', { headers }).then(res => res.json()),
+        fetch('api/admin/users', { headers }).then(res => res.json()),
+        fetch('api/admin/orders', { headers }).then(res => res.json()),
+        fetch('api/admin/yuan-purchases', { headers }).then(res => res.json()),
+        fetch('api/admin/pending-orders', { headers }).then(res => res.json()),
       ]);
 
       if (statsRes.error) throw new Error(statsRes.error);
@@ -1115,7 +1115,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
   const loadReviewsForModeration = async () => {
     try {
       setLoading(true);
-      const response = await fetch('/api/admin/reviews', {
+      const response = await fetch('api/admin/reviews', {
         headers: {
           'X-Telegram-User-Id': window.Telegram?.WebApp?.initDataUnsafe?.user?.id?.toString() || ''
         }
@@ -1140,7 +1140,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
 
   const approveReview = async (reviewId: number) => {
     try {
-      const response = await fetch(`/api/admin/reviews/${reviewId}/approve`, {
+      const response = await fetch(`api/admin/reviews/${reviewId}/approve`, {
         method: 'POST',
         headers: {
           'X-Telegram-User-Id': window.Telegram?.WebApp?.initDataUnsafe?.user?.id?.toString() || ''
@@ -1166,7 +1166,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
     }
     
     try {
-      const response = await fetch(`/api/admin/reviews/${reviewId}`, {
+      const response = await fetch(`api/admin/reviews/${reviewId}`, {
         method: 'DELETE',
         headers: {
           'X-Telegram-User-Id': window.Telegram?.WebApp?.initDataUnsafe?.user?.id?.toString() || ''
@@ -1216,7 +1216,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
       
       if (type === 'order') {
         // Для обычных заказов меняем статус на "paid" (Оплачено)
-        const response = await fetch('/api/admin/update-order-status', {
+        const response = await fetch('api/admin/update-order-status', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -1234,7 +1234,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
         }
       } else {
         // Для покупок юаней используем старую логику
-        const response = await fetch('/api/admin/confirm-order', {
+        const response = await fetch('api/admin/confirm-order', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -1263,7 +1263,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
       
       if (type === 'order') {
         // Для обычных заказов меняем статус на "cancelled" (Отменено)
-        const response = await fetch('/api/admin/update-order-status', {
+        const response = await fetch('api/admin/update-order-status', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -1281,7 +1281,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
         }
       } else {
         // Для покупок юаней используем старую логику
-        const response = await fetch('/api/admin/cancel-order', {
+        const response = await fetch('api/admin/cancel-order', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -1307,7 +1307,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
   // Функции для работы с уведомлениями
   const loadUsersList = async () => {
     try {
-      const response = await fetch('/api/admin/users-list', {
+      const response = await fetch('api/admin/users-list', {
         headers: {
           'X-Telegram-User-Id': window.Telegram?.WebApp?.initDataUnsafe?.user?.id?.toString() || ''
         }
@@ -1332,8 +1332,8 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
     
     try {
       const endpoint = notificationType === 'all' 
-        ? '/api/admin/send-notification-all'
-        : '/api/admin/send-notification-user';
+        ? 'api/admin/send-notification-all'
+        : 'api/admin/send-notification-user';
       
       const body = notificationType === 'all'
         ? { message: notificationMessage, title: notificationTitle }
@@ -1379,7 +1379,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
       };
       const initData = typeof window !== 'undefined' ? window.Telegram?.WebApp?.initData : '';
       if (initData) headers['x-telegram-init-data'] = initData;
-      const response = await fetch('/api/admin/system-status', { headers });
+      const response = await fetch('api/admin/system-status', { headers });
       const data = await response.json();
       if (response.ok && data && data.success !== false) {
         setSystemStatus(data.data || {});
@@ -1395,7 +1395,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
   const loadUserHistory = async (telegramId: string) => {
     setLoadingUserHistory(true);
     try {
-      const response = await fetch(`/api/admin/user-history/${telegramId}`, {
+      const response = await fetch(`api/admin/user-history/${telegramId}`, {
         headers: {
           'X-Telegram-User-Id': window.Telegram?.WebApp?.initDataUnsafe?.user?.id?.toString() || ''
         }
@@ -1420,7 +1420,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
 
   const loadSalesAnalytics = async (period?: string, startDate?: string, endDate?: string, compare?: boolean) => {
     try {
-      let url = `/api/admin/sales-analytics?`;
+      let url = `api/admin/sales-analytics?`;
       
       if (startDate && endDate) {
         url += `startDate=${startDate}&endDate=${endDate}`;
@@ -1465,7 +1465,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
   const loadDeliveryOrders = async () => {
     setLoadingDelivery(true);
     try {
-      const response = await fetch('/api/admin/delivery');
+      const response = await fetch('api/admin/delivery');
       if (response.ok) {
         const data = await response.json();
         setDeliveryOrders(data.orders || []);
@@ -1490,7 +1490,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
     if (!pendingStatusUpdate) return;
     
     try {
-      const response = await fetch(`/api/admin/orders/${pendingStatusUpdate.orderId}/update-status`, {
+      const response = await fetch(`api/admin/orders/${pendingStatusUpdate.orderId}/update-status`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
@@ -1539,7 +1539,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
     }
 
     try {
-      const response = await fetch('/api/admin/update-user-commission', {
+      const response = await fetch('api/admin/update-user-commission', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -1572,7 +1572,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
   // Загрузка заказов для калькулятора прибыли
   const loadProfitOrders = async () => {
     try {
-      const response = await fetch('/api/admin/orders-for-profit', {
+      const response = await fetch('api/admin/orders-for-profit', {
         headers: {
           'X-Telegram-User-Id': window.Telegram?.WebApp?.initDataUnsafe?.user?.id?.toString() || ''
         }
@@ -1605,7 +1605,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
   const loadReferralsData = async () => {
     setLoadingReferrals(true);
     try {
-      const response = await fetch('/api/admin/referrals-data', {
+      const response = await fetch('api/admin/referrals-data', {
         headers: {
           'X-Telegram-User-Id': window.Telegram?.WebApp?.initDataUnsafe?.user?.id?.toString() || ''
         }
@@ -1648,7 +1648,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
     if (isNaN(days) || days < 1 || days > 365) return;
 
     try {
-      const response = await fetch('/api/admin/extend-discount', {
+      const response = await fetch('api/admin/extend-discount', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -1799,7 +1799,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
     }
 
     try {
-      const response = await fetch('/api/admin/save-profit-calculation', {
+      const response = await fetch('api/admin/save-profit-calculation', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -1871,7 +1871,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
       
       console.log('📤 Отправляем payload:', payload);
       
-      const response = await fetch('/api/admin/update-order-status', {
+      const response = await fetch('api/admin/update-order-status', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -1903,7 +1903,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
   const loadOrderDetails = async (orderId: number) => {
     setLoadingOrderDetails(true);
     try {
-      const response = await fetch(`/api/admin/order-details/${orderId}`, {
+      const response = await fetch(`api/admin/order-details/${orderId}`, {
         headers: {
           'X-Telegram-User-Id': window.Telegram?.WebApp?.initDataUnsafe?.user?.id?.toString() || ''
         }
@@ -6188,7 +6188,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
                   onClick={async () => {
                     setLoadingPurchases(true);
                     try {
-                      const response = await fetch('/api/purchases/images');
+                      const response = await fetch('api/purchases/images');
                       if (response.ok) {
                         const data = await response.json();
                         setExistingPurchases(data || []);
@@ -6265,7 +6265,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
                                 return;
                               }
 
-                              const response = await fetch(`/api/admin/purchases/images/${filename}`, {
+                              const response = await fetch(`api/admin/purchases/images/${filename}`, {
                                 method: 'DELETE',
                                 headers: {
                                   'x-telegram-init-data': initData
@@ -6546,7 +6546,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
                         
                         let response;
                         try {
-                          response = await fetch('/api/admin/purchases/upload', {
+                          response = await fetch('api/admin/purchases/upload', {
                             method: 'POST',
                             // НЕ указываем Content-Type - браузер сам установит с boundary для FormData
                             headers: {
@@ -6599,7 +6599,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
                           
                           // Обновляем список существующих изображений
                           try {
-                            const refreshResponse = await fetch('/api/purchases/images');
+                            const refreshResponse = await fetch('api/purchases/images');
                             if (refreshResponse.ok) {
                               const refreshData = await refreshResponse.json();
                               setExistingPurchases(refreshData || []);

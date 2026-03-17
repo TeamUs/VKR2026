@@ -558,7 +558,7 @@ const WriteReviewModal: React.FC<WriteReviewModalProps> = ({ isOpen, onClose, on
         formData.append('photos', photo);
       });
 
-      const response = await fetch('/api/reviews', {
+      const response = await fetch('api/reviews', {
         method: 'POST',
         body: formData
       });

@@ -800,7 +800,7 @@ const App: React.FC = () => {
 
   const initializeUser = async (user: TelegramUser) => {
     try {
-      const response = await fetch('/api/user/init', {
+      const response = await fetch('api/user/init', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -849,7 +849,7 @@ const App: React.FC = () => {
         // Отмечаем текущую дату
         localStorage.setItem(lastCallKey, today);
         
-        const response = await fetch('/api/gamification/daily-login', {
+        const response = await fetch('api/gamification/daily-login', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ telegramId })
@@ -943,7 +943,7 @@ const App: React.FC = () => {
         // Запускаем heartbeat для отслеживания онлайн-статуса (каждые 10 секунд)
         const heartbeatInterval = setInterval(async () => {
           try {
-            await fetch('/api/user/heartbeat', {
+            await fetch('api/user/heartbeat', {
               method: 'POST',
               headers: {
                 'Content-Type': 'application/json',
@@ -1050,7 +1050,7 @@ const App: React.FC = () => {
 
   const handleReferral = async (referralId: string) => {
     try {
-      const response = await fetch('/api/referral', {
+      const response = await fetch('api/referral', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

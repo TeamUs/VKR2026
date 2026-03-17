@@ -1018,7 +1018,7 @@ const YuanPurchase: React.FC<YuanPurchaseProps> = ({ telegramId, isDarkTheme, to
 
   const fetchExchangeRate = async () => {
     try {
-      const response = await fetch('/api/exchange-rate');
+      const response = await fetch('api/exchange-rate');
       if (response.ok) {
         const data = await response.json();
         // Используем тот же курс, что и в разделе "Курс юаня"
@@ -1054,7 +1054,7 @@ const YuanPurchase: React.FC<YuanPurchaseProps> = ({ telegramId, isDarkTheme, to
         return;
       }
       
-      const response = await fetch(`/api/yuan-purchases?telegram_id=${telegramId}`);
+      const response = await fetch(`api/yuan-purchases?telegram_id=${telegramId}`);
       if (response.ok) {
         const data = await response.json();
         setPurchaseHistory(data.purchases || []);
@@ -1139,7 +1139,7 @@ const YuanPurchase: React.FC<YuanPurchaseProps> = ({ telegramId, isDarkTheme, to
         userLink: user?.username ? `@${user.username}` : `tg://user?id=${user?.id || telegramId}`
       };
 
-      const response = await fetch('/api/yuan-purchase', {
+      const response = await fetch('api/yuan-purchase', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
