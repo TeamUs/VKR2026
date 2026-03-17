@@ -553,7 +553,7 @@ async function logUserActivity(telegramId, actionType, actionData = {}) {
     await ensureDBConnection();
     if (dbConnection) {
       await dbConnection.execute(`
-        INSERT INTO user_activity (telegram_id, action_type, action_data)
+        INSERT INTO vkr_user_activity (telegram_id, action_type, action_data)
         VALUES (?, ?, ?)
       `, [telegramId, actionType, JSON.stringify(actionData)]);
     }
@@ -568,7 +568,7 @@ async function createSystemLog(logLevel, logMessage, logData = {}, telegramId = 
     await ensureDBConnection();
     if (dbConnection) {
       await dbConnection.execute(`
-        INSERT INTO system_logs (log_level, log_message, log_data, telegram_id)
+        INSERT INTO vkr_system_logs (log_level, log_message, log_data, telegram_id)
         VALUES (?, ?, ?, ?)
       `, [logLevel, logMessage, JSON.stringify(logData), telegramId]);
     }
@@ -1611,7 +1611,7 @@ app.post('/api/calculate-from-link', async (req, res) => {
       try {
         await ensureDBConnection();
         const [rows] = await dbConnection.execute(
-          'SELECT commission, access_expires_at FROM users WHERE telegram_id = ?',
+          'SELECT commission, access_expires_at FROM vkr_users WHERE telegram_id = ?',
           [telegramId]
         );
         
@@ -1845,7 +1845,7 @@ app.post('/api/get-price-with-size', async (req, res) => {
       try {
         await ensureDBConnection();
         const [rows] = await dbConnection.execute(
-          'SELECT commission, access_expires_at FROM users WHERE telegram_id = ?',
+          'SELECT commission, access_expires_at FROM vkr_users WHERE telegram_id = ?',
           [telegramId]
         );
         
@@ -1941,19 +1941,19 @@ app.post('/api/referral-stats', async (req, res) => {
       try {
         // Получаем информацию о пользователе
         const [userRows] = await dbConnection.execute(
-          'SELECT commission, access_expires_at FROM users WHERE telegram_id = ?',
+          'SELECT commission, access_expires_at FROM vkr_users WHERE telegram_id = ?',
           [telegramId]
         );
 
         // Получаем количество приглашенных пользователей
         const [referralRows] = await dbConnection.execute(
-          'SELECT COUNT(*) as total_referrals FROM referrals WHERE referred_by = ?',
+          'SELECT COUNT(*) as total_referrals FROM vkr_referrals WHERE referred_by = ?',
           [telegramId]
         );
 
         // Получаем количество кликов по ссылке
         const [clicksRows] = await dbConnection.execute(
-          'SELECT clicks FROM referrals WHERE telegram_id = ?',
+          'SELECT clicks FROM vkr_referrals WHERE telegram_id = ?',
           [telegramId]
         );
 
@@ -2010,7 +2010,7 @@ app.post('/api/submit-review-direct', async (req, res) => {
     if (dbConnection) {
       // Сохраняем отзыв в базу данных
       await dbConnection.execute(
-        `INSERT INTO reviews (telegram_id, username, review_text, created_at) 
+        `INSERT INTO vkr_reviews (telegram_id, username, review_text, created_at) 
          VALUES (?, ?, ?, ?)`,
         [telegramId, username || '', reviewText, timestamp || new Date()]
       );
@@ -2058,7 +2058,7 @@ app.post('/api/calculate-price', async (req, res) => {
     if (telegramId && dbConnection) {
       try {
         const [rows] = await dbConnection.execute(
-          'SELECT commission, access_expires_at FROM users WHERE telegram_id = ?',
+          'SELECT commission, access_expires_at FROM vkr_users WHERE telegram_id = ?',
           [telegramId]
         );
         
@@ -2096,7 +2096,7 @@ app.post('/api/calculate-price', async (req, res) => {
         let tempDiscountActive = false;
         try {
           const [discountData] = await dbConnection.execute(
-            'SELECT temp_discount_active, temp_discount_end_date FROM users WHERE telegram_id = ?',
+            'SELECT temp_discount_active, temp_discount_end_date FROM vkr_users WHERE telegram_id = ?',
             [telegramId]
           );
           tempDiscountActive = discountData.length > 0 && 
@@ -2110,7 +2110,7 @@ app.post('/api/calculate-price', async (req, res) => {
         
         // Применяем награды от уровня
         const [userData] = await dbConnection.execute(
-          'SELECT current_level FROM users WHERE telegram_id = ?',
+          'SELECT current_level FROM vkr_users WHERE telegram_id = ?',
           [telegramId]
         );
         
@@ -2122,7 +2122,7 @@ app.post('/api/calculate-price', async (req, res) => {
           if (userLevel === 'Bronze') {
             // Проверяем, это первый заказ пользователя (учитываем заказы со всеми статусами, кроме отмененных)
             const [orderCount] = await dbConnection.execute(
-              'SELECT COUNT(*) as count FROM orders WHERE telegram_id = ? AND status != "cancelled"',
+              'SELECT COUNT(*) as count FROM vkr_orders WHERE telegram_id = ? AND status != "cancelled"',
               [telegramId]
             );
             if (orderCount[0].count === 0) {
@@ -2220,7 +2220,7 @@ app.post('/api/orders', async (req, res) => {
     try {
       // Создаем или обновляем пользователя
       await dbConnection.execute(
-        `INSERT INTO users (telegram_id, commission, referred_by) 
+        `INSERT INTO vkr_users (telegram_id, commission, referred_by) 
          VALUES (?, 1000, ?) 
          ON DUPLICATE KEY UPDATE telegram_id = telegram_id`,
         [telegramId, telegramId]
@@ -2228,7 +2228,7 @@ app.post('/api/orders', async (req, res) => {
 
       // Получаем username из базы данных
       const [userRows] = await dbConnection.execute(
-        'SELECT username FROM users WHERE telegram_id = ?',
+        'SELECT username FROM vkr_users WHERE telegram_id = ?',
         [telegramId]
       );
       
@@ -2236,7 +2236,7 @@ app.post('/api/orders', async (req, res) => {
 
               // Создаем заказ (без товаров)
       const [result] = await dbConnection.execute(
-                `INSERT INTO orders (telegram_id, username, full_name, phone_number, pickup_point, pickup_point_address, comments, status) 
+                `INSERT INTO vkr_orders (telegram_id, username, full_name, phone_number, pickup_point, pickup_point_address, comments, status) 
                  VALUES (?, ?, ?, ?, ?, ?, ?, 'pending')`,
                 [telegramId, dbUsername, fullName, phoneNumber, pickupPoint, pickupPointAddress, comments || '']
               );
@@ -2251,7 +2251,7 @@ app.post('/api/orders', async (req, res) => {
         totalSavings += itemSavings;
 
         await dbConnection.execute(
-          `INSERT INTO order_items (order_id, product_link, product_size, quantity, estimated_savings) 
+          `INSERT INTO vkr_order_items (order_id, product_link, product_size, quantity, estimated_savings) 
            VALUES (?, ?, ?, ?, ?)`,
           [orderId, item.productLink, item.productSize || '', quantity, itemSavings]
         );
@@ -2259,14 +2259,14 @@ app.post('/api/orders', async (req, res) => {
 
       // Обновляем общую экономию заказа
       await dbConnection.execute(
-        `UPDATE orders SET estimated_savings = ? WHERE order_id = ?`,
+        `UPDATE vkr_orders SET estimated_savings = ? WHERE order_id = ?`,
         [totalSavings, orderId]
       );
 
       // Генерируем tracking number и создаем запись в delivery_tracking
       const trackingNumber = `POIZ-${orderId.toString().padStart(6, '0')}`;
       await dbConnection.execute(
-        `INSERT INTO delivery_tracking (order_id, internal_tracking_number, status) 
+        `INSERT INTO vkr_delivery_tracking (order_id, internal_tracking_number, status) 
          VALUES (?, ?, 'Создан')`,
         [orderId, trackingNumber]
       );
@@ -2353,14 +2353,14 @@ app.post('/api/user/init', async (req, res) => {
       try {
         // Проверяем, существует ли пользователь
         const [existingUser] = await dbConnection.execute(
-          'SELECT * FROM users WHERE telegram_id = ?',
+          'SELECT * FROM vkr_users WHERE telegram_id = ?',
           [telegramId]
         );
 
         if (existingUser.length > 0) {
           // Обновляем существующего пользователя (username, full_name и last_activity)
           await dbConnection.execute(
-            `UPDATE users SET username = ?, full_name = ?, last_activity = NOW() 
+            `UPDATE vkr_users SET username = ?, full_name = ?, last_activity = NOW() 
              WHERE telegram_id = ?`,
             [username || null, fullName || null, telegramId]
           );
@@ -2370,7 +2370,7 @@ app.post('/api/user/init', async (req, res) => {
             // Создаем нового пользователя с базовой комиссией и временем активности
           // Автоматически присваиваем бронзовый уровень (0 XP требуется)
           await dbConnection.execute(
-            `INSERT INTO users (telegram_id, username, full_name, commission, current_level, last_activity) 
+            `INSERT INTO vkr_users (telegram_id, username, full_name, commission, current_level, last_activity) 
              VALUES (?, ?, ?, 1000, 'Bronze', NOW())`,
             [telegramId, username || null, fullName || null]
           );
@@ -2413,7 +2413,7 @@ app.post('/api/user/heartbeat', async (req, res) => {
       try {
         // Обновляем время последней активности пользователя
         await dbConnection.execute(
-          'UPDATE users SET last_activity = NOW() WHERE telegram_id = ?',
+          'UPDATE vkr_users SET last_activity = NOW() WHERE telegram_id = ?',
           [telegramId]
         );
 
@@ -2449,7 +2449,7 @@ app.post('/api/referral', async (req, res) => {
 
         // Проверяем, существует ли пользователь
         const [existingUser] = await dbConnection.execute(
-          'SELECT * FROM users WHERE telegram_id = ?',
+          'SELECT * FROM vkr_users WHERE telegram_id = ?',
           [telegramId]
         );
 
@@ -2466,7 +2466,7 @@ app.post('/api/referral', async (req, res) => {
 
         // Получаем информацию о реферере для определения бонусов
         const [referrerInfo] = await dbConnection.execute(
-          'SELECT username, full_name, current_level FROM users WHERE telegram_id = ?',
+          'SELECT username, full_name, current_level FROM vkr_users WHERE telegram_id = ?',
           [referralId]
         );
 
@@ -2483,7 +2483,7 @@ app.post('/api/referral', async (req, res) => {
         // Создаем пользователя с реферальной скидкой
         // Автоматически присваиваем бронзовый уровень (0 XP требуется)
         await dbConnection.execute(
-          `INSERT INTO users (telegram_id, commission, referred_by, access_expires_at, current_level) 
+          `INSERT INTO vkr_users (telegram_id, commission, referred_by, access_expires_at, current_level) 
            VALUES (?, ?, ?, DATE_ADD(NOW(), INTERVAL ? DAY), 'Bronze')`,
           [telegramId, referralCommission, referralId, referralDays]
         );
@@ -2494,7 +2494,7 @@ app.post('/api/referral', async (req, res) => {
         // НО только если реферер НЕ имеет уровень Diamond (у Diamond комиссия уже 0₽ навсегда)
         if (!(referrerInfo.length > 0 && referrerInfo[0].current_level === 'Diamond')) {
           const [referrerCurrentDiscount] = await dbConnection.execute(
-            'SELECT access_expires_at FROM users WHERE telegram_id = ?',
+            'SELECT access_expires_at FROM vkr_users WHERE telegram_id = ?',
             [referralId]
           );
 
@@ -2506,20 +2506,20 @@ app.post('/api/referral', async (req, res) => {
               // У реферера есть активная скидка - продлеваем на 7 дней
               const newExpiry = new Date(currentExpiry.getTime() + 7 * 24 * 60 * 60 * 1000);
               await dbConnection.execute(
-                'UPDATE users SET commission = 400, access_expires_at = ? WHERE telegram_id = ?',
+                'UPDATE vkr_users SET commission = 400, access_expires_at = ? WHERE telegram_id = ?',
                 [newExpiry, referralId]
               );
             } else {
               // У реферера была скидка, но она истекла - даем новую на 7 дней
               await dbConnection.execute(
-                'UPDATE users SET commission = 400, access_expires_at = DATE_ADD(NOW(), INTERVAL 7 DAY) WHERE telegram_id = ?',
+                'UPDATE vkr_users SET commission = 400, access_expires_at = DATE_ADD(NOW(), INTERVAL 7 DAY) WHERE telegram_id = ?',
                 [referralId]
               );
             }
           } else {
             // У реферера никогда не было скидки - даем первую на 7 дней
             await dbConnection.execute(
-              'UPDATE users SET commission = 400, access_expires_at = DATE_ADD(NOW(), INTERVAL 7 DAY) WHERE telegram_id = ?',
+              'UPDATE vkr_users SET commission = 400, access_expires_at = DATE_ADD(NOW(), INTERVAL 7 DAY) WHERE telegram_id = ?',
               [referralId]
             );
           }
@@ -2557,7 +2557,7 @@ app.post('/api/referral', async (req, res) => {
         } else {
           // Получаем обновленную информацию о скидке реферера для уведомления
           const [updatedReferrerInfo] = await dbConnection.execute(
-            'SELECT access_expires_at FROM users WHERE telegram_id = ?',
+            'SELECT access_expires_at FROM vkr_users WHERE telegram_id = ?',
             [referralId]
           );
           
@@ -2716,7 +2716,7 @@ app.get('/api/user/orders', async (req, res) => {
     // Пробуем разные варианты сравнения для telegram_id
     const [allOrdersCount] = await dbConnection.execute(`
       SELECT COUNT(*) as total 
-      FROM orders 
+      FROM vkr_orders 
       WHERE telegram_id = ? 
          OR CAST(telegram_id AS CHAR) = ?
          OR telegram_id = CAST(? AS UNSIGNED)
@@ -2726,7 +2726,7 @@ app.get('/api/user/orders', async (req, res) => {
     // Проверим заказы по статусам
     const [statusCounts] = await dbConnection.execute(`
       SELECT status, COUNT(*) as count 
-      FROM orders 
+      FROM vkr_orders 
       WHERE telegram_id = ? 
          OR CAST(telegram_id AS CHAR) = ?
          OR telegram_id = CAST(? AS UNSIGNED)
@@ -2737,7 +2737,7 @@ app.get('/api/user/orders', async (req, res) => {
     // Сначала проверим, какие заказы есть у пользователя с разными статусами
     const [testQuery] = await dbConnection.execute(`
       SELECT order_id, status, created_at
-      FROM orders
+      FROM vkr_orders
       WHERE (telegram_id = ? OR CAST(telegram_id AS CHAR) = ?)
       ORDER BY created_at DESC
       LIMIT 10
@@ -2761,8 +2761,8 @@ app.get('/api/user/orders', async (req, res) => {
         dt.internal_tracking_number,
         dt.status as delivery_status,
         dt.last_updated
-      FROM orders o
-      LEFT JOIN delivery_tracking dt ON o.order_id = dt.order_id
+      FROM vkr_orders o
+      LEFT JOIN vkr_delivery_tracking dt ON o.order_id = dt.order_id
       WHERE (o.telegram_id = ? 
          OR CAST(o.telegram_id AS CHAR) = ?
          OR o.telegram_id = CAST(? AS UNSIGNED))
@@ -2788,7 +2788,7 @@ app.get('/api/user/orders', async (req, res) => {
       // Проверим, есть ли вообще заказы с другими статусами
       const [allOrders] = await dbConnection.execute(`
         SELECT order_id, status, created_at 
-        FROM orders 
+        FROM vkr_orders 
         WHERE telegram_id = ?
         ORDER BY created_at DESC
         LIMIT 5
@@ -2826,8 +2826,8 @@ app.get('/api/user/:telegramId', async (req, res) => {
       try {
         const [rows] = await dbConnection.execute(
           `SELECT u.*, r.referral_url, r.clicks 
-           FROM users u 
-           LEFT JOIN referrals r ON u.telegram_id = r.telegram_id 
+           FROM vkr_users u 
+           LEFT JOIN vkr_referrals r ON u.telegram_id = r.telegram_id 
            WHERE u.telegram_id = ?`,
           [telegramId]
         );
@@ -2879,7 +2879,7 @@ app.get('/api/reviews', async (req, res) => {
     
           // Получаем общее количество одобренных отзывов
           const [totalRows] = await dbConnection.execute(`
-            SELECT COUNT(*) as total FROM reviews WHERE is_approved = 1
+            SELECT COUNT(*) as total FROM vkr_reviews WHERE is_approved = 1
           `);
           const total = totalRows[0].total;
           
@@ -2887,8 +2887,8 @@ app.get('/api/reviews', async (req, res) => {
     const [rows] = await dbConnection.execute(`
       SELECT r.review_id, r.telegram_id, r.username, r.full_name, r.rating, r.review_text, r.photo_url, r.created_at, r.moderated_at,
              u.avatar_url
-      FROM reviews r
-      LEFT JOIN users u ON r.telegram_id = u.telegram_id
+      FROM vkr_reviews r
+      LEFT JOIN vkr_users u ON r.telegram_id = u.telegram_id
       WHERE r.is_approved = 1
       ORDER BY r.moderated_at DESC, r.created_at DESC
       LIMIT ${limit} OFFSET ${offset}
@@ -2936,7 +2936,7 @@ app.get('/api/reviews/average-rating', async (req, res) => {
     
           const [rows] = await dbConnection.execute(`
             SELECT AVG(rating) as averageRating, COUNT(*) as totalReviews
-            FROM reviews
+            FROM vkr_reviews
             WHERE is_approved = 1
           `);
     
@@ -2986,7 +2986,7 @@ app.post('/api/reviews', upload.array('photos', 10), async (req, res) => {
 
     // Проверяем, существует ли пользователь, если нет - создаем
     const [existingUser] = await dbConnection.execute(
-      'SELECT telegram_id FROM users WHERE telegram_id = ?',
+      'SELECT telegram_id FROM vkr_users WHERE telegram_id = ?',
       [telegram_id]
     );
 
@@ -2994,7 +2994,7 @@ app.post('/api/reviews', upload.array('photos', 10), async (req, res) => {
       console.log('Создаем нового пользователя:', telegram_id);
       // Автоматически присваиваем бронзовый уровень (0 XP требуется)
       await dbConnection.execute(`
-        INSERT INTO users (telegram_id, commission, username, full_name, avatar_url, current_level, created_at)
+        INSERT INTO vkr_users (telegram_id, commission, username, full_name, avatar_url, current_level, created_at)
         VALUES (?, 1000, ?, ?, ?, 'Bronze', NOW())
       `, [telegram_id, username || null, full_name || null, avatar_url || null]);
       
@@ -3002,7 +3002,7 @@ app.post('/api/reviews', upload.array('photos', 10), async (req, res) => {
     } else if (avatar_url || username || full_name) {
       // Обновляем данные пользователя, если они переданы (особенно avatar_url)
       await dbConnection.execute(`
-        UPDATE users 
+        UPDATE vkr_users 
         SET username = COALESCE(?, username),
             full_name = COALESCE(?, full_name),
             avatar_url = COALESCE(?, avatar_url)
@@ -3019,7 +3019,7 @@ app.post('/api/reviews', upload.array('photos', 10), async (req, res) => {
     }
 
     const [result] = await dbConnection.execute(`
-      INSERT INTO reviews (telegram_id, username, full_name, rating, review_text, photo_url, is_approved)
+      INSERT INTO vkr_reviews (telegram_id, username, full_name, rating, review_text, photo_url, is_approved)
       VALUES (?, ?, ?, ?, ?, ?, 0)
     `, [telegram_id, username, full_name, rating, review_text, photo_url]);
 
@@ -3102,7 +3102,7 @@ app.get('/api/admin/reviews', async (req, res) => {
     
     // Получаем общее количество отзывов
     const [totalRows] = await dbConnection.execute(`
-      SELECT COUNT(*) as total FROM reviews ${whereClause}
+      SELECT COUNT(*) as total FROM vkr_reviews ${whereClause}
     `);
     const total = totalRows[0].total;
     
@@ -3110,7 +3110,7 @@ app.get('/api/admin/reviews', async (req, res) => {
     const [rows] = await dbConnection.execute(`
       SELECT review_id, telegram_id, username, full_name, rating, review_text, photo_url, 
              created_at, is_approved, moderated_at, moderated_by
-      FROM reviews 
+      FROM vkr_reviews 
       ${whereClause}
       ORDER BY created_at DESC
       LIMIT ${limit} OFFSET ${offset}
@@ -3142,7 +3142,7 @@ app.post('/api/admin/reviews/:reviewId/approve', async (req, res) => {
     
     // Обновляем статус отзыва
     await dbConnection.execute(`
-      UPDATE reviews 
+      UPDATE vkr_reviews 
       SET is_approved = 1, moderated_at = NOW(), moderated_by = ?
       WHERE review_id = ?
     `, [moderatorId, reviewId]);
@@ -3150,7 +3150,7 @@ app.post('/api/admin/reviews/:reviewId/approve', async (req, res) => {
     // Получаем данные отзыва для отправки в канал
     const [reviewRows] = await dbConnection.execute(`
       SELECT telegram_id, username, full_name, rating, review_text, photo_url
-      FROM reviews 
+      FROM vkr_reviews 
       WHERE review_id = ?
     `, [reviewId]);
     
@@ -3196,7 +3196,7 @@ app.delete('/api/admin/reviews/:reviewId', async (req, res) => {
     
     // Удаляем отзыв из базы данных
     await dbConnection.execute(`
-      DELETE FROM reviews WHERE review_id = ?
+      DELETE FROM vkr_reviews WHERE review_id = ?
     `, [reviewId]);
     
     // Уведомляем менеджера об удалении
@@ -3224,7 +3224,7 @@ app.get('/api/admin/reviews/stats', async (req, res) => {
         SUM(CASE WHEN is_approved = 1 THEN 1 ELSE 0 END) as approved_reviews,
         SUM(CASE WHEN is_approved = 0 THEN 1 ELSE 0 END) as pending_reviews,
         AVG(CASE WHEN is_approved = 1 THEN rating ELSE NULL END) as average_rating
-      FROM reviews
+      FROM vkr_reviews
     `);
     
     // Статистика по дням (последние 7 дней)
@@ -3233,7 +3233,7 @@ app.get('/api/admin/reviews/stats', async (req, res) => {
         DATE(created_at) as date,
         COUNT(*) as total,
         SUM(CASE WHEN is_approved = 1 THEN 1 ELSE 0 END) as approved
-      FROM reviews 
+      FROM vkr_reviews 
       WHERE created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)
       GROUP BY DATE(created_at)
       ORDER BY date DESC
@@ -3743,7 +3743,7 @@ app.get('/api/profile', async (req, res) => {
     // Получаем данные пользователя
     const [userRows] = await dbConnection.execute(`
       SELECT telegram_id, commission, created_at, full_name, phone_number, preferred_currency, avatar_url
-      FROM users 
+      FROM vkr_users 
       WHERE telegram_id = ?
     `, [telegram_id]);
     
@@ -3761,7 +3761,7 @@ app.get('/api/profile', async (req, res) => {
       SELECT 
         COUNT(*) as total_orders,
         COUNT(CASE WHEN status = 'completed' THEN 1 END) as completed_orders
-      FROM orders 
+      FROM vkr_orders 
       WHERE telegram_id = ? AND (status = 'paid' OR status = 'completed')
     `, [telegram_id]);
     
@@ -3770,7 +3770,7 @@ app.get('/api/profile', async (req, res) => {
       SELECT 
         COUNT(*) as total_referrals,
         COALESCE(SUM(clicks), 0) as total_clicks
-      FROM referrals 
+      FROM vkr_referrals 
       WHERE referred_by = ?
     `, [telegram_id]);
     
@@ -3781,7 +3781,7 @@ app.get('/api/profile', async (req, res) => {
         COALESCE(SUM(amount_rub), 0) as total_spent_rub,
         COALESCE(SUM(amount_cny), 0) as total_bought_cny,
         COALESCE(SUM(savings), 0) as total_savings
-      FROM yuan_purchases 
+      FROM vkr_yuan_purchases 
       WHERE telegram_id = ? AND status = 'completed'
     `, [telegram_id]);
 
@@ -3791,7 +3791,7 @@ app.get('/api/profile', async (req, res) => {
       SELECT 
         COUNT(*) as total_orders,
         COALESCE(SUM(estimated_savings), 0) as total_order_savings
-      FROM orders 
+      FROM vkr_orders 
       WHERE telegram_id = ? AND (status = 'paid' OR status = 'completed')
     `, [telegram_id]);
 
@@ -3811,7 +3811,7 @@ app.get('/api/profile', async (req, res) => {
         // Получаем данные пользователя из users таблицы
         const [userGamification] = await dbConnection.execute(`
           SELECT xp, current_level, total_orders, total_yuan_bought, total_referrals, total_savings
-          FROM users 
+          FROM vkr_users 
           WHERE telegram_id = ?
         `, [telegram_id]);
 
@@ -3888,7 +3888,7 @@ app.patch('/api/users', async (req, res) => {
     
     // Проверяем, существует ли пользователь
     const [existingUser] = await dbConnection.execute(
-      'SELECT telegram_id FROM users WHERE telegram_id = ?',
+      'SELECT telegram_id FROM vkr_users WHERE telegram_id = ?',
       [telegram_id]
     );
     
@@ -3896,7 +3896,7 @@ app.patch('/api/users', async (req, res) => {
       // Создаем нового пользователя
       // Автоматически присваиваем бронзовый уровень (0 XP требуется)
       await dbConnection.execute(`
-        INSERT INTO users (telegram_id, commission, full_name, phone_number, preferred_currency, avatar_url, current_level, created_at) 
+        INSERT INTO vkr_users (telegram_id, commission, full_name, phone_number, preferred_currency, avatar_url, current_level, created_at) 
         VALUES (?, 1000, ?, ?, ?, ?, 'Bronze', NOW())
       `, [telegram_id, full_name, phone_number, preferred_currency, avatar_url]);
       
@@ -3904,7 +3904,7 @@ app.patch('/api/users', async (req, res) => {
     } else {
       // Обновляем существующего пользователя
       await dbConnection.execute(`
-        UPDATE users 
+        UPDATE vkr_users 
         SET full_name = COALESCE(?, full_name),
             phone_number = COALESCE(?, phone_number),
             preferred_currency = COALESCE(?, preferred_currency),
@@ -3951,7 +3951,7 @@ app.post('/api/yuan-purchase', async (req, res) => {
     
     // Проверяем, существует ли пользователь
     const [existingUser] = await dbConnection.execute(
-      'SELECT telegram_id FROM users WHERE telegram_id = ?',
+      'SELECT telegram_id FROM vkr_users WHERE telegram_id = ?',
       [telegramId]
     );
     
@@ -3959,7 +3959,7 @@ app.post('/api/yuan-purchase', async (req, res) => {
       // Создаем нового пользователя
       // Автоматически присваиваем бронзовый уровень (0 XP требуется)
       await dbConnection.execute(`
-        INSERT INTO users (telegram_id, username, full_name, commission, current_level, created_at) 
+        INSERT INTO vkr_users (telegram_id, username, full_name, commission, current_level, created_at) 
         VALUES (?, ?, ?, 1000, 'Bronze', NOW())
       `, [telegramId, username || 'unknown', (firstName && lastName) ? `${firstName} ${lastName}` : (firstName || 'Пользователь')]);
       
@@ -3968,7 +3968,7 @@ app.post('/api/yuan-purchase', async (req, res) => {
     
     // Создаем запись о покупке
     const [result] = await dbConnection.execute(`
-      INSERT INTO yuan_purchases (telegram_id, amount_rub, amount_cny, exchange_rate, favorable_rate, savings, status)
+      INSERT INTO vkr_yuan_purchases (telegram_id, amount_rub, amount_cny, exchange_rate, favorable_rate, savings, status)
       VALUES (?, ?, ?, ?, ?, ?, 'pending')
     `, [telegramId, amountRubNum, amountCnyNum, 12.5, rate, savings || 0]);
     
@@ -4036,7 +4036,7 @@ app.get('/api/yuan-purchases', async (req, res) => {
     
     const [rows] = await dbConnection.execute(`
       SELECT id, amount_rub, amount_cny, exchange_rate, favorable_rate, savings, status, created_at
-      FROM yuan_purchases 
+      FROM vkr_yuan_purchases 
       WHERE telegram_id = ? AND status = 'completed'
       ORDER BY created_at DESC
     `, [telegram_id]);
@@ -4072,8 +4072,8 @@ app.get('/api/orders-history', async (req, res) => {
         o.estimated_savings, 
         o.status as order_status,
         dt.status as delivery_status
-      FROM orders o
-      LEFT JOIN delivery_tracking dt ON o.order_id = dt.order_id
+      FROM vkr_orders o
+      LEFT JOIN vkr_delivery_tracking dt ON o.order_id = dt.order_id
       WHERE o.telegram_id = ? AND (o.status = 'paid' OR o.status = 'completed')
       ORDER BY o.created_at DESC
     `, [telegram_id]);
@@ -4082,7 +4082,7 @@ app.get('/api/orders-history', async (req, res) => {
     const ordersWithItems = await Promise.all(orders.map(async (order) => {
       const [items] = await dbConnection.execute(`
         SELECT product_link, product_size, quantity, estimated_savings
-        FROM order_items 
+        FROM vkr_order_items 
         WHERE order_id = ?
         ORDER BY id
       `, [order.order_id]);
@@ -4119,7 +4119,7 @@ app.get('/api/user-activity', async (req, res) => {
     
     const [rows] = await dbConnection.execute(`
       SELECT id, action_type, action_data, created_at
-      FROM user_activity 
+      FROM vkr_user_activity 
       WHERE telegram_id = ?
       ORDER BY created_at DESC
       LIMIT ?
@@ -4144,7 +4144,7 @@ app.post('/api/user-activity', async (req, res) => {
     }
     
     const [result] = await dbConnection.execute(`
-      INSERT INTO user_activity (telegram_id, action_type, action_data)
+      INSERT INTO vkr_user_activity (telegram_id, action_type, action_data)
       VALUES (?, ?, ?)
     `, [telegram_id, action_type, JSON.stringify(action_data || {})]);
     
@@ -4176,7 +4176,7 @@ app.get('/api/exchange-rates', async (req, res) => {
     
     const [rows] = await dbConnection.execute(`
       SELECT id, currency_from, currency_to, rate, favorable_rate, source, created_at, updated_at
-      FROM exchange_rates 
+      FROM vkr_exchange_rates 
       WHERE currency_from = ? AND currency_to = ?
       ORDER BY created_at DESC
       LIMIT 1
@@ -4188,7 +4188,7 @@ app.get('/api/exchange-rates', async (req, res) => {
       const defaultFavorableRate = defaultRate * 0.95;
       
       await dbConnection.execute(`
-        INSERT INTO exchange_rates (currency_from, currency_to, rate, favorable_rate, source)
+        INSERT INTO vkr_exchange_rates (currency_from, currency_to, rate, favorable_rate, source)
         VALUES (?, ?, ?, ?, 'CBRF')
       `, [currency_from, currency_to, defaultRate, defaultFavorableRate]);
       
@@ -4223,7 +4223,7 @@ app.post('/api/exchange-rates', async (req, res) => {
     }
     
     const [result] = await dbConnection.execute(`
-      INSERT INTO exchange_rates (currency_from, currency_to, rate, favorable_rate, source)
+      INSERT INTO vkr_exchange_rates (currency_from, currency_to, rate, favorable_rate, source)
       VALUES (?, ?, ?, ?, ?)
     `, [currency_from, currency_to, rate, favorable_rate || rate * 0.95, source]);
     
@@ -4249,7 +4249,7 @@ app.get('/api/system-logs', async (req, res) => {
     
     let query = `
       SELECT id, log_level, log_message, log_data, telegram_id, created_at
-      FROM system_logs 
+      FROM vkr_system_logs 
       WHERE 1=1
     `;
     const params = [];
@@ -4288,7 +4288,7 @@ app.post('/api/system-logs', async (req, res) => {
     }
     
     const [result] = await dbConnection.execute(`
-      INSERT INTO system_logs (log_level, log_message, log_data, telegram_id)
+      INSERT INTO vkr_system_logs (log_level, log_message, log_data, telegram_id)
       VALUES (?, ?, ?, ?)
     `, [log_level, log_message, JSON.stringify(log_data || {}), telegram_id]);
     
@@ -4330,37 +4330,37 @@ app.get('/api/admin/stats', async (req, res) => {
     
     // Общее количество пользователей
     const [totalUsersResult] = await dbConnection.execute(
-      'SELECT COUNT(*) as total FROM users'
+      'SELECT COUNT(*) as total FROM vkr_users'
     );
     const totalUsers = totalUsersResult[0].total;
     
     // Новые пользователи сегодня
     const [newUsersTodayResult] = await dbConnection.execute(
-      'SELECT COUNT(*) as total FROM users WHERE DATE(created_at) = CURDATE()'
+      'SELECT COUNT(*) as total FROM vkr_users WHERE DATE(created_at) = CURDATE()'
     );
     const newUsersToday = newUsersTodayResult[0].total;
     
     // Общее количество заказов
     const [totalOrdersResult] = await dbConnection.execute(
-      'SELECT COUNT(*) as total FROM orders'
+      'SELECT COUNT(*) as total FROM vkr_orders'
     );
     const totalOrders = totalOrdersResult[0].total;
     
     // Заказы сегодня
     const [ordersTodayResult] = await dbConnection.execute(
-      'SELECT COUNT(*) as total FROM orders WHERE DATE(created_at) = CURDATE()'
+      'SELECT COUNT(*) as total FROM vkr_orders WHERE DATE(created_at) = CURDATE()'
     );
     const ordersToday = ordersTodayResult[0].total;
     
     // Общее количество покупок юаней
     const [totalYuanResult] = await dbConnection.execute(
-      'SELECT COUNT(*) as total FROM yuan_purchases'
+      'SELECT COUNT(*) as total FROM vkr_yuan_purchases'
     );
     const totalYuanPurchases = totalYuanResult[0].total;
     
     // Покупки юаней сегодня
     const [yuanTodayResult] = await dbConnection.execute(
-      'SELECT COUNT(*) as total FROM yuan_purchases WHERE DATE(created_at) = CURDATE()'
+      'SELECT COUNT(*) as total FROM vkr_yuan_purchases WHERE DATE(created_at) = CURDATE()'
     );
     const yuanPurchasesToday = yuanTodayResult[0].total;
     
@@ -4369,9 +4369,9 @@ app.get('/api/admin/stats', async (req, res) => {
       SELECT 
         COALESCE(SUM(yuan_savings), 0) + COALESCE(SUM(order_savings), 0) as total_savings
       FROM (
-        SELECT SUM(savings) as yuan_savings, 0 as order_savings FROM yuan_purchases WHERE status = 'completed'
+        SELECT SUM(savings) as yuan_savings, 0 as order_savings FROM vkr_yuan_purchases WHERE status = 'completed'
         UNION ALL
-        SELECT 0 as yuan_savings, SUM(estimated_savings) as order_savings FROM orders WHERE (status = 'paid' OR status = 'completed')
+        SELECT 0 as yuan_savings, SUM(estimated_savings) as order_savings FROM vkr_orders WHERE (status = 'paid' OR status = 'completed')
       ) as combined_savings
     `);
     const totalSavings = totalSavingsResult[0].total_savings || 0;
@@ -4380,7 +4380,7 @@ app.get('/api/admin/stats', async (req, res) => {
     const [totalRevenueResult] = await dbConnection.execute(`
       SELECT 
         COALESCE(SUM(profit), 0) as total_revenue
-      FROM profit_calculations
+      FROM vkr_profit_calculations
     `);
     const totalRevenue = totalRevenueResult[0].total_revenue || 0;
     
@@ -4388,9 +4388,9 @@ app.get('/api/admin/stats', async (req, res) => {
     const [activeUsersResult] = await dbConnection.execute(`
       SELECT COUNT(DISTINCT telegram_id) as active_users
       FROM (
-        SELECT telegram_id FROM orders WHERE created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)
+        SELECT telegram_id FROM vkr_orders WHERE created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)
         UNION
-        SELECT telegram_id FROM yuan_purchases WHERE created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)
+        SELECT telegram_id FROM vkr_yuan_purchases WHERE created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)
       ) as active_users_combined
     `);
     const activeUsers = activeUsersResult[0].active_users || 0;
@@ -4399,11 +4399,11 @@ app.get('/api/admin/stats', async (req, res) => {
     const [conversionResult] = await dbConnection.execute(`
       SELECT 
         COUNT(DISTINCT active_users.telegram_id) as converted_users
-      FROM users
+      FROM vkr_users
       LEFT JOIN (
-        SELECT telegram_id FROM orders
+        SELECT telegram_id FROM vkr_orders
         UNION
-        SELECT telegram_id FROM yuan_purchases
+        SELECT telegram_id FROM vkr_yuan_purchases
       ) as active_users ON users.telegram_id = active_users.telegram_id
       WHERE active_users.telegram_id IS NOT NULL
     `);
@@ -4454,10 +4454,10 @@ app.get('/api/admin/users', async (req, res) => {
         COALESCE(SUM(CASE WHEN (o.status = 'paid' OR o.status = 'completed') THEN o.estimated_savings ELSE 0 END), 0) as order_savings,
         COALESCE(SUM(CASE WHEN yp.status = 'completed' THEN yp.savings ELSE 0 END), 0) + COALESCE(SUM(CASE WHEN o.status = 'completed' THEN o.estimated_savings ELSE 0 END), 0) as total_savings,
         COUNT(DISTINCT r.telegram_id) as referrals_count
-      FROM users u
-      LEFT JOIN orders o ON u.telegram_id = o.telegram_id
-      LEFT JOIN yuan_purchases yp ON u.telegram_id = yp.telegram_id
-      LEFT JOIN users r ON u.telegram_id = r.referred_by
+      FROM vkr_users u
+      LEFT JOIN vkr_orders o ON u.telegram_id = o.telegram_id
+      LEFT JOIN vkr_yuan_purchases yp ON u.telegram_id = yp.telegram_id
+      LEFT JOIN vkr_users r ON u.telegram_id = r.referred_by
       GROUP BY u.telegram_id, u.username, u.full_name, u.created_at, u.last_activity, u.commission, u.referred_by
       ORDER BY u.created_at DESC
     `);
@@ -4486,12 +4486,12 @@ app.get('/api/admin/orders', async (req, res) => {
         o.estimated_savings,
         o.status,
         COALESCE(item_stats.items_count, 0) as items_count
-      FROM orders o
+      FROM vkr_orders o
       LEFT JOIN (
         SELECT 
           order_id,
           COUNT(*) as items_count
-        FROM order_items
+        FROM vkr_order_items
         GROUP BY order_id
       ) item_stats ON o.order_id = item_stats.order_id
       ORDER BY o.created_at DESC
@@ -4519,7 +4519,7 @@ app.get('/api/admin/yuan-purchases', async (req, res) => {
         savings,
         created_at,
         status
-      FROM yuan_purchases
+      FROM vkr_yuan_purchases
       ORDER BY created_at DESC
     `);
     
@@ -4550,12 +4550,12 @@ app.get('/api/admin/pending-orders', async (req, res) => {
         o.estimated_savings,
         o.status,
         COALESCE(item_stats.items_count, 0) as items_count
-      FROM orders o
+      FROM vkr_orders o
       LEFT JOIN (
         SELECT 
           order_id,
           COUNT(*) as items_count
-        FROM order_items
+        FROM vkr_order_items
         GROUP BY order_id
       ) item_stats ON o.order_id = item_stats.order_id
       WHERE o.status = 'pending'
@@ -4574,8 +4574,8 @@ app.get('/api/admin/pending-orders', async (req, res) => {
         yp.savings,
         yp.created_at,
         yp.status
-      FROM yuan_purchases yp
-      LEFT JOIN users u ON yp.telegram_id = u.telegram_id
+      FROM vkr_yuan_purchases yp
+      LEFT JOIN vkr_users u ON yp.telegram_id = u.telegram_id
       WHERE yp.status = 'pending'
       ORDER BY yp.created_at DESC
     `);
@@ -4600,7 +4600,7 @@ app.get('/api/admin/user-details/:telegramId', async (req, res) => {
     
     // Основная информация о пользователе
     const [userInfo] = await dbConnection.execute(
-      'SELECT * FROM users WHERE telegram_id = ?',
+      'SELECT * FROM vkr_users WHERE telegram_id = ?',
       [telegramId]
     );
     
@@ -4616,8 +4616,8 @@ app.get('/api/admin/user-details/:telegramId', async (req, res) => {
           CONCAT(oi.product_link, ' (', COALESCE(oi.product_size, 'без размера'), ', ', oi.quantity, ' шт.)')
           SEPARATOR '; '
         ) as items_details
-      FROM orders o
-      LEFT JOIN order_items oi ON o.order_id = oi.order_id
+      FROM vkr_orders o
+      LEFT JOIN vkr_order_items oi ON o.order_id = oi.order_id
       WHERE o.telegram_id = ?
       GROUP BY o.order_id
       ORDER BY o.created_at DESC
@@ -4625,13 +4625,13 @@ app.get('/api/admin/user-details/:telegramId', async (req, res) => {
     
     // Покупки юаней
     const [yuanPurchases] = await dbConnection.execute(
-      'SELECT * FROM yuan_purchases WHERE telegram_id = ? ORDER BY created_at DESC',
+      'SELECT * FROM vkr_yuan_purchases WHERE telegram_id = ? ORDER BY created_at DESC',
       [telegramId]
     );
     
     // Активность пользователя
     const [activity] = await dbConnection.execute(
-      'SELECT * FROM user_activity WHERE telegram_id = ? ORDER BY created_at DESC LIMIT 50',
+      'SELECT * FROM vkr_user_activity WHERE telegram_id = ? ORDER BY created_at DESC LIMIT 50',
       [telegramId]
     );
     
@@ -4666,7 +4666,7 @@ app.get('/api/admin/system-logs', async (req, res) => {
     
     const { limit = 100, level = 'all' } = req.query;
     
-    let query = 'SELECT * FROM system_logs';
+    let query = 'SELECT * FROM vkr_system_logs';
     const params = [];
     
     if (level !== 'all') {
@@ -4697,12 +4697,12 @@ app.post('/api/admin/confirm-order', async (req, res) => {
       // При подтверждении оплаты статус меняется на 'paid', а не 'completed'
       // 'completed' - это финальный статус после доставки
       await dbConnection.execute(
-        'UPDATE orders SET status = ? WHERE order_id = ?',
+        'UPDATE vkr_orders SET status = ? WHERE order_id = ?',
         ['paid', orderId]
       );
     } else if (type === 'yuan') {
       await dbConnection.execute(
-        'UPDATE yuan_purchases SET status = ? WHERE id = ?',
+        'UPDATE vkr_yuan_purchases SET status = ? WHERE id = ?',
         ['completed', orderId]
       );
     }
@@ -4724,13 +4724,13 @@ app.post('/api/admin/confirm-order', async (req, res) => {
             // Обновляем total_orders в таблице users (учитываем оплаченные и завершенные заказы)
             const [orderStats] = await dbConnection.execute(`
               SELECT COUNT(*) as total_orders
-              FROM orders 
+              FROM vkr_orders 
               WHERE telegram_id = ? AND (status = 'paid' OR status = 'completed')
             `, [telegramId]);
             
             const totalOrders = orderStats[0]?.total_orders || 0;
             await dbConnection.execute(
-              'UPDATE users SET total_orders = ? WHERE telegram_id = ?',
+              'UPDATE vkr_users SET total_orders = ? WHERE telegram_id = ?',
               [totalOrders, telegramId]
             );
             
@@ -4782,7 +4782,7 @@ app.post('/api/admin/confirm-order', async (req, res) => {
           } else if (type === 'yuan') {
             // Покупка юаней подтверждена - даем XP (1 за 100₽)
             const [yuanData] = await dbConnection.execute(
-              'SELECT amount_rub FROM yuan_purchases WHERE id = ?',
+              'SELECT amount_rub FROM vkr_yuan_purchases WHERE id = ?',
               [orderId]
             );
             
@@ -4864,12 +4864,12 @@ app.post('/api/admin/cancel-order', async (req, res) => {
     
     if (type === 'order') {
       await dbConnection.execute(
-        'UPDATE orders SET status = ? WHERE order_id = ?',
+        'UPDATE vkr_orders SET status = ? WHERE order_id = ?',
         ['cancelled', orderId]
       );
     } else if (type === 'yuan') {
       await dbConnection.execute(
-        'UPDATE yuan_purchases SET status = ? WHERE id = ?',
+        'UPDATE vkr_yuan_purchases SET status = ? WHERE id = ?',
         ['cancelled', orderId]
       );
     }
@@ -4892,13 +4892,13 @@ async function getTelegramIdByOrderId(orderId, type) {
   try {
     if (type === 'order') {
       const [result] = await dbConnection.execute(
-        'SELECT telegram_id FROM orders WHERE order_id = ?',
+        'SELECT telegram_id FROM vkr_orders WHERE order_id = ?',
         [orderId]
       );
       return result[0]?.telegram_id;
     } else if (type === 'yuan') {
       const [result] = await dbConnection.execute(
-        'SELECT telegram_id FROM yuan_purchases WHERE id = ?',
+        'SELECT telegram_id FROM vkr_yuan_purchases WHERE id = ?',
         [orderId]
       );
       return result[0]?.telegram_id;
@@ -4983,7 +4983,7 @@ async function updateUserStatsAfterConfirmation(telegramId, orderId, type) {
     if (type === 'order') {
       // Получаем данные заказа
       const [orderData] = await dbConnection.execute(`
-        SELECT estimated_savings FROM orders WHERE order_id = ? AND telegram_id = ?
+        SELECT estimated_savings FROM vkr_orders WHERE order_id = ? AND telegram_id = ?
       `, [orderId, telegramId]);
       
       if (orderData.length > 0) {
@@ -4991,7 +4991,7 @@ async function updateUserStatsAfterConfirmation(telegramId, orderId, type) {
         
         // Обновляем статистику пользователя
         await dbConnection.execute(`
-          UPDATE users 
+          UPDATE vkr_users 
           SET total_savings = total_savings + ?,
               last_activity = NOW()
           WHERE telegram_id = ?
@@ -5002,7 +5002,7 @@ async function updateUserStatsAfterConfirmation(telegramId, orderId, type) {
     } else if (type === 'yuan') {
       // Получаем данные покупки юаней
       const [yuanData] = await dbConnection.execute(`
-        SELECT savings FROM yuan_purchases WHERE id = ? AND telegram_id = ?
+        SELECT savings FROM vkr_yuan_purchases WHERE id = ? AND telegram_id = ?
       `, [orderId, telegramId]);
       
       if (yuanData.length > 0) {
@@ -5010,7 +5010,7 @@ async function updateUserStatsAfterConfirmation(telegramId, orderId, type) {
         
         // Обновляем статистику пользователя
         await dbConnection.execute(`
-          UPDATE users 
+          UPDATE vkr_users 
           SET total_savings = total_savings + ?,
               last_activity = NOW()
           WHERE telegram_id = ?
@@ -5042,7 +5042,7 @@ app.post('/api/admin/send-notification-all', async (req, res) => {
       try {
         // Получаем всех пользователей
         const [users] = await dbConnection.execute(
-          'SELECT telegram_id, username, full_name FROM users WHERE telegram_id != 0'
+          'SELECT telegram_id, username, full_name FROM vkr_users WHERE telegram_id != 0'
         );
 
         let successCount = 0;
@@ -5111,7 +5111,7 @@ app.post('/api/admin/send-notification-user', async (req, res) => {
       try {
         // Проверяем, существует ли пользователь
         const [users] = await dbConnection.execute(
-          'SELECT telegram_id, username, full_name FROM users WHERE telegram_id = ?',
+          'SELECT telegram_id, username, full_name FROM vkr_users WHERE telegram_id = ?',
           [telegramId]
         );
 
@@ -5166,9 +5166,9 @@ app.get('/api/admin/users-list', async (req, res) => {
             u.created_at,
             COUNT(DISTINCT o.order_id) as orders_count,
             COUNT(DISTINCT yp.id) as yuan_purchases_count
-          FROM users u
-          LEFT JOIN orders o ON u.telegram_id = o.telegram_id AND o.status = 'completed'
-          LEFT JOIN yuan_purchases yp ON u.telegram_id = yp.telegram_id AND yp.status = 'completed'
+          FROM vkr_users u
+          LEFT JOIN vkr_orders o ON u.telegram_id = o.telegram_id AND o.status = 'completed'
+          LEFT JOIN vkr_yuan_purchases yp ON u.telegram_id = yp.telegram_id AND yp.status = 'completed'
           WHERE u.telegram_id != 0
           GROUP BY u.telegram_id, u.username, u.full_name, u.created_at
           ORDER BY u.created_at DESC
@@ -5332,7 +5332,7 @@ app.post('/api/admin/update-user-commission', async (req, res) => {
       try {
         // Проверяем, существует ли пользователь
         const [users] = await dbConnection.execute(
-          'SELECT telegram_id, username, full_name FROM users WHERE telegram_id = ?',
+          'SELECT telegram_id, username, full_name FROM vkr_users WHERE telegram_id = ?',
           [telegramId]
         );
 
@@ -5345,7 +5345,7 @@ app.post('/api/admin/update-user-commission', async (req, res) => {
 
         // Обновляем комиссию (в рублях)
         await dbConnection.execute(
-          'UPDATE users SET commission = ? WHERE telegram_id = ?',
+          'UPDATE vkr_users SET commission = ? WHERE telegram_id = ?',
           [commissionRub, telegramId]
         );
 
@@ -5407,9 +5407,9 @@ app.get('/api/admin/user-history/:telegramId', async (req, res) => {
             COUNT(DISTINCT yp.id) as total_yuan_purchases,
             COALESCE(SUM(CASE WHEN o.status = 'completed' THEN o.estimated_savings ELSE 0 END), 0) as total_savings_orders,
             COALESCE(SUM(CASE WHEN yp.status = 'completed' THEN yp.savings ELSE 0 END), 0) as total_savings_yuan
-          FROM users u
-          LEFT JOIN orders o ON u.telegram_id = o.telegram_id
-          LEFT JOIN yuan_purchases yp ON u.telegram_id = yp.telegram_id
+          FROM vkr_users u
+          LEFT JOIN vkr_orders o ON u.telegram_id = o.telegram_id
+          LEFT JOIN vkr_yuan_purchases yp ON u.telegram_id = yp.telegram_id
           WHERE u.telegram_id = ?
           GROUP BY u.telegram_id, u.username, u.full_name, u.commission, u.created_at, u.referred_by
         `, [telegramId]);
@@ -5433,7 +5433,7 @@ app.get('/api/admin/user-history/:telegramId', async (req, res) => {
             comments,
             username,
             full_name
-          FROM orders 
+          FROM vkr_orders 
           WHERE telegram_id = ? 
           ORDER BY created_at DESC
         `, [telegramId]);
@@ -5447,7 +5447,7 @@ app.get('/api/admin/user-history/:telegramId', async (req, res) => {
             savings,
             status,
             created_at
-          FROM yuan_purchases 
+          FROM vkr_yuan_purchases 
           WHERE telegram_id = ? 
           ORDER BY created_at DESC
         `, [telegramId]);
@@ -5458,7 +5458,7 @@ app.get('/api/admin/user-history/:telegramId', async (req, res) => {
             action_type,
             action_data,
             created_at
-          FROM user_activity 
+          FROM vkr_user_activity 
           WHERE telegram_id = ? 
           ORDER BY created_at DESC
           LIMIT 50
@@ -5554,7 +5554,7 @@ app.get('/api/admin/sales-analytics', async (req, res) => {
             COUNT(*) as orders_count,
             SUM(estimated_savings) as total_savings,
             AVG(estimated_savings) as avg_savings
-          FROM orders 
+          FROM vkr_orders 
           WHERE ${dateFilter} AND status = 'completed'
           GROUP BY DATE(created_at)
           ORDER BY date ASC
@@ -5568,7 +5568,7 @@ app.get('/api/admin/sales-analytics', async (req, res) => {
             SUM(amount_rub) as total_amount_rub,
             SUM(amount_cny) as total_amount_cny,
             SUM(savings) as total_savings
-          FROM yuan_purchases 
+          FROM vkr_yuan_purchases 
           WHERE ${dateFilter} AND status = 'completed'
           GROUP BY DATE(created_at)
           ORDER BY date ASC
@@ -5579,7 +5579,7 @@ app.get('/api/admin/sales-analytics', async (req, res) => {
           SELECT 
             DATE(created_at) as date,
             COUNT(*) as new_users_count
-          FROM users 
+          FROM vkr_users 
           WHERE ${dateFilter}
           GROUP BY DATE(created_at)
           ORDER BY date ASC
@@ -5591,7 +5591,7 @@ app.get('/api/admin/sales-analytics', async (req, res) => {
             DATE(pc.created_at) as date,
             COUNT(*) as profit_calculations_count,
             SUM(pc.profit) as total_profit
-          FROM profit_calculations pc
+          FROM vkr_profit_calculations pc
           WHERE ${dateFilter.replace('created_at', 'pc.created_at')}
           GROUP BY DATE(pc.created_at)
           ORDER BY date ASC
@@ -5601,7 +5601,7 @@ app.get('/api/admin/sales-analytics', async (req, res) => {
         const [ordersTotalStats] = await dbConnection.execute(`
           SELECT 
             COUNT(*) as total_orders
-          FROM orders 
+          FROM vkr_orders 
           WHERE ${dateFilter} AND status = 'completed'
         `);
 
@@ -5609,14 +5609,14 @@ app.get('/api/admin/sales-analytics', async (req, res) => {
           SELECT 
             COUNT(*) as total_yuan_purchases,
             COALESCE(SUM(amount_rub), 0) as total_yuan_amount
-          FROM yuan_purchases 
+          FROM vkr_yuan_purchases 
           WHERE ${dateFilter} AND status = 'completed'
         `);
 
         const [newUsersTotalStats] = await dbConnection.execute(`
           SELECT 
             COUNT(*) as total_new_users
-          FROM users 
+          FROM vkr_users 
           WHERE ${dateFilter}
         `);
 
@@ -5625,8 +5625,8 @@ app.get('/api/admin/sales-analytics', async (req, res) => {
           SELECT 
             COUNT(*) as total_profit_calculations,
             COALESCE(SUM(profit), 0) as total_profit
-          FROM profit_calculations 
-          WHERE ${dateFilter.replace('created_at', 'profit_calculations.created_at')}
+          FROM vkr_profit_calculations 
+          WHERE ${dateFilter.replace('created_at', 'vkr_profit_calculations.created_at')}
         `);
 
         const totalStats = {
@@ -5644,7 +5644,7 @@ app.get('/api/admin/sales-analytics', async (req, res) => {
           const [prevOrdersStats] = await dbConnection.execute(`
             SELECT 
               COUNT(*) as total_orders
-            FROM orders 
+            FROM vkr_orders 
             WHERE ${previousDateFilter} AND status = 'completed'
           `);
 
@@ -5652,14 +5652,14 @@ app.get('/api/admin/sales-analytics', async (req, res) => {
             SELECT 
               COUNT(*) as total_yuan_purchases,
               COALESCE(SUM(amount_rub), 0) as total_yuan_amount
-            FROM yuan_purchases 
+            FROM vkr_yuan_purchases 
             WHERE ${previousDateFilter} AND status = 'completed'
           `);
 
           const [prevNewUsersStats] = await dbConnection.execute(`
             SELECT 
               COUNT(*) as total_new_users
-            FROM users 
+            FROM vkr_users 
             WHERE ${previousDateFilter}
           `);
 
@@ -5667,8 +5667,8 @@ app.get('/api/admin/sales-analytics', async (req, res) => {
             SELECT 
               COUNT(*) as total_profit_calculations,
               COALESCE(SUM(profit), 0) as total_profit
-            FROM profit_calculations 
-            WHERE ${previousDateFilter.replace('created_at', 'profit_calculations.created_at')}
+            FROM vkr_profit_calculations 
+            WHERE ${previousDateFilter.replace('created_at', 'vkr_profit_calculations.created_at')}
           `);
 
           previousStats = {
@@ -5733,8 +5733,8 @@ app.get('/api/admin/order-details/:orderId', async (req, res) => {
             u.telegram_id,
             u.username as user_username,
             u.full_name as user_full_name
-          FROM orders o
-          LEFT JOIN users u ON o.telegram_id = u.telegram_id
+          FROM vkr_orders o
+          LEFT JOIN vkr_users u ON o.telegram_id = u.telegram_id
           WHERE o.order_id = ?
         `, [orderId]);
 
@@ -5749,7 +5749,7 @@ app.get('/api/admin/order-details/:orderId', async (req, res) => {
             product_size,
             quantity,
             estimated_savings
-          FROM order_items 
+          FROM vkr_order_items 
           WHERE order_id = ?
           ORDER BY id
         `, [orderId]);
@@ -5792,7 +5792,7 @@ app.post('/api/admin/update-order-status', async (req, res) => {
       try {
         // Получаем информацию о заказе и пользователе перед обновлением
         const [orderRows] = await dbConnection.execute(
-          'SELECT o.*, u.telegram_id, u.full_name, u.username FROM orders o LEFT JOIN users u ON o.telegram_id = u.telegram_id WHERE o.order_id = ?',
+          'SELECT o.*, u.telegram_id, u.full_name, u.username FROM vkr_orders o LEFT JOIN vkr_users u ON o.telegram_id = u.telegram_id WHERE o.order_id = ?',
           [orderId]
         );
 
@@ -5804,7 +5804,7 @@ app.post('/api/admin/update-order-status', async (req, res) => {
 
         // Обновляем статус заказа
         await dbConnection.execute(
-          'UPDATE orders SET status = ? WHERE order_id = ?',
+          'UPDATE vkr_orders SET status = ? WHERE order_id = ?',
           [status, orderId]
         );
 
@@ -5867,14 +5867,14 @@ app.post('/api/admin/save-profit-calculation', async (req, res) => {
       try {
         // Проверяем, существует ли уже расчет для этого заказа
         const [existing] = await dbConnection.execute(
-          'SELECT id FROM profit_calculations WHERE order_id = ?',
+          'SELECT id FROM vkr_profit_calculations WHERE order_id = ?',
           [orderId]
         );
 
         if (existing.length > 0) {
           // Обновляем существующий расчет
           await dbConnection.execute(`
-            UPDATE profit_calculations SET
+            UPDATE vkr_profit_calculations SET
               customer_commission = ?,
               customer_product_cost_cny = ?,
               customer_rate = ?,
@@ -5894,7 +5894,7 @@ app.post('/api/admin/save-profit-calculation', async (req, res) => {
         } else {
           // Создаем новый расчет
           await dbConnection.execute(`
-            INSERT INTO profit_calculations (
+            INSERT INTO vkr_profit_calculations (
               order_id, customer_commission, customer_product_cost_cny, customer_rate, customer_delivery, customer_total,
               my_product_cost_cny, my_rate, my_delivery, my_total, profit, created_by
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -5926,7 +5926,7 @@ app.get('/api/admin/total-profit', async (req, res) => {
     if (dbConnection) {
       try {
         const [result] = await dbConnection.execute(
-          'SELECT COALESCE(SUM(profit), 0) as total_profit FROM profit_calculations'
+          'SELECT COALESCE(SUM(profit), 0) as total_profit FROM vkr_profit_calculations'
         );
 
         res.json({ success: true, totalProfit: result[0].total_profit });
@@ -5963,9 +5963,9 @@ app.get('/api/admin/orders-for-profit', async (req, res) => {
             u.username,
             pc.profit as existing_profit,
             pc.id as profit_calculation_id
-          FROM orders o
-          LEFT JOIN users u ON o.telegram_id = u.telegram_id
-          LEFT JOIN profit_calculations pc ON o.order_id = pc.order_id
+          FROM vkr_orders o
+          LEFT JOIN vkr_users u ON o.telegram_id = u.telegram_id
+          LEFT JOIN vkr_profit_calculations pc ON o.order_id = pc.order_id
           WHERE o.status IN ('paid', 'completed') AND (o.status != 'profit_calculated' OR o.status IS NULL)
           ORDER BY o.created_at DESC
         `);
@@ -6027,8 +6027,8 @@ app.get('/api/tracking/:trackingNumber', async (req, res) => {
         o.full_name,
         o.phone_number,
         o.telegram_id
-      FROM delivery_tracking dt
-      JOIN orders o ON dt.order_id = o.order_id
+      FROM vkr_delivery_tracking dt
+      JOIN vkr_orders o ON dt.order_id = o.order_id
       WHERE dt.internal_tracking_number = ? AND o.telegram_id = ?
     `, [trackingNumber, telegramId]);
 
@@ -6080,8 +6080,8 @@ app.get('/api/admin/delivery', async (req, res) => {
         dt.internal_tracking_number,
         dt.status as delivery_status,
         dt.last_updated
-      FROM orders o
-      LEFT JOIN delivery_tracking dt ON o.order_id = dt.order_id
+      FROM vkr_orders o
+      LEFT JOIN vkr_delivery_tracking dt ON o.order_id = dt.order_id
       ORDER BY o.created_at DESC
     `);
 
@@ -6131,8 +6131,8 @@ app.get('/api/admin/referrals-data', async (req, res) => {
           WHEN r.access_expires_at <= NOW() THEN 1
           ELSE 0
         END as is_expired
-      FROM users r
-      LEFT JOIN users ref ON r.referred_by = ref.telegram_id
+      FROM vkr_users r
+      LEFT JOIN vkr_users ref ON r.referred_by = ref.telegram_id
       WHERE r.referred_by IS NOT NULL
       ORDER BY r.created_at DESC
     `);
@@ -6169,7 +6169,7 @@ app.post('/api/admin/extend-discount', async (req, res) => {
 
     // Проверяем, существует ли пользователь
     const [users] = await dbConnection.execute(
-      'SELECT telegram_id, username, full_name, access_expires_at, commission FROM users WHERE telegram_id = ?',
+      'SELECT telegram_id, username, full_name, access_expires_at, commission FROM vkr_users WHERE telegram_id = ?',
       [telegramId]
     );
 
@@ -6192,7 +6192,7 @@ app.post('/api/admin/extend-discount', async (req, res) => {
 
     // Обновляем срок действия скидки
     await dbConnection.execute(
-      'UPDATE users SET access_expires_at = ?, commission = 400 WHERE telegram_id = ?',
+      'UPDATE vkr_users SET access_expires_at = ?, commission = 400 WHERE telegram_id = ?',
       [newExpiryDate, telegramId]
     );
 
@@ -6248,7 +6248,7 @@ app.post('/api/admin/orders/:orderId/update-status', async (req, res) => {
 
     // Обновляем статус в delivery_tracking
     await dbConnection.execute(
-      `UPDATE delivery_tracking SET status = ?, last_updated = CURRENT_TIMESTAMP WHERE order_id = ?`,
+      `UPDATE vkr_delivery_tracking SET status = ?, last_updated = CURRENT_TIMESTAMP WHERE order_id = ?`,
       [status, orderId]
     );
     
@@ -6261,8 +6261,8 @@ app.post('/api/admin/orders/:orderId/update-status', async (req, res) => {
         o.telegram_id,
         o.full_name,
         dt.internal_tracking_number
-      FROM orders o
-      JOIN delivery_tracking dt ON o.order_id = dt.order_id
+      FROM vkr_orders o
+      JOIN vkr_delivery_tracking dt ON o.order_id = dt.order_id
       WHERE o.order_id = ?
     `, [orderId]);
 
@@ -6300,14 +6300,14 @@ app.get('/api/reviews', async (req, res) => {
 
     // Получаем общее количество одобренных отзывов
     const [totalRows] = await dbConnection.execute(`
-      SELECT COUNT(*) as total FROM reviews WHERE is_approved = 1
+      SELECT COUNT(*) as total FROM vkr_reviews WHERE is_approved = 1
     `);
     const total = totalRows[0].total;
 
     // Получаем только одобренные отзывы с пагинацией
     const [rows] = await dbConnection.execute(`
       SELECT review_id, telegram_id, username, full_name, rating, review_text, photo_url, created_at, moderated_at
-      FROM reviews
+      FROM vkr_reviews
       WHERE is_approved = 1
       ORDER BY moderated_at DESC, created_at DESC
       LIMIT ${limit} OFFSET ${offset}
@@ -6358,7 +6358,7 @@ app.get('/api/gamification/:telegramId', async (req, res) => {
     
     // Получаем данные пользователя
     const [users] = await dbConnection.query(
-      'SELECT xp, current_level, login_streak, total_savings, total_orders, total_yuan_bought, total_referrals FROM users WHERE telegram_id = ?',
+      'SELECT xp, current_level, login_streak, total_savings, total_orders, total_yuan_bought, total_referrals FROM vkr_users WHERE telegram_id = ?',
       [telegramId]
     );
     
@@ -6499,7 +6499,7 @@ app.get('/api/gamification/leaderboard', async (req, res) => {
     
     const [users] = await dbConnection.query(
       `SELECT telegram_id, xp, current_level 
-       FROM users 
+       FROM vkr_users 
        WHERE xp > 0
        ORDER BY xp DESC 
        LIMIT ?`,
@@ -6522,7 +6522,7 @@ app.get('/api/gamification/:telegramId/xp-history', async (req, res) => {
     const limit = parseInt(req.query.limit) || 50;
     
     const [history] = await dbConnection.query(
-      `SELECT * FROM xp_history 
+      `SELECT * FROM vkr_xp_history 
        WHERE telegram_id = ? 
        ORDER BY created_at DESC 
        LIMIT ?`,
@@ -6543,7 +6543,7 @@ app.get('/api/gamification/:telegramId/level-history', async (req, res) => {
     await ensureDBConnection();
     
     const [history] = await dbConnection.query(
-      `SELECT * FROM level_history 
+      `SELECT * FROM vkr_level_history 
        WHERE telegram_id = ? 
        ORDER BY created_at DESC`,
       [telegramId]
@@ -6784,7 +6784,7 @@ app.post('/api/daily-login', async (req, res) => {
     
     // Получаем данные пользователя
     const [userRows] = await dbConnection.execute(
-      'SELECT last_login_date, login_streak, total_logins FROM users WHERE telegram_id = ?',
+      'SELECT last_login_date, login_streak, total_logins FROM vkr_users WHERE telegram_id = ?',
       [telegramId]
     );
     
@@ -6821,7 +6821,7 @@ app.post('/api/daily-login', async (req, res) => {
     
     // Обновляем данные пользователя
     await dbConnection.execute(
-      'UPDATE users SET last_login_date = ?, login_streak = ?, total_logins = total_logins + 1 WHERE telegram_id = ?',
+      'UPDATE vkr_users SET last_login_date = ?, login_streak = ?, total_logins = total_logins + 1 WHERE telegram_id = ?',
       [today, newStreak, telegramId]
     );
     
@@ -6890,7 +6890,7 @@ app.post('/api/calculate-price', async (req, res) => {
     
     // Обновляем счетчик расчетов
     await dbConnection.execute(
-      'UPDATE users SET calculation_count = calculation_count + 1, last_calculation_date = NOW() WHERE telegram_id = ?',
+      'UPDATE vkr_users SET calculation_count = calculation_count + 1, last_calculation_date = NOW() WHERE telegram_id = ?',
       [telegramId]
     );
     
@@ -6923,7 +6923,7 @@ app.post('/api/calculate-price', async (req, res) => {
     
     // Проверяем временную скидку
     const [userRows] = await dbConnection.execute(
-      'SELECT temp_discount_active, temp_discount_end_date FROM users WHERE telegram_id = ?',
+      'SELECT temp_discount_active, temp_discount_end_date FROM vkr_users WHERE telegram_id = ?',
       [telegramId]
     );
     
