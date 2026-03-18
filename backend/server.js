@@ -4035,7 +4035,7 @@ app.get('/api/yuan-purchases', async (req, res) => {
     }
     
     const [rows] = await dbConnection.execute(`
-      SELECT id, amount_rub, amount_cny, exchange_rate, favorable_rate, savings, status, created_at
+      SELECT purchase_id AS id, amount_rub, amount_cny, exchange_rate, favorable_rate, savings, status, created_at
       FROM vkr_yuan_purchases 
       WHERE telegram_id = ? AND status = 'completed'
       ORDER BY created_at DESC
@@ -4782,7 +4782,7 @@ app.post('/api/admin/confirm-order', async (req, res) => {
           } else if (type === 'yuan') {
             // Покупка юаней подтверждена - даем XP (1 за 100₽)
             const [yuanData] = await dbConnection.execute(
-              'SELECT amount_rub FROM vkr_yuan_purchases WHERE id = ?',
+              'SELECT amount_rub FROM vkr_yuan_purchases WHERE purchase_id = ?',
               [orderId]
             );
             
@@ -4898,7 +4898,7 @@ async function getTelegramIdByOrderId(orderId, type) {
       return result[0]?.telegram_id;
     } else if (type === 'yuan') {
       const [result] = await dbConnection.execute(
-        'SELECT telegram_id FROM vkr_yuan_purchases WHERE id = ?',
+        'SELECT telegram_id FROM vkr_yuan_purchases WHERE purchase_id = ?',
         [orderId]
       );
       return result[0]?.telegram_id;
@@ -5002,7 +5002,7 @@ async function updateUserStatsAfterConfirmation(telegramId, orderId, type) {
     } else if (type === 'yuan') {
       // Получаем данные покупки юаней
       const [yuanData] = await dbConnection.execute(`
-        SELECT savings FROM vkr_yuan_purchases WHERE id = ? AND telegram_id = ?
+        SELECT savings FROM vkr_yuan_purchases WHERE purchase_id = ? AND telegram_id = ?
       `, [orderId, telegramId]);
       
       if (yuanData.length > 0) {

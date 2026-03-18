@@ -168,6 +168,75 @@ DB_NAME=default_db
 
 Основное приложение продолжает работать с таблицами без префикса (`users`, `orders`, …), ВКР — с таблицами `vkr_*`. Данные разделены по именам таблиц.
 
+#### Пересоздание vkr_ таблиц: точная копия основных таблиц с префиксом vkr_
+
+Если нужно, чтобы таблицы ВКР были **полной копией** основных (те же колонки, типы, ключи), сделайте так на сервере.
+
+**1. Удалить старые vkr_ таблицы**
+
+```bash
+cd /var/www/vkr-mini-app
+mysql -h 194.87.190.90 -u gen_user -p default_db < database/drop_vkr_tables.sql
+```
+
+(Пароль БД ввести по запросу. Файл `database/drop_vkr_tables.sql` есть в репозитории.)
+
+**2. Выгрузить только структуру (DDL) основных таблиц из default_db**
+
+Подставьте хост и пользователя БД. Список таблиц — те, что есть в основном приложении. Если в основной БД есть ещё таблицы (например `user_activity`, `system_logs`), добавьте их в конец списка:
+
+```bash
+mysqldump -h 194.87.190.90 -P 3306 -u gen_user -p \
+  --no-data --skip-comments --single-transaction --set-gtid-purged=OFF \
+  default_db \
+  achievements user_achievements xp_history level_history users orders order_items \
+  delivery_tracking exchange_rates referrals reviews yuan_purchases profit_calculations \
+  > /tmp/schema_main_ddl.sql
+```
+
+**3. Заменить имена таблиц на vkr_* и применить в ту же БД**
+
+Порядок замен важен: сначала более длинные имена (например `user_achievements`), чтобы не зацепить части слов. Если в шаге 2 добавляли `user_activity` и `system_logs`, добавьте в sed строки:  
+`-e 's/\`user_activity\`/\`vkr_user_activity\`/g'` и `-e 's/\`system_logs\`/\`vkr_system_logs\`/g'`.
+
+```bash
+sed -e 's/`user_achievements`/`vkr_user_achievements`/g' \
+    -e 's/`order_items`/`vkr_order_items`/g' \
+    -e 's/`delivery_tracking`/`vkr_delivery_tracking`/g' \
+    -e 's/`exchange_rates`/`vkr_exchange_rates`/g' \
+    -e 's/`profit_calculations`/`vkr_profit_calculations`/g' \
+    -e 's/`yuan_purchases`/`vkr_yuan_purchases`/g' \
+    -e 's/`level_history`/`vkr_level_history`/g' \
+    -e 's/`xp_history`/`vkr_xp_history`/g' \
+    -e 's/`user_activity`/`vkr_user_activity`/g' \
+    -e 's/`system_logs`/`vkr_system_logs`/g' \
+    -e 's/`achievements`/`vkr_achievements`/g' \
+    -e 's/`referrals`/`vkr_referrals`/g' \
+    -e 's/`reviews`/`vkr_reviews`/g' \
+    -e 's/`orders`/`vkr_orders`/g' \
+    -e 's/`users`/`vkr_users`/g' \
+  /tmp/schema_main_ddl.sql > /tmp/schema_vkr_ddl.sql
+
+mysql -h 194.87.190.90 -u gen_user -p default_db < /tmp/schema_vkr_ddl.sql
+```
+
+**4. (По желанию) Сохранить результат в репозиторий**
+
+Чтобы в репозитории лежала актуальная схема ВКР (для новых серверов или просмотра):
+
+```bash
+cp /tmp/schema_vkr_ddl.sql /var/www/vkr-mini-app/database/schema_vkr_prefix.sql
+# Локально: git add database/schema_vkr_prefix.sql && git commit -m "chore: схема vkr_ из dump основной БД" && git push
+```
+
+**5. Перезапустить backend ВКР**
+
+```bash
+pm2 restart vkr-backend --update-env
+```
+
+После этого таблицы `vkr_*` будут совпадать по структуре с основными (включая колонки вроде `last_activity`, `phone_number`, `preferred_currency`, `avatar_url` в `vkr_users` и т.д.).
+
 ---
 
 ## Часть 4. Конфигурация второго приложения (.env)
