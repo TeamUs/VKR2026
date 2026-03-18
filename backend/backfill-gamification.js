@@ -83,12 +83,12 @@ async function mustGetAchievements(pool) {
   let rows;
   try {
     [rows] = await pool.query(
-      'SELECT id, achievement_key, name, xp_reward, additional_reward FROM vkr_achievements'
+      'SELECT id, achievement_key, name, xp_reward, additional_reward FROM achievements'
     );
   } catch (e) {
     if (e && (e.code === 'ER_BAD_FIELD_ERROR' || String(e.message || '').includes('Unknown column'))) {
       [rows] = await pool.query(
-        'SELECT id, achievement_key, name, xp_reward FROM vkr_achievements'
+        'SELECT id, achievement_key, name, xp_reward FROM achievements'
       );
     } else {
       throw e;
@@ -120,7 +120,7 @@ async function listUsers(pool, { onlyUserId, limit }) {
   const hasWhere = where.length > 0;
   const sql =
     `SELECT telegram_id
-     FROM vkr_users
+     FROM users
      ${hasWhere ? `WHERE ${where.join(' AND ')}` : ''}
      ORDER BY telegram_id` + (limit ? ' LIMIT ?' : '');
   if (limit) params.push(limit);
@@ -139,7 +139,7 @@ async function getUserFacts(pool, telegramId) {
        calculation_count,
        last_calculation_date,
        total_savings
-     FROM vkr_users
+     FROM users
      WHERE telegram_id = ?`,
     [telegramId]
   );
@@ -148,7 +148,7 @@ async function getUserFacts(pool, telegramId) {
 
   const [orders] = await pool.query(
     `SELECT order_id, created_at, status, estimated_savings
-     FROM vkr_orders
+     FROM orders
      WHERE telegram_id = ?
        AND status IN ('paid','completed')
      ORDER BY created_at ASC`,
@@ -157,7 +157,7 @@ async function getUserFacts(pool, telegramId) {
 
   const [ordersLast7DaysRows] = await pool.query(
     `SELECT COUNT(*) AS cnt
-     FROM vkr_orders
+     FROM orders
      WHERE telegram_id = ?
        AND status IN ('paid','completed')
        AND created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)`,
@@ -166,7 +166,7 @@ async function getUserFacts(pool, telegramId) {
 
   const [ordersTodayRows] = await pool.query(
     `SELECT COUNT(*) AS cnt
-     FROM vkr_orders
+     FROM orders
      WHERE telegram_id = ?
        AND status IN ('paid','completed')
        AND DATE(created_at) = CURDATE()`,
@@ -175,7 +175,7 @@ async function getUserFacts(pool, telegramId) {
 
   const [ordersJanuaryRows] = await pool.query(
     `SELECT COUNT(*) AS cnt
-     FROM vkr_orders
+     FROM orders
      WHERE telegram_id = ?
        AND status IN ('paid','completed')
        AND MONTH(created_at) = 1
@@ -199,7 +199,7 @@ async function getUserFacts(pool, telegramId) {
 
   const [yuanPurchases] = await pool.query(
     `SELECT id, amount_rub, amount_cny, status, created_at
-     FROM vkr_yuan_purchases
+     FROM yuan_purchases
      WHERE telegram_id = ?
        AND status = 'completed'
      ORDER BY created_at ASC`,
@@ -212,7 +212,7 @@ async function getUserFacts(pool, telegramId) {
 
   const [referrals] = await pool.query(
     `SELECT telegram_id, created_at
-     FROM vkr_users
+     FROM users
      WHERE referred_by = ?
        AND telegram_id <> ?
      ORDER BY created_at ASC`,
@@ -230,8 +230,8 @@ async function getUserFacts(pool, telegramId) {
 
   const [[activeReferralsRow]] = await pool.query(
     `SELECT COUNT(DISTINCT u.telegram_id) AS cnt
-     FROM vkr_users u
-     JOIN vkr_orders o ON o.telegram_id = u.telegram_id
+     FROM users u
+     JOIN orders o ON o.telegram_id = u.telegram_id
      WHERE u.referred_by = ?
        AND u.telegram_id <> ?
        AND o.status IN ('paid','completed')`,
@@ -242,8 +242,8 @@ async function getUserFacts(pool, telegramId) {
 
   const [[secondLevelRow]] = await pool.query(
     `SELECT COUNT(DISTINCT u2.telegram_id) AS cnt
-     FROM vkr_users u1
-     JOIN vkr_users u2 ON u2.referred_by = u1.telegram_id
+     FROM users u1
+     JOIN users u2 ON u2.referred_by = u1.telegram_id
      WHERE u1.referred_by = ?
        AND u1.telegram_id <> ?
        AND u2.telegram_id <> u2.referred_by`,
@@ -389,18 +389,18 @@ async function insertXpIfMissing(conn, { telegramId, xpAmount, source, sourceId,
 
   // Atomic “insert if missing” (idempotent even if script is re-run).
   const [res] = await conn.query(
-    `INSERT INTO vkr_xp_history (telegram_id, xp_amount, source, source_id, description)
+    `INSERT INTO xp_history (telegram_id, xp_amount, source, source_id, description)
      SELECT ?, ?, ?, ?, ?
      FROM DUAL
      WHERE NOT EXISTS (
-       SELECT 1 FROM vkr_xp_history WHERE telegram_id = ? AND source = ? AND source_id <=> ?
+       SELECT 1 FROM xp_history WHERE telegram_id = ? AND source = ? AND source_id <=> ?
      )`,
     [telegramId, xpAmount, source, sourceId, description, telegramId, source, sourceId]
   );
 
   const inserted = Number(res.affectedRows || 0) > 0;
   if (inserted) {
-    await conn.query('UPDATE vkr_users SET xp = xp + ? WHERE telegram_id = ?', [xpAmount, telegramId]);
+    await conn.query('UPDATE users SET xp = xp + ? WHERE telegram_id = ?', [xpAmount, telegramId]);
   }
 
   return { inserted };
@@ -414,11 +414,11 @@ async function ensureAchievement(conn, { telegramId, achievement, unlockedAt }, 
   }
 
   const [ins] = await conn.query(
-    `INSERT INTO vkr_user_achievements (telegram_id, achievement_key, unlocked_at, xp_awarded)
+    `INSERT INTO user_achievements (telegram_id, achievement_key, unlocked_at, xp_awarded)
      SELECT ?, ?, COALESCE(?, NOW()), ?
      FROM DUAL
      WHERE NOT EXISTS (
-       SELECT 1 FROM vkr_user_achievements WHERE telegram_id = ? AND achievement_key = ?
+       SELECT 1 FROM user_achievements WHERE telegram_id = ? AND achievement_key = ?
      )`,
     [
       telegramId,
@@ -473,7 +473,7 @@ async function applyTempDiscountIfAny(conn, telegramId, discountDays, dryRun) {
   // If schema doesn't have these columns, this will throw — we swallow and continue.
   try {
     await conn.query(
-      `UPDATE vkr_users
+      `UPDATE users
        SET
          temp_discount_active = TRUE,
          temp_discount_end_date = CASE
@@ -513,28 +513,28 @@ function xpKey(source, sourceId) {
 async function getExistingUserState(conn, telegramId) {
   // XP keys (for idempotency checks)
   const [xpKeysRows] = await conn.query(
-    'SELECT source, source_id FROM vkr_xp_history WHERE telegram_id = ?',
+    'SELECT source, source_id FROM xp_history WHERE telegram_id = ?',
     [telegramId]
   );
   const existingXpKeys = new Set(xpKeysRows.map((r) => xpKey(r.source, r.source_id)));
 
   // Existing XP sum
   const [[xpSumRow]] = await conn.query(
-    'SELECT COALESCE(SUM(xp_amount), 0) AS total_xp FROM vkr_xp_history WHERE telegram_id = ?',
+    'SELECT COALESCE(SUM(xp_amount), 0) AS total_xp FROM xp_history WHERE telegram_id = ?',
     [telegramId]
   );
   const existingXpTotal = Number(xpSumRow?.total_xp || 0);
 
   // Already unlocked achievements
   const [uaRows] = await conn.query(
-    'SELECT achievement_key FROM vkr_user_achievements WHERE telegram_id = ?',
+    'SELECT achievement_key FROM user_achievements WHERE telegram_id = ?',
     [telegramId]
   );
   const existingAchievementKeys = new Set(uaRows.map((r) => String(r.achievement_key)));
 
   // Current user fields we may update
   const [[userRow]] = await conn.query(
-    'SELECT commission, current_level FROM vkr_users WHERE telegram_id = ?',
+    'SELECT commission, current_level FROM users WHERE telegram_id = ?',
     [telegramId]
   );
   const currentCommission = Number(userRow?.commission ?? 1000);
@@ -551,7 +551,7 @@ async function getExistingUserState(conn, telegramId) {
 
 async function updateCommissionByLevelIfNoActiveReferral(conn, telegramId, level, dryRun) {
   try {
-    const [[row]] = await conn.query('SELECT commission FROM vkr_users WHERE telegram_id = ?', [telegramId]);
+    const [[row]] = await conn.query('SELECT commission FROM users WHERE telegram_id = ?', [telegramId]);
     if (!row) return { updated: false };
 
     const desired = commissionForLevel(level);
@@ -565,7 +565,7 @@ async function updateCommissionByLevelIfNoActiveReferral(conn, telegramId, level
       return { updated: true, dryRun: true, from: current, to: finalCommission, levelCommission: desired };
     }
 
-    await conn.query('UPDATE vkr_users SET commission = ? WHERE telegram_id = ?', [finalCommission, telegramId]);
+    await conn.query('UPDATE users SET commission = ? WHERE telegram_id = ?', [finalCommission, telegramId]);
     return { updated: true, from: current, to: finalCommission, levelCommission: desired };
   } catch (e) {
     // If schema differs (no commission/access_expires_at), just skip.
@@ -577,11 +577,11 @@ async function recomputeUserXpFromHistory(conn, telegramId, dryRun) {
   if (dryRun) return { updated: true, dryRun: true };
 
   const [[row]] = await conn.query(
-    'SELECT COALESCE(SUM(xp_amount), 0) AS total_xp FROM vkr_xp_history WHERE telegram_id = ?',
+    'SELECT COALESCE(SUM(xp_amount), 0) AS total_xp FROM xp_history WHERE telegram_id = ?',
     [telegramId]
   );
   const totalXP = Number(row?.total_xp || 0);
-  await conn.query('UPDATE vkr_users SET xp = ? WHERE telegram_id = ?', [totalXP, telegramId]);
+  await conn.query('UPDATE users SET xp = ? WHERE telegram_id = ?', [totalXP, telegramId]);
   return { updated: true, totalXP };
 }
 
@@ -625,7 +625,7 @@ async function updateUserCachedStats(conn, facts, dryRun) {
 
   // Keep cache columns consistent with core tables (helps the app & gamification logic).
   await conn.query(
-    `UPDATE vkr_users
+    `UPDATE users
      SET total_orders = ?,
          total_referrals = ?,
          total_yuan_bought = ?
@@ -638,7 +638,7 @@ async function updateUserLevel(conn, telegramId, dryRun) {
   if (dryRun) return { updated: false };
 
   const [[row]] = await conn.query(
-    'SELECT xp, current_level FROM vkr_users WHERE telegram_id = ?',
+    'SELECT xp, current_level FROM users WHERE telegram_id = ?',
     [telegramId]
   );
 
@@ -649,7 +649,7 @@ async function updateUserLevel(conn, telegramId, dryRun) {
   if (newLevel === currentLevel) return { updated: false };
 
   await conn.query(
-    'UPDATE vkr_users SET current_level = ? WHERE telegram_id = ?',
+    'UPDATE users SET current_level = ? WHERE telegram_id = ?',
     [newLevel, telegramId]
   );
   return { updated: true, from: currentLevel, to: newLevel };
@@ -816,7 +816,7 @@ async function main() {
         const lvl = await updateUserLevel(conn, telegramId, false);
         if (lvl.updated) summary.levelUpdates += 1;
         // Read back current level for accurate stats/commission
-        const [[row]] = await conn.query('SELECT current_level FROM vkr_users WHERE telegram_id = ?', [telegramId]);
+        const [[row]] = await conn.query('SELECT current_level FROM users WHERE telegram_id = ?', [telegramId]);
         finalLevel = String(row?.current_level || 'Bronze');
       }
       summary.levelsAfter[finalLevel] = (summary.levelsAfter[finalLevel] || 0) + 1;

@@ -19,7 +19,7 @@ async function ensureUser(connection, username, fullName) {
   if (username) {
     // Пытаемся найти пользователя по username
     const [users] = await connection.execute(
-      'SELECT telegram_id FROM vkr_users WHERE username = ?',
+      'SELECT telegram_id FROM users WHERE username = ?',
       [username]
     );
     
@@ -32,7 +32,7 @@ async function ensureUser(connection, username, fullName) {
     telegramId = 1000000 + Math.floor(Math.random() * 1000000);
     
     await connection.execute(
-      'INSERT INTO vkr_users (telegram_id, username, full_name, created_at) VALUES (?, ?, ?, NOW())',
+      'INSERT INTO users (telegram_id, username, full_name, created_at) VALUES (?, ?, ?, NOW())',
       [telegramId, username, fullName || null]
     );
     
@@ -42,7 +42,7 @@ async function ensureUser(connection, username, fullName) {
     telegramId = 1000000 + Math.floor(Math.random() * 1000000);
     
     await connection.execute(
-      'INSERT INTO vkr_users (telegram_id, username, full_name, created_at) VALUES (?, ?, ?, NOW())',
+      'INSERT INTO users (telegram_id, username, full_name, created_at) VALUES (?, ?, ?, NOW())',
       [telegramId, null, fullName]
     );
     
@@ -52,7 +52,7 @@ async function ensureUser(connection, username, fullName) {
   // Если ни username, ни fullName нет, создаем анонимного пользователя
   telegramId = 1000000 + Math.floor(Math.random() * 1000000);
   await connection.execute(
-    'INSERT INTO vkr_users (telegram_id, username, full_name, created_at) VALUES (?, ?, ?, NOW())',
+    'INSERT INTO users (telegram_id, username, full_name, created_at) VALUES (?, ?, ?, NOW())',
     [telegramId, null, 'Аноним', new Date()]
   );
   
@@ -81,13 +81,13 @@ async function importReviews() {
         
         // Вставляем отзыв с рейтингом 5
         const [result] = await connection.execute(
-          `INSERT INTO vkr_reviews (telegram_id, username, rating, review_text, photo_path, created_at)
+          `INSERT INTO reviews (telegram_id, username, rating, review_text, photo_path, created_at)
            VALUES (?, ?, 5, ?, ?, ?)`,
           [
             telegramId,
             review.username || null,
             review.text,
-            null, // photo_path будет null (vkr_reviews без отдельной таблицы фото)
+            null, // photo_path будет null (reviews без отдельной таблицы фото)
             review.date || new Date()
           ]
         );
@@ -100,10 +100,10 @@ async function importReviews() {
           const firstPhoto = review.photoUrls[0];
           
           await connection.execute(
-            'UPDATE vkr_reviews SET photo_path = ? WHERE review_id = ?',
+            'UPDATE reviews SET photo_path = ? WHERE review_id = ?',
             [firstPhoto, reviewId]
           );
-          // В vkr_ схеме отдельной таблицы фото нет — только photo_path в vkr_reviews
+          // Отдельной таблицы фото нет — только photo_path в reviews
           
           console.log(`✓ Отзыв ${reviewId}: ${review.username || review.fullName || 'Аноним'} - ${review.photoUrls.length} фото`);
         } else {
