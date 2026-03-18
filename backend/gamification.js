@@ -79,7 +79,7 @@ class GamificationService {
 
       // Get current user data
       const [users] = await connection.query(
-        'SELECT xp, current_level FROM vkr_users WHERE telegram_id = ?',
+        'SELECT xp, current_level FROM users WHERE telegram_id = ?',
         [telegramId]
       );
 
@@ -93,20 +93,20 @@ class GamificationService {
 
       // Update user XP
       await connection.query(
-        'UPDATE vkr_users SET xp = ? WHERE telegram_id = ?',
+        'UPDATE users SET xp = ? WHERE telegram_id = ?',
         [newXP, telegramId]
       );
 
       // Log XP history (поддержка: source/source_id или reason/entity_type/entity_id)
       try {
         await connection.query(
-          'INSERT INTO vkr_xp_history (telegram_id, xp_amount, source, source_id, description) VALUES (?, ?, ?, ?, ?)',
+          'INSERT INTO xp_history (telegram_id, xp_amount, source, source_id, description) VALUES (?, ?, ?, ?, ?)',
           [telegramId, xpAmount, source, sourceId != null ? String(sourceId) : null, description]
         );
       } catch (xpErr) {
         if (xpErr.code === 'ER_BAD_FIELD_ERROR') {
           await connection.query(
-            'INSERT INTO vkr_xp_history (telegram_id, xp_amount, reason, entity_type, entity_id, description) VALUES (?, ?, ?, ?, ?, ?)',
+            'INSERT INTO xp_history (telegram_id, xp_amount, reason, entity_type, entity_id, description) VALUES (?, ?, ?, ?, ?, ?)',
             [telegramId, xpAmount, source, source, sourceId != null ? String(sourceId) : null, description]
           );
         } else {
@@ -120,12 +120,12 @@ class GamificationService {
       
       if (newLevel !== currentLevel) {
         await connection.query(
-          'UPDATE vkr_users SET current_level = ? WHERE telegram_id = ?',
+          'UPDATE users SET current_level = ? WHERE telegram_id = ?',
           [newLevel, telegramId]
         );
 
         await connection.query(
-          'INSERT INTO vkr_level_history (telegram_id, old_level, new_level, xp_at_levelup) VALUES (?, ?, ?, ?)',
+          'INSERT INTO level_history (telegram_id, old_level, new_level, xp_at_levelup) VALUES (?, ?, ?, ?)',
           [telegramId, currentLevel, newLevel, newXP]
         );
 
@@ -233,15 +233,15 @@ class GamificationService {
       let existing = [];
       try {
         [existing] = await connection.query(
-          'SELECT * FROM vkr_user_achievements WHERE telegram_id = ? AND achievement_key = ?',
+          'SELECT * FROM user_achievements WHERE telegram_id = ? AND achievement_key = ?',
           [telegramId, achievementKey]
         );
       } catch (e) {
         if (e.code === 'ER_BAD_FIELD_ERROR') {
-          const [achRows] = await connection.query('SELECT id FROM vkr_achievements WHERE achievement_key = ?', [achievementKey]);
+          const [achRows] = await connection.query('SELECT id FROM achievements WHERE achievement_key = ?', [achievementKey]);
           if (achRows.length > 0) {
             [existing] = await connection.query(
-              'SELECT * FROM vkr_user_achievements WHERE user_id = ? AND achievement_id = ?',
+              'SELECT * FROM user_achievements WHERE user_id = ? AND achievement_id = ?',
               [telegramId, achRows[0].id]
             );
           }
@@ -255,7 +255,7 @@ class GamificationService {
 
       // Get achievement details
       const [achievements] = await connection.query(
-        'SELECT * FROM vkr_achievements WHERE achievement_key = ?',
+        'SELECT * FROM achievements WHERE achievement_key = ?',
         [achievementKey]
       );
 
@@ -272,13 +272,13 @@ class GamificationService {
       // Поддержка двух схем: (telegram_id, achievement_key) или (user_id, achievement_id)
       try {
         await connection.query(
-          'INSERT INTO vkr_user_achievements (telegram_id, achievement_key, unlocked_at, xp_awarded) VALUES (?, ?, NOW(), ?)',
+          'INSERT INTO user_achievements (telegram_id, achievement_key, unlocked_at, xp_awarded) VALUES (?, ?, NOW(), ?)',
           [telegramId, achievementKey, achievement.xp_reward]
         );
       } catch (insertErr) {
         if (insertErr.code === 'ER_BAD_FIELD_ERROR' || insertErr.code === 'ER_NO_SUCH_TABLE') {
           await connection.query(
-            'INSERT INTO vkr_user_achievements (user_id, achievement_id, unlocked_at) VALUES (?, ?, NOW())',
+            'INSERT INTO user_achievements (user_id, achievement_id, unlocked_at) VALUES (?, ?, NOW())',
             [telegramId, achievement.id]
           );
         } else {
@@ -369,20 +369,20 @@ class GamificationService {
     await this.init();
 
     const [allAchievements] = await this.pool.query(
-      'SELECT * FROM vkr_achievements ORDER BY category, id'
+      'SELECT * FROM achievements ORDER BY category, id'
     );
 
     let userAchievements = [];
     try {
       [userAchievements] = await this.pool.query(
-        'SELECT achievement_key, unlocked_at FROM vkr_user_achievements WHERE telegram_id = ?',
+        'SELECT achievement_key, unlocked_at FROM user_achievements WHERE telegram_id = ?',
         [telegramId]
       );
     } catch (e) {
       if (e.code === 'ER_BAD_FIELD_ERROR') {
         [userAchievements] = await this.pool.query(
-          `SELECT a.achievement_key, ua.unlocked_at FROM vkr_user_achievements ua 
-           JOIN vkr_achievements a ON a.id = ua.achievement_id WHERE ua.user_id = ?`,
+          `SELECT a.achievement_key, ua.unlocked_at FROM user_achievements ua 
+           JOIN achievements a ON a.id = ua.achievement_id WHERE ua.user_id = ?`,
           [telegramId]
         );
       } else throw e;
@@ -433,7 +433,7 @@ class GamificationService {
           DATE(last_daily_login) as last_daily_login, 
           login_streak,
           CASE WHEN DATE(last_daily_login) = DATE(?) THEN 1 ELSE 0 END as is_today
-        FROM vkr_users 
+        FROM users 
         WHERE telegram_id = ? 
         FOR UPDATE`,
         [todayStr, telegramId]
@@ -526,7 +526,7 @@ class GamificationService {
       // Обновляем данные пользователя
       // Используем DATE(?) чтобы гарантировать, что сохраняется только дата без времени
       await connection.query(
-        'UPDATE vkr_users SET last_daily_login = DATE(?), login_streak = ? WHERE telegram_id = ?',
+        'UPDATE users SET last_daily_login = DATE(?), login_streak = ? WHERE telegram_id = ?',
         [todayStr, newStreak, telegramId]
       );
 
@@ -612,7 +612,7 @@ class GamificationService {
 
     // Get order count from users table (учитываются только подтвержденные заказы)
     const [orderStats] = await this.pool.query(
-      'SELECT total_orders, referred_by FROM vkr_users WHERE telegram_id = ?',
+      'SELECT total_orders, referred_by FROM users WHERE telegram_id = ?',
       [telegramId]
     );
 
@@ -674,7 +674,7 @@ class GamificationService {
     // Dragon Hunter - Orders total amount >= 10,000₽
     // Используем estimated_savings как сумму заказов (в системе используется как стоимость заказа)
     const [orderAmountStats] = await this.pool.query(
-      'SELECT COALESCE(SUM(estimated_savings), 0) as total FROM vkr_orders WHERE telegram_id = ? AND status = "completed"',
+      'SELECT COALESCE(SUM(estimated_savings), 0) as total FROM orders WHERE telegram_id = ? AND status = "completed"',
       [telegramId]
     );
     if (orderAmountStats[0]?.total >= 10000) {
@@ -684,7 +684,7 @@ class GamificationService {
 
     // Check for 3 orders in a week (Chain Orders) - учитываем только завершенные заказы
     const [recentOrders] = await this.pool.query(
-      'SELECT COUNT(*) as count FROM vkr_orders WHERE telegram_id = ? AND status = "completed" AND created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)',
+      'SELECT COUNT(*) as count FROM orders WHERE telegram_id = ? AND status = "completed" AND created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)',
       [telegramId]
     );
 
@@ -700,7 +700,7 @@ class GamificationService {
     // New Year Luck - 3 orders in January (учитываем только завершенные заказы)
     if (month === 1) {
       const [januaryOrders] = await this.pool.query(
-        'SELECT COUNT(*) as count FROM vkr_orders WHERE telegram_id = ? AND status = "completed" AND MONTH(created_at) = 1 AND YEAR(created_at) = YEAR(NOW())',
+        'SELECT COUNT(*) as count FROM orders WHERE telegram_id = ? AND status = "completed" AND MONTH(created_at) = 1 AND YEAR(created_at) = YEAR(NOW())',
         [telegramId]
       );
 
@@ -734,7 +734,7 @@ class GamificationService {
 
     // Получаем общее количество рефералов (кто запустил приложение по ссылке)
     const [totalReferralsResult] = await this.pool.query(
-      'SELECT COUNT(*) as count FROM vkr_users WHERE referred_by = ?',
+      'SELECT COUNT(*) as count FROM users WHERE referred_by = ?',
       [referrerId]
     );
     const totalReferrals = totalReferralsResult[0]?.count || 0;
@@ -761,8 +761,8 @@ class GamificationService {
     // Check if the referred user has referred someone
     const [secondLevelReferrals] = await this.pool.query(
       `SELECT COUNT(DISTINCT u2.telegram_id) as count 
-       FROM vkr_users u1 
-       JOIN vkr_users u2 ON u2.referred_by = u1.telegram_id 
+       FROM users u1 
+       JOIN users u2 ON u2.referred_by = u1.telegram_id 
        WHERE u1.referred_by = ?`,
       [referrerId]
     );
@@ -795,7 +795,7 @@ class GamificationService {
 
     // Get purchase statistics (amount_cny в БД, не amount_yuan)
     const [purchaseStats] = await this.pool.query(
-      'SELECT COUNT(*) as count, COALESCE(SUM(amount_rub), 0) as total_rub, COALESCE(SUM(amount_cny), 0) as total_yuan FROM vkr_yuan_purchases WHERE telegram_id = ? AND status = "completed"',
+      'SELECT COUNT(*) as count, COALESCE(SUM(amount_rub), 0) as total_rub, COALESCE(SUM(amount_cny), 0) as total_yuan FROM yuan_purchases WHERE telegram_id = ? AND status = "completed"',
       [telegramId]
     );
 
@@ -848,7 +848,7 @@ class GamificationService {
 
     // Год удачи - 365 дней с регистрации
     const [registrationDays] = await this.pool.query(
-      'SELECT DATEDIFF(NOW(), created_at) as days FROM vkr_users WHERE telegram_id = ?',
+      'SELECT DATEDIFF(NOW(), created_at) as days FROM users WHERE telegram_id = ?',
       [telegramId]
     );
     
@@ -861,7 +861,7 @@ class GamificationService {
     // Проверяем, что calculation_count увеличилось минимум на 5 за последние 7 дней
     // Для этого нужно отслеживать историю, но можно проверить last_calculation_date и текущий count
     const [userCalcData] = await this.pool.query(
-      'SELECT calculation_count, last_calculation_date FROM vkr_users WHERE telegram_id = ?',
+      'SELECT calculation_count, last_calculation_date FROM users WHERE telegram_id = ?',
       [telegramId]
     );
     
@@ -885,12 +885,12 @@ class GamificationService {
     const today = new Date().toISOString().split('T')[0];
     
     const [todayOrders] = await this.pool.query(
-      'SELECT COUNT(*) as count FROM vkr_orders WHERE telegram_id = ? AND status = "completed" AND DATE(created_at) = ?',
+      'SELECT COUNT(*) as count FROM orders WHERE telegram_id = ? AND status = "completed" AND DATE(created_at) = ?',
       [telegramId, today]
     );
     
     const [userData] = await this.pool.query(
-      'SELECT last_calculation_date FROM vkr_users WHERE telegram_id = ?',
+      'SELECT last_calculation_date FROM users WHERE telegram_id = ?',
       [telegramId]
     );
     
@@ -915,7 +915,7 @@ class GamificationService {
 
     // Расчет удачи - первый расчет
     const [calculationCount] = await this.pool.query(
-      'SELECT calculation_count FROM vkr_users WHERE telegram_id = ?',
+      'SELECT calculation_count FROM users WHERE telegram_id = ?',
       [telegramId]
     );
     
@@ -935,8 +935,8 @@ class GamificationService {
     // users.total_savings может быть не синхронизирована со старыми данными
     const [savingsRows] = await this.pool.query(`
       SELECT 
-        (SELECT COALESCE(SUM(savings), 0) FROM vkr_yuan_purchases WHERE telegram_id = ? AND status = 'completed') +
-        (SELECT COALESCE(SUM(estimated_savings), 0) FROM vkr_orders WHERE telegram_id = ? AND status IN ('paid', 'completed')) as total_savings
+        (SELECT COALESCE(SUM(savings), 0) FROM yuan_purchases WHERE telegram_id = ? AND status = 'completed') +
+        (SELECT COALESCE(SUM(estimated_savings), 0) FROM orders WHERE telegram_id = ? AND status IN ('paid', 'completed')) as total_savings
     `, [telegramId, telegramId]);
     const realTotalSavings = parseFloat(savingsRows[0]?.total_savings) || 0;
 
@@ -957,7 +957,7 @@ class GamificationService {
     const today = new Date().toISOString().split('T')[0];
     
     const [userData] = await this.pool.query(
-      'SELECT calculation_count, last_calculation_date FROM vkr_users WHERE telegram_id = ?',
+      'SELECT calculation_count, last_calculation_date FROM users WHERE telegram_id = ?',
       [telegramId]
     );
     
@@ -985,7 +985,7 @@ class GamificationService {
     endDate.setDate(endDate.getDate() + durationDays);
     
     await this.pool.query(
-      'UPDATE vkr_users SET temp_discount_active = TRUE, temp_discount_end_date = ? WHERE telegram_id = ?',
+      'UPDATE users SET temp_discount_active = TRUE, temp_discount_end_date = ? WHERE telegram_id = ?',
       [endDate, telegramId]
     );
   }
@@ -997,7 +997,7 @@ class GamificationService {
     await this.init();
     
     const [discountData] = await this.pool.query(
-      'SELECT temp_discount_active, temp_discount_end_date FROM vkr_users WHERE telegram_id = ?',
+      'SELECT temp_discount_active, temp_discount_end_date FROM users WHERE telegram_id = ?',
       [telegramId]
     );
     
@@ -1017,7 +1017,7 @@ class GamificationService {
     await this.init();
 
     const [userData] = await this.pool.query(
-      'SELECT xp, current_level, login_streak, total_savings, total_orders, total_yuan_bought, total_referrals, calculation_count FROM vkr_users WHERE telegram_id = ?',
+      'SELECT xp, current_level, login_streak, total_savings, total_orders, total_yuan_bought, total_referrals, calculation_count FROM users WHERE telegram_id = ?',
       [telegramId]
     );
 
