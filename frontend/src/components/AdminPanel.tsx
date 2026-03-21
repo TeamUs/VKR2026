@@ -1081,26 +1081,25 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
 
       const headers = { 'X-Telegram-User-Id': window.Telegram?.WebApp?.initDataUnsafe?.user?.id?.toString() || '' };
 
-      const [statsRes, usersRes, ordersRes, yuanRes, pendingRes] = await Promise.all([
+      const [statsRes, usersRes, ordersRes, pendingRes] = await Promise.all([
         fetch('api/admin/stats', { headers }).then(res => res.json()),
         fetch('api/admin/users', { headers }).then(res => res.json()),
         fetch('api/admin/orders', { headers }).then(res => res.json()),
-        fetch('api/admin/yuan-purchases', { headers }).then(res => res.json()),
         fetch('api/admin/pending-orders', { headers }).then(res => res.json()),
       ]);
 
       if (statsRes.error) throw new Error(statsRes.error);
       if (usersRes.error) throw new Error(usersRes.error);
       if (ordersRes.error) throw new Error(ordersRes.error);
-      if (yuanRes.error) throw new Error(yuanRes.error);
       if (pendingRes.error) throw new Error(pendingRes.error);
 
       setStats(statsRes);
       setUsers(usersRes.users);
       setOrders(ordersRes.orders);
-      setYuanPurchases(yuanRes.purchases);
       setPendingOrders(pendingRes.orders);
-      setPendingYuanPurchases(pendingRes.yuanPurchases);
+      // Раздел «Юани» полностью убран из ВКР-приложения
+      setYuanPurchases([]);
+      setPendingYuanPurchases([]);
 
     } catch (err: any) {
       console.error('Error fetching admin data:', err);
@@ -2301,10 +2300,6 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
                   <div style={{ fontSize: '20px', marginBottom: '4px' }}>📦</div>
                   <div>Заказы</div>
                 </TabButton>
-                <TabButton $active={activeTab === 'yuan'} $isDark={isDarkTheme} onClick={() => setActiveTab('yuan')}>
-                  <div style={{ fontSize: '20px', marginBottom: '4px' }}>💰</div>
-                  <div>Юани</div>
-                </TabButton>
                 <TabButton $active={activeTab === 'referrals'} $isDark={isDarkTheme} onClick={() => { setActiveTab('referrals'); loadReferralsData(); }}>
                   <div style={{ fontSize: '20px', marginBottom: '4px' }}>🔗</div>
                   <div>Рефералы</div>
@@ -2403,14 +2398,6 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
                 <QuickStatLabel $isDark={isDarkTheme}>Заказов сегодня</QuickStatLabel>
               </QuickStatCard>
               <QuickStatCard $isDark={isDarkTheme}>
-                <QuickStatValue $isDark={isDarkTheme}>{stats.totalYuanPurchases}</QuickStatValue>
-                <QuickStatLabel $isDark={isDarkTheme}>Покупок юаней</QuickStatLabel>
-              </QuickStatCard>
-              <QuickStatCard $isDark={isDarkTheme}>
-                <QuickStatValue $isDark={isDarkTheme}>{stats.yuanPurchasesToday}</QuickStatValue>
-                <QuickStatLabel $isDark={isDarkTheme}>Покупок сегодня</QuickStatLabel>
-              </QuickStatCard>
-              <QuickStatCard $isDark={isDarkTheme}>
                 <QuickStatValue $isDark={isDarkTheme}>{formatCurrency(stats.totalRevenue)}</QuickStatValue>
                 <QuickStatLabel $isDark={isDarkTheme}>💰 Моя прибыль</QuickStatLabel>
               </QuickStatCard>
@@ -2445,7 +2432,6 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
               <FilterSelect $isDark={isDarkTheme} value={pendingFilter} onChange={(e) => setPendingFilter(e.target.value)}>
                 <option value="all">Все</option>
                 <option value="orders">Оформление заказов</option>
-                <option value="yuan">Покупка юаней</option>
               </FilterSelect>
               <FilterSelect $isDark={isDarkTheme} value={sortBy} onChange={(e) => setSortBy(e.target.value)}>
                 <option value="created_at">По дате</option>
@@ -2617,140 +2603,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
               </div>
             )}
 
-            {/* Покупки юаней */}
-            {pendingYuanPurchases.length > 0 && (pendingFilter === 'all' || pendingFilter === 'yuan') && (
-              <div>
-                <h3 style={{ color: 'var(--text-primary)', marginBottom: '16px', fontSize: '1.2rem' }}>
-                  💰 Покупки юаней ({pendingYuanPurchases.length})
-                </h3>
-                <CompactTable $isDark={isDarkTheme}>
-                  <thead>
-                    <tr>
-                      <CompactTableHeader $isDark={isDarkTheme} onClick={() => handleSort('id')}>
-                        ID {sortBy === 'id' && (sortOrder === 'asc' ? '↑' : '↓')}
-                      </CompactTableHeader>
-                      <CompactTableHeader $isDark={isDarkTheme} onClick={() => handleSort('full_name')}>
-                        Пользователь {sortBy === 'full_name' && (sortOrder === 'asc' ? '↑' : '↓')}
-                      </CompactTableHeader>
-                      <CompactTableHeader $isDark={isDarkTheme} onClick={() => handleSort('amount_rub')}>
-                        Сумма (₽) {sortBy === 'amount_rub' && (sortOrder === 'asc' ? '↑' : '↓')}
-                      </CompactTableHeader>
-                      <CompactTableHeader $isDark={isDarkTheme}>Юани</CompactTableHeader>
-                      <CompactTableHeader $isDark={isDarkTheme} onClick={() => handleSort('savings')}>
-                        Экономия {sortBy === 'savings' && (sortOrder === 'asc' ? '↑' : '↓')}
-                      </CompactTableHeader>
-                      <CompactTableHeader $isDark={isDarkTheme} onClick={() => handleSort('created_at')}>
-                        Дата {sortBy === 'created_at' && (sortOrder === 'asc' ? '↑' : '↓')}
-                      </CompactTableHeader>
-                      <CompactTableHeader $isDark={isDarkTheme}>Действия</CompactTableHeader>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {paginatedData.filter(item => item.id && !item.order_id).map((purchase, index) => (
-                      <CompactTableRow key={`pending-yuan-${purchase.id}-${index}`} $isDark={isDarkTheme}>
-                        <CompactTableCell $isDark={isDarkTheme}>#{purchase.id}</CompactTableCell>
-                        <CompactTableCell $isDark={isDarkTheme}>
-                          <div>
-                            <div style={{ fontWeight: 'bold', fontSize: '0.9rem' }}>{purchase.full_name}</div>
-                            <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
-                              @{purchase.username || 'без username'}
-                            </div>
-                          </div>
-                        </CompactTableCell>
-                        <CompactTableCell $isDark={isDarkTheme}>{formatCurrency(purchase.amount_rub)}</CompactTableCell>
-                        <CompactTableCell $isDark={isDarkTheme}>{purchase.amount_cny} ¥</CompactTableCell>
-                        <CompactTableCell $isDark={isDarkTheme} style={{ color: 'var(--success-color)', fontWeight: 'bold' }}>
-                          {formatCurrency(purchase.savings)}
-                        </CompactTableCell>
-                        <CompactTableCell $isDark={isDarkTheme}>{formatDateTime(purchase.created_at)}</CompactTableCell>
-                        <CompactTableCell $isDark={isDarkTheme}>
-                          <div style={{ display: 'flex', gap: '4px', flexDirection: 'column' }}>
-                            <ActionButton
-                              $variant="success"
-                              $isDark={isDarkTheme}
-                              onClick={() => handleConfirmOrder(purchase.id, 'yuan')}
-                            >
-                              ✅ Подтвердить
-                            </ActionButton>
-                            <ActionButton
-                              $variant="danger"
-                              $isDark={isDarkTheme}
-                              onClick={() => handleCancelOrder(purchase.id, 'yuan')}
-                            >
-                              ❌ Отменить
-                            </ActionButton>
-                          </div>
-                        </CompactTableCell>
-                      </CompactTableRow>
-                    ))}
-                  </tbody>
-                </CompactTable>
-                
-                {/* Мобильные карточки для покупок юаней */}
-                <MobileCardContainer $isDark={isDarkTheme}>
-                  {paginatedData.filter(item => item.id && !item.order_id).map((purchase, index) => (
-                    <MobileCard key={`mobile-yuan-${purchase.id}-${index}`} $isDark={isDarkTheme}>
-                      <MobileCardHeader $isDark={isDarkTheme}>
-                        <MobileCardTitle $isDark={isDarkTheme}>
-                          Покупка #{purchase.id}
-                        </MobileCardTitle>
-                        <MobileCardStatus $status="pending" $isDark={isDarkTheme}>
-                          Ожидает
-                        </MobileCardStatus>
-                      </MobileCardHeader>
-                      
-                      <MobileCardContent>
-                        <MobileCardRow $isDark={isDarkTheme}>
-                          <MobileCardLabel $isDark={isDarkTheme}>Пользователь:</MobileCardLabel>
-                          <MobileCardValue $isDark={isDarkTheme}>{purchase.full_name}</MobileCardValue>
-                        </MobileCardRow>
-                        
-                        <MobileCardRow $isDark={isDarkTheme}>
-                          <MobileCardLabel $isDark={isDarkTheme}>Сумма:</MobileCardLabel>
-                          <MobileCardValue $isDark={isDarkTheme}>{formatCurrency(purchase.amount_rub)}</MobileCardValue>
-                        </MobileCardRow>
-                        
-                        <MobileCardRow $isDark={isDarkTheme}>
-                          <MobileCardLabel $isDark={isDarkTheme}>Юани:</MobileCardLabel>
-                          <MobileCardValue $isDark={isDarkTheme}>{purchase.amount_cny} ¥</MobileCardValue>
-                        </MobileCardRow>
-                        
-                        <MobileCardRow $isDark={isDarkTheme}>
-                          <MobileCardLabel $isDark={isDarkTheme}>Экономия:</MobileCardLabel>
-                          <MobileCardValue $isDark={isDarkTheme} style={{ color: 'var(--success-color)', fontWeight: 'bold' }}>
-                            {formatCurrency(purchase.savings)}
-                          </MobileCardValue>
-                        </MobileCardRow>
-                        
-                        <MobileCardRow $isDark={isDarkTheme}>
-                          <MobileCardLabel $isDark={isDarkTheme}>Дата:</MobileCardLabel>
-                          <MobileCardValue $isDark={isDarkTheme}>{formatDateTime(purchase.created_at)}</MobileCardValue>
-                        </MobileCardRow>
-                      </MobileCardContent>
-                      
-                      <MobileCardActions $isDark={isDarkTheme}>
-                        <MobileActionButton
-                          $variant="success"
-                          $isDark={isDarkTheme}
-                          onClick={() => handleConfirmOrder(purchase.id, 'yuan')}
-                        >
-                          ✅ Подтвердить
-                        </MobileActionButton>
-                        <MobileActionButton
-                          $variant="danger"
-                          $isDark={isDarkTheme}
-                          onClick={() => handleCancelOrder(purchase.id, 'yuan')}
-                        >
-                          ❌ Отменить
-                        </MobileActionButton>
-                      </MobileCardActions>
-                    </MobileCard>
-                  ))}
-                </MobileCardContainer>
-              </div>
-            )}
-
-            {pendingOrders.length === 0 && pendingYuanPurchases.length === 0 && (
+            {pendingOrders.length === 0 && (
               <EmptyState>Нет заказов, ожидающих подтверждения</EmptyState>
             )}
           </Section>
@@ -2785,7 +2638,6 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
                 <option value="telegram_id">По ID</option>
                 <option value="username">По username</option>
                 <option value="orders_count">По заказам</option>
-                <option value="yuan_purchases_count">По покупкам юаней</option>
                 <option value="total_savings">По экономии</option>
                 <option value="referrals_count">По рефералам</option>
               </FilterSelect>
@@ -2818,7 +2670,6 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
                       <CompactTableHeader $isDark={isDarkTheme} onClick={() => handleSort('orders_count')}>
                         Заказы {sortBy === 'orders_count' && (sortOrder === 'asc' ? '↑' : '↓')}
                       </CompactTableHeader>
-                      <CompactTableHeader $isDark={isDarkTheme}>Покупки</CompactTableHeader>
                       <CompactTableHeader $isDark={isDarkTheme} onClick={() => handleSort('total_savings')}>
                         Экономия {sortBy === 'total_savings' && (sortOrder === 'asc' ? '↑' : '↓')}
                       </CompactTableHeader>
@@ -2862,7 +2713,6 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
                         </CompactTableCell>
                         <CompactTableCell $isDark={isDarkTheme}>@{user.username || 'неизвестно'}</CompactTableCell>
                         <CompactTableCell $isDark={isDarkTheme}>{user.orders_count}</CompactTableCell>
-                        <CompactTableCell $isDark={isDarkTheme}>{user.yuan_purchases_count}</CompactTableCell>
                         <CompactTableCell $isDark={isDarkTheme} style={{ color: 'var(--success-color)', fontWeight: 'bold' }}>
                           {formatCurrency(user.total_savings)}
                         </CompactTableCell>
@@ -2927,11 +2777,6 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
                       <MobileCardRow $isDark={isDarkTheme}>
                         <MobileCardLabel $isDark={isDarkTheme}>Заказов:</MobileCardLabel>
                         <MobileCardValue $isDark={isDarkTheme}>{user.orders_count}</MobileCardValue>
-                      </MobileCardRow>
-                      
-                      <MobileCardRow $isDark={isDarkTheme}>
-                        <MobileCardLabel $isDark={isDarkTheme}>Покупок:</MobileCardLabel>
-                        <MobileCardValue $isDark={isDarkTheme}>{user.yuan_purchases_count}</MobileCardValue>
                       </MobileCardRow>
                       
                       <MobileCardRow $isDark={isDarkTheme}>
@@ -3208,7 +3053,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
           </Section>
         )}
 
-        {activeTab === 'yuan' && (
+        {false && (
           <Section id="yuan-section" $isDark={isDarkTheme}>
             <SectionTitle>💰 Покупки юаней ({yuanPurchases.length})</SectionTitle>
             
@@ -3865,34 +3710,6 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
                     )}
                   </div>
 
-                  {/* Покупки юаней */}
-                  <div style={{ 
-                    padding: '12px', 
-                    backgroundColor: 'var(--bg-secondary)', 
-                    borderRadius: '8px',
-                    border: '1px solid var(--border-color)',
-                    textAlign: 'center',
-                    minHeight: '80px',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    justifyContent: 'center'
-                  }}>
-                    <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '4px' }}>💴 Юани</div>
-                    <div style={{ fontSize: '1.2rem', fontWeight: 'bold', color: 'var(--text-primary)' }}>
-                      {salesAnalytics.totalStats.total_yuan_purchases || 0}
-                    </div>
-                    {salesAnalytics.previousStats && (
-                      <div style={{ 
-                        fontSize: '0.7rem', 
-                        color: (salesAnalytics.totalStats.total_yuan_purchases - salesAnalytics.previousStats.total_yuan_purchases) >= 0 ? '#27ae60' : '#e74c3c',
-                        fontWeight: 'bold'
-                      }}>
-                        {(salesAnalytics.totalStats.total_yuan_purchases - salesAnalytics.previousStats.total_yuan_purchases) >= 0 ? '▲' : '▼'}
-                        {Math.abs(salesAnalytics.totalStats.total_yuan_purchases - salesAnalytics.previousStats.total_yuan_purchases)}
-                      </div>
-                    )}
-                  </div>
-
                   {/* Новые пользователи */}
                   <div style={{ 
                     padding: '12px', 
@@ -4003,42 +3820,6 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
                           </span>
                           <span style={{ fontWeight: 'bold', color: '#3498db' }}>
                             {stat.orders_count || 0} заказов
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {/* Покупки юаней по дням */}
-                {salesAnalytics.yuanStats && salesAnalytics.yuanStats.length > 0 && (
-                  <div style={{ marginBottom: '20px' }}>
-                    <h4 style={{ 
-                      color: 'var(--text-primary)', 
-                      marginBottom: '12px',
-                      fontSize: '0.9rem',
-                      fontWeight: 'bold',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '6px'
-                    }}>
-                      💴 Покупки юаней по дням
-                    </h4>
-                    <div style={{ display: 'grid', gap: '8px' }}>
-                      {salesAnalytics.yuanStats.map((stat: any, index: number) => (
-                        <div key={index} style={{ 
-                          display: 'flex', 
-                          justifyContent: 'space-between',
-                          padding: '12px',
-                          backgroundColor: 'var(--bg-secondary)',
-                          borderRadius: '8px',
-                          border: '1px solid var(--border-color)'
-                        }}>
-                          <span style={{ fontWeight: '500', color: 'var(--text-primary)' }}>
-                            {new Date(stat.date).toLocaleDateString('ru-RU')}
-                          </span>
-                          <span style={{ fontWeight: 'bold', color: '#e74c3c' }}>
-                            {stat.purchases_count || 0} покупок
                           </span>
                         </div>
                       ))}
@@ -4301,10 +4082,6 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
                       <span style={{ fontWeight: 'bold' }}>{userHistory.user.total_orders || 0}</span>
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                      <span>Покупок юаней:</span>
-                      <span style={{ fontWeight: 'bold' }}>{userHistory.user.total_yuan_purchases || 0}</span>
-                    </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                       <span>Общая экономия:</span>
                       <span style={{ fontWeight: 'bold', color: 'var(--success-color)' }}>
                         {formatCurrency((userHistory.user.total_savings_orders || 0) + (userHistory.user.total_savings_yuan || 0))}
@@ -4354,26 +4131,6 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
                     </div>
                   )}
 
-                  {/* Последние покупки юаней */}
-                  {userHistory.yuanPurchases && userHistory.yuanPurchases.length > 0 && (
-                    <div>
-                      <h5 style={{ color: 'var(--text-primary)', marginBottom: '8px' }}>💰 Последние покупки юаней:</h5>
-                      <div style={{ display: 'grid', gap: '8px' }}>
-                        {userHistory.yuanPurchases.slice(0, 5).map((purchase: any, index: number) => (
-                          <div key={index} style={{ 
-                            display: 'flex', 
-                            justifyContent: 'space-between',
-                            padding: '8px',
-                            backgroundColor: 'var(--bg-secondary)',
-                            borderRadius: '6px'
-                          }}>
-                            <span>#{purchase.id} - {purchase.status}</span>
-                            <span style={{ fontWeight: 'bold' }}>{formatCurrency(purchase.amount_rub)}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
                 </div>
               )}
               

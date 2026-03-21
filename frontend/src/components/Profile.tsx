@@ -1205,7 +1205,6 @@ const Profile: React.FC<ProfileProps> = ({ telegramId, isDarkTheme, toggleTheme,
   const [telegramUser, setTelegramUser] = useState<any>(null);
   const [achievementsModalPosition, setAchievementsModalPosition] = useState({ top: '50%', transform: 'translateY(-50%)' });
   const [levelsModalPosition, setLevelsModalPosition] = useState({ top: '50%', transform: 'translateY(-50%)' });
-  const [yuanHistory, setYuanHistory] = useState<any[]>([]);
   const [ordersHistory, setOrdersHistory] = useState<any[]>([]);
   
   // Confetti state
@@ -1215,6 +1214,14 @@ const Profile: React.FC<ProfileProps> = ({ telegramId, isDarkTheme, toggleTheme,
   const [ordersHistoryExpanded, setOrdersHistoryExpanded] = useState(false);
   const [combinedHistory, setCombinedHistory] = useState<any[]>([]);
   const [isAdmin, setIsAdmin] = useState(false);
+
+  const YUAN_ACHIEVEMENT_NAMES = new Set([
+    'Первый обмен',
+    'Юань-новичок',
+    'Валютный дракон',
+    'Объемный обмен',
+    'Мастер юаней'
+  ]);
   const [showPasswordModal, setShowPasswordModal] = useState(false);
   const [password, setPassword] = useState('');
   const [passwordError, setPasswordError] = useState('');
@@ -1271,7 +1278,6 @@ const Profile: React.FC<ProfileProps> = ({ telegramId, isDarkTheme, toggleTheme,
     // Загружаем реальные данные из API
     fetchProfileData();
     
-    fetchYuanHistory(telegramId);
     fetchOrdersHistory(telegramId);
     fetchUserOrders(telegramId);
     
@@ -1282,7 +1288,6 @@ const Profile: React.FC<ProfileProps> = ({ telegramId, isDarkTheme, toggleTheme,
     
     // Обновляем данные при возврате на страницу
     const handleFocus = () => {
-      fetchYuanHistory(telegramId);
       fetchOrdersHistory(telegramId);
       fetchUserOrders(telegramId);
       fetchProfileData(telegramId);
@@ -1293,7 +1298,6 @@ const Profile: React.FC<ProfileProps> = ({ telegramId, isDarkTheme, toggleTheme,
     // Также обновляем данные периодически (каждые 30 секунд), если страница видима
     const interval = setInterval(() => {
       if (!document.hidden) {
-        fetchYuanHistory(telegramId);
         fetchOrdersHistory(telegramId);
         fetchUserOrders(telegramId);
         fetchProfileData(telegramId);
@@ -1315,17 +1319,16 @@ const Profile: React.FC<ProfileProps> = ({ telegramId, isDarkTheme, toggleTheme,
 
   // Объединяем и сортируем историю по дате
   useEffect(() => {
-    const combined = [
-      ...yuanHistory.map(item => ({ ...item, type: 'yuan', sortDate: new Date(item.created_at) })),
-      ...ordersHistory.map(item => ({ ...item, type: 'order', sortDate: new Date(item.created_at) }))
-    ].sort((a, b) => {
-      const dateA = new Date(a.created_at);
-      const dateB = new Date(b.created_at);
-      return dateB.getTime() - dateA.getTime();
-    });
-    
+    const combined = ordersHistory
+      .map(item => ({ ...item, type: 'order', sortDate: new Date(item.created_at) }))
+      .sort((a, b) => {
+        const dateA = new Date(a.created_at);
+        const dateB = new Date(b.created_at);
+        return dateB.getTime() - dateA.getTime();
+      });
+
     setCombinedHistory(combined);
-  }, [yuanHistory, ordersHistory]);
+  }, [ordersHistory]);
 
   const generateAllAchievements = () => {
     const achievements: Achievement[] = [
@@ -1421,38 +1424,6 @@ const Profile: React.FC<ProfileProps> = ({ telegramId, isDarkTheme, toggleTheme,
         requirement: '100 кликов',
         unlocked: profileData?.statistics.referrals.total_clicks ? profileData.statistics.referrals.total_clicks >= 100 : false,
         progress: Math.min((profileData?.statistics.referrals.total_clicks || 0) / 100 * 100, 100)
-      },
-
-      // Покупки юаня
-      {
-        id: 'first_yuan',
-        name: 'Покупатель юаня',
-        description: 'Купите юани впервые',
-        icon: '¥',
-        category: 'Юань',
-        requirement: '1 покупка юаня',
-        unlocked: profileData?.statistics.yuan_purchases.total_purchases ? profileData.statistics.yuan_purchases.total_purchases >= 1 : false,
-        progress: Math.min((profileData?.statistics.yuan_purchases.total_purchases || 0) / 1 * 100, 100)
-      },
-      {
-        id: 'yuan_saver',
-        name: 'Экономист',
-        description: 'Сэкономьте 1000 рублей',
-        icon: '💎',
-        category: 'Юань',
-        requirement: '1000₽ экономии',
-        unlocked: profileData?.statistics.total_savings?.total ? profileData.statistics.total_savings.total >= 1000 : false,
-        progress: Math.min((profileData?.statistics.total_savings?.total || 0) / 1000 * 100, 100)
-      },
-      {
-        id: 'yuan_master',
-        name: 'Мастер юаня',
-        description: 'Купите юани на сумму 100,000 рублей',
-        icon: '🏦',
-        category: 'Юань',
-        requirement: '100,000₽ потрачено',
-        unlocked: profileData?.statistics.yuan_purchases.total_spent_rub ? profileData.statistics.yuan_purchases.total_spent_rub >= 100000 : false,
-        progress: Math.min((profileData?.statistics.yuan_purchases.total_spent_rub || 0) / 100000 * 100, 100)
       },
 
       // Специальные достижения
@@ -1573,28 +1544,6 @@ const Profile: React.FC<ProfileProps> = ({ telegramId, isDarkTheme, toggleTheme,
         unlocked: false
       },
 
-      // Достижения по юаню
-      {
-        id: 'yuan_collector',
-        name: 'Коллекционер юаня',
-        description: 'Купите юани 10 раз',
-        icon: '🪙',
-        category: 'Юань',
-        requirement: '10 покупок юаня',
-        unlocked: profileData?.statistics.yuan_purchases.total_purchases ? profileData.statistics.yuan_purchases.total_purchases >= 10 : false,
-        progress: Math.min((profileData?.statistics.yuan_purchases.total_purchases || 0) / 10 * 100, 100)
-      },
-      {
-        id: 'yuan_whale',
-        name: 'Кит юаня',
-        description: 'Купите юани на 500,000 рублей',
-        icon: '🐋',
-        category: 'Юань',
-        requirement: '500,000₽ потрачено',
-        unlocked: profileData?.statistics.yuan_purchases.total_spent_rub ? profileData.statistics.yuan_purchases.total_spent_rub >= 500000 : false,
-        progress: Math.min((profileData?.statistics.yuan_purchases.total_spent_rub || 0) / 500000 * 100, 100)
-      },
-
       // Достижения по сезонам
       {
         id: 'spring_buyer',
@@ -1637,19 +1586,6 @@ const Profile: React.FC<ProfileProps> = ({ telegramId, isDarkTheme, toggleTheme,
     setAllAchievements(achievements);
   };
 
-
-  const fetchYuanHistory = async (userId?: string) => {
-    const currentTelegramId = userId || telegramId;
-    try {
-      const response = await fetch(`api/yuan-purchases?telegram_id=${currentTelegramId}`);
-      if (response.ok) {
-        const data = await response.json();
-        setYuanHistory(data.purchases || []);
-      }
-    } catch (error) {
-      console.error('Ошибка загрузки истории покупок юаней:', error);
-    }
-  };
 
   const fetchOrdersHistory = async (userId?: string) => {
     const currentTelegramId = userId || telegramId;
@@ -1764,7 +1700,9 @@ const Profile: React.FC<ProfileProps> = ({ telegramId, isDarkTheme, toggleTheme,
             ordersToNext: gamificationData.xpToNext, // Теперь это XP, не заказы
             xp: gamificationData.xp,
             xpToNext: gamificationData.xpToNext,
-            achievements: gamificationData.achievements.slice(0, 6) // Первые 6 для превью
+            achievements: gamificationData.achievements
+              .filter((ach: any) => !YUAN_ACHIEVEMENT_NAMES.has(ach?.name))
+              .slice(0, 6) // Первые 6 для превью
           };
           
           // Сохраняем все достижения отдельно для модального окна (ОБНОВЛЕНО ДЛЯ НОВОЙ СИСТЕМЫ)
@@ -1789,21 +1727,27 @@ const Profile: React.FC<ProfileProps> = ({ telegramId, isDarkTheme, toggleTheme,
                 });
               });
             });
-            setAllAchievements(allAchievementsFlat);
+            setAllAchievements(
+              allAchievementsFlat.filter((ach: any) => ach?.category !== 'Юань' && !YUAN_ACHIEVEMENT_NAMES.has(ach?.name))
+            );
           } else {
             // Fallback: используем достижения из gamificationData
-            setAllAchievements(gamificationData.achievements.map((ach: any, index: number) => ({
-              id: ach.id ? ach.id.toString() : `achievement_${index}`,
-              key: ach.key || ach.achievement_key || '',
-              name: ach.name || `Достижение ${index + 1}`,
-              description: ach.description || '',
-              icon: ach.icon || '🏆',
-              category: ach.category || 'Общие',
-              requirement: ach.requirement || '',
-              unlocked: Boolean(ach.unlocked),
-              unlockedAt: ach.unlocked_at || null,
-              xpReward: ach.xpReward ?? ach.xp_reward ?? 0
-            })));
+            setAllAchievements(
+              gamificationData.achievements
+                .filter((ach: any) => !YUAN_ACHIEVEMENT_NAMES.has(ach?.name))
+                .map((ach: any, index: number) => ({
+                  id: ach.id ? ach.id.toString() : `achievement_${index}`,
+                  key: ach.key || ach.achievement_key || '',
+                  name: ach.name || `Достижение ${index + 1}`,
+                  description: ach.description || '',
+                  icon: ach.icon || '🏆',
+                  category: ach.category || 'Общие',
+                  requirement: ach.requirement || '',
+                  unlocked: Boolean(ach.unlocked),
+                  unlockedAt: ach.unlocked_at || null,
+                  xpReward: ach.xpReward ?? ach.xp_reward ?? 0
+                }))
+            );
           }
           
           // Проверяем недавнее повышение уровня
@@ -1961,7 +1905,6 @@ const Profile: React.FC<ProfileProps> = ({ telegramId, isDarkTheme, toggleTheme,
   const getCategoryIcon = (category: string) => {
     const icons: { [key: string]: string } = {
       'Заказы': '🛍️',
-      'Юани': '💰',
       'Рефералы': '🤝',
       'Активность': '⚡',
       'Экономия': '💸'
@@ -2354,10 +2297,6 @@ const Profile: React.FC<ProfileProps> = ({ telegramId, isDarkTheme, toggleTheme,
             <StatLabel>Приглашено</StatLabel>
           </StatItem>
           <StatItem $isDark={isDarkTheme}>
-            <StatValue>{profileData.statistics.yuan_purchases.total_purchases}</StatValue>
-            <StatLabel>Покупок юаня</StatLabel>
-          </StatItem>
-          <StatItem $isDark={isDarkTheme}>
             <StatValue>{formatCurrency(Number(profileData.statistics.total_savings?.total) || 0)}</StatValue>
             <StatLabel>Сэкономлено</StatLabel>
           </StatItem>
@@ -2537,7 +2476,7 @@ const Profile: React.FC<ProfileProps> = ({ telegramId, isDarkTheme, toggleTheme,
         </HistorySection>
       )}
 
-      {/* История заказов и покупок юаней */}
+      {/* История заказов */}
       {combinedHistory && combinedHistory.length > 0 && (
         <HistorySection $isDark={isDarkTheme}>
           <HistoryTitle $isDark={isDarkTheme} onClick={() => setOrdersHistoryExpanded(!ordersHistoryExpanded)}>
@@ -2580,65 +2519,40 @@ const Profile: React.FC<ProfileProps> = ({ telegramId, isDarkTheme, toggleTheme,
                 </HistoryItemHeader>
                 
                 <HistoryItemType $isDark={isDarkTheme}>
-                  <span className="type-icon">
-                    {item.type === 'order' ? '📦' : '💰'}
-                  </span>
-                  <span className="type-text">
-                    {item.type === 'order' ? 'Оформление заказа' : 'Покупка юаней'}
-                  </span>
+                  <span className="type-icon">📦</span>
+                  <span className="type-text">Оформление заказа</span>
                 </HistoryItemType>
                 
                 <HistoryItemDetails>
-                  {item.type === 'order' ? (
-                    <>
-                      <HistoryDetail $isDark={isDarkTheme}>
-                        <span>Размер:</span>
-                        <span>{item.product_size}</span>
-                      </HistoryDetail>
-                      <HistoryDetail $isDark={isDarkTheme}>
-                        <span>Получатель:</span>
-                        <span>{item.full_name}</span>
-                      </HistoryDetail>
-                      <HistoryDetail $isDark={isDarkTheme}>
-                        <span>Телефон:</span>
-                        <span>{item.phone_number}</span>
-                      </HistoryDetail>
-                      <HistoryDetail $isDark={isDarkTheme}>
-                        <span>Пункт выдачи:</span>
-                        <span>{item.pickup_point_address}</span>
-                      </HistoryDetail>
-                      <HistoryDetail $isDark={isDarkTheme}>
-                        <span>Ссылка:</span>
-                        <span style={{ 
-                          fontSize: '11px',
-                          fontFamily: 'JetBrains Mono, monospace',
-                          wordBreak: 'break-all',
-                          overflowWrap: 'break-word'
-                        }}>
-                          {item.product_link || 'Не указана'}
-                        </span>
-                      </HistoryDetail>
-                    </>
-                  ) : (
-                    <>
-                      <HistoryDetail $isDark={isDarkTheme}>
-                        <span>Потрачено:</span>
-                        <span>{item.amount_rub.toLocaleString('ru-RU', { minimumFractionDigits: 2 })} ₽</span>
-                      </HistoryDetail>
-                      <HistoryDetail $isDark={isDarkTheme}>
-                        <span>Получено:</span>
-                        <span>{item.amount_cny.toLocaleString('ru-RU', { minimumFractionDigits: 2 })} ¥</span>
-                      </HistoryDetail>
-                      <HistoryDetail $isDark={isDarkTheme}>
-                        <span>Курс:</span>
-                        <span>{item.favorable_rate} ₽</span>
-                      </HistoryDetail>
-                      <HistoryDetail $isDark={isDarkTheme}>
-                        <span>Экономия:</span>
-                        <span>{item.savings.toLocaleString('ru-RU', { minimumFractionDigits: 2 })} ₽</span>
-                      </HistoryDetail>
-                    </>
-                  )}
+                  <>
+                    <HistoryDetail $isDark={isDarkTheme}>
+                      <span>Размер:</span>
+                      <span>{item.product_size}</span>
+                    </HistoryDetail>
+                    <HistoryDetail $isDark={isDarkTheme}>
+                      <span>Получатель:</span>
+                      <span>{item.full_name}</span>
+                    </HistoryDetail>
+                    <HistoryDetail $isDark={isDarkTheme}>
+                      <span>Телефон:</span>
+                      <span>{item.phone_number}</span>
+                    </HistoryDetail>
+                    <HistoryDetail $isDark={isDarkTheme}>
+                      <span>Пункт выдачи:</span>
+                      <span>{item.pickup_point_address}</span>
+                    </HistoryDetail>
+                    <HistoryDetail $isDark={isDarkTheme}>
+                      <span>Ссылка:</span>
+                      <span style={{ 
+                        fontSize: '11px',
+                        fontFamily: 'JetBrains Mono, monospace',
+                        wordBreak: 'break-all',
+                        overflowWrap: 'break-word'
+                      }}>
+                        {item.product_link || 'Не указана'}
+                      </span>
+                    </HistoryDetail>
+                  </>
                 </HistoryItemDetails>
               </HistoryItem>
             ))}

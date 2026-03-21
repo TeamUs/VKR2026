@@ -790,50 +790,9 @@ class GamificationService {
    * @returns {Promise<Array>} Unlocked achievements
    */
   async checkYuanAchievements(telegramId, amountRub) {
-    await this.init();
-    const unlocked = [];
-
-    // Get purchase statistics (amount_cny в БД, не amount_yuan)
-    const [purchaseStats] = await this.pool.query(
-      'SELECT COUNT(*) as count, COALESCE(SUM(amount_rub), 0) as total_rub, COALESCE(SUM(amount_cny), 0) as total_yuan FROM yuan_purchases WHERE telegram_id = ? AND status = "completed"',
-      [telegramId]
-    );
-
-    const purchaseCount = purchaseStats[0]?.count || 0;
-    const totalRub = Number(purchaseStats[0]?.total_rub) || 0;
-    const totalYuan = Number(purchaseStats[0]?.total_yuan) || 0;
-
-    // First Exchange - First yuan purchase
-    if (purchaseCount === 1) {
-      const result = await this.checkAndUnlockAchievement(telegramId, 'first_exchange');
-      if (!result.alreadyUnlocked) unlocked.push(result);
-    }
-
-    // Yuan Newbie - Buy 1,000 yuan
-    if (totalYuan >= 1000) {
-      const result = await this.checkAndUnlockAchievement(telegramId, 'yuan_newbie');
-      if (!result.alreadyUnlocked) unlocked.push(result);
-    }
-
-    // Currency Dragon - Buy 5,000 yuan
-    if (totalYuan >= 5000) {
-      const result = await this.checkAndUnlockAchievement(telegramId, 'currency_dragon');
-      if (!result.alreadyUnlocked) unlocked.push(result);
-    }
-
-    // Volume Exchange - Buy yuan for 20,000₽
-    if (totalRub >= 20000) {
-      const result = await this.checkAndUnlockAchievement(telegramId, 'volume_exchange');
-      if (!result.alreadyUnlocked) unlocked.push(result);
-    }
-
-    // Yuan Master - Buy yuan for 100,000₽
-    if (totalRub >= 100000) {
-      const result = await this.checkAndUnlockAchievement(telegramId, 'yuan_master');
-      if (!result.alreadyUnlocked) unlocked.push(result);
-    }
-
-    return unlocked;
+    // Yuan purchases are fully disabled in the VKR mini-app.
+    // Returning an empty list prevents XP/achievement unlocking tied to yuan spending.
+    return [];
   }
 
   /**

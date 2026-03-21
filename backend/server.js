@@ -3923,7 +3923,8 @@ app.patch('/api/users', async (req, res) => {
 // Покупка юаня
 app.post('/api/yuan-purchase', async (req, res) => {
   try {
-    await ensureDBConnection();
+    // В ВКР-приложении полностью отключена функциональность покупки юаней.
+    return res.status(410).json({ success: false, error: 'Yuan purchases are disabled in VKR app.' });
     
     const { 
       telegramId, 
@@ -4026,7 +4027,8 @@ app.post('/api/yuan-purchase', async (req, res) => {
 // Получение истории покупок юаня
 app.get('/api/yuan-purchases', async (req, res) => {
   try {
-    await ensureDBConnection();
+    // В ВКР-приложении полностью отключена функциональность покупки юаней.
+    return res.json({ purchases: [] });
     
     const { telegram_id } = req.query;
     
@@ -4508,7 +4510,8 @@ app.get('/api/admin/orders', async (req, res) => {
 // Получение всех покупок юаней для админов
 app.get('/api/admin/yuan-purchases', async (req, res) => {
   try {
-    await ensureDBConnection();
+    // В ВКР-приложении полностью отключена функциональность покупки юаней.
+    return res.json({ purchases: [] });
     
     const [purchases] = await dbConnection.execute(`
       SELECT 
@@ -4562,23 +4565,9 @@ app.get('/api/admin/pending-orders', async (req, res) => {
       ORDER BY o.created_at DESC
     `);
     
-    // Получаем покупки юаней со статусом 'pending' с информацией о пользователе
-    const [pendingYuanPurchases] = await dbConnection.execute(`
-      SELECT 
-        yp.id,
-        yp.telegram_id,
-        u.username,
-        u.full_name,
-        yp.amount_cny,
-        yp.amount_rub,
-        yp.savings,
-        yp.created_at,
-        yp.status
-      FROM yuan_purchases yp
-      LEFT JOIN users u ON yp.telegram_id = u.telegram_id
-      WHERE yp.status = 'pending'
-      ORDER BY yp.created_at DESC
-    `);
+    // Покупки юаней в ВКР-приложении отключены.
+    // Возвращаем пустой список, чтобы не трогать таблицу `yuan_purchases`.
+    const pendingYuanPurchases = [];
     
     res.json({ 
       orders: pendingOrders,
@@ -4623,11 +4612,9 @@ app.get('/api/admin/user-details/:telegramId', async (req, res) => {
       ORDER BY o.created_at DESC
     `, [telegramId]);
     
-    // Покупки юаней
-    const [yuanPurchases] = await dbConnection.execute(
-      'SELECT * FROM yuan_purchases WHERE telegram_id = ? ORDER BY created_at DESC',
-      [telegramId]
-    );
+    // Покупки юаней в ВКР-приложении отключены.
+    // Возвращаем пустой список, чтобы не трогать таблицу `yuan_purchases`.
+    const yuanPurchases = [];
     
     // Активность пользователя
     const [activity] = await dbConnection.execute(
@@ -4692,6 +4679,11 @@ app.post('/api/admin/confirm-order', async (req, res) => {
   try {
     await ensureDBConnection();
     const { orderId, type } = req.body; // type: 'order' или 'yuan'
+
+    // В ВКР-приложении полностью отключена функциональность покупки юаней.
+    if (type === 'yuan') {
+      return res.status(410).json({ success: false, message: 'Yuan purchases are disabled in VKR app.' });
+    }
     
     if (type === 'order') {
       // При подтверждении оплаты статус меняется на 'paid', а не 'completed'
@@ -4699,11 +4691,6 @@ app.post('/api/admin/confirm-order', async (req, res) => {
       await dbConnection.execute(
         'UPDATE orders SET status = ? WHERE order_id = ?',
         ['paid', orderId]
-      );
-    } else if (type === 'yuan') {
-      await dbConnection.execute(
-        'UPDATE yuan_purchases SET status = ? WHERE id = ?',
-        ['completed', orderId]
       );
     }
     
@@ -4861,15 +4848,15 @@ app.post('/api/admin/cancel-order', async (req, res) => {
   try {
     await ensureDBConnection();
     const { orderId, type } = req.body; // type: 'order' или 'yuan'
+
+    // В ВКР-приложении полностью отключена функциональность покупки юаней.
+    if (type === 'yuan') {
+      return res.status(410).json({ success: false, message: 'Yuan purchases are disabled in VKR app.' });
+    }
     
     if (type === 'order') {
       await dbConnection.execute(
         'UPDATE orders SET status = ? WHERE order_id = ?',
-        ['cancelled', orderId]
-      );
-    } else if (type === 'yuan') {
-      await dbConnection.execute(
-        'UPDATE yuan_purchases SET status = ? WHERE id = ?',
         ['cancelled', orderId]
       );
     }
