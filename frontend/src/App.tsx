@@ -3,7 +3,7 @@ import styled, { createGlobalStyle, keyframes } from 'styled-components';
 import MainMenu from './components/MainMenu';
 import OrderForm from './components/OrderForm';
 import PriceCalculator from './components/PriceCalculator';
-import FAQ from './components/FAQ';
+import AiAssistant from './components/AiAssistant';
 import Instructions from './components/Instructions';
 import ReferralSystem from './components/ReferralSystem';
 import AboutUs from './components/AboutUs';
@@ -722,7 +722,7 @@ type AppView =
   | 'main'
   | 'order'
   | 'calculator'
-  | 'faq'
+  | 'ai-assistant'
   | 'instructions'
   | 'referral'
   | 'exchange-rate'
@@ -1203,8 +1203,8 @@ const App: React.FC = () => {
               </Suspense>
             )}
             
-            {currentView === 'faq' && (
-              <FAQ onNavigate={navigateTo} toggleTheme={toggleTheme} isDarkTheme={isDarkTheme} />
+            {currentView === 'ai-assistant' && (
+              <AiAssistant onNavigate={navigateTo} toggleTheme={toggleTheme} isDarkTheme={isDarkTheme} />
             )}
             
             {currentView === 'instructions' && (

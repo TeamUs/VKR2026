@@ -3774,16 +3774,13 @@ app.get('/api/profile', async (req, res) => {
       WHERE referred_by = ?
     `, [telegram_id]);
     
-    // Получаем статистику покупок юаня
-    const [yuanStats] = await dbConnection.execute(`
-      SELECT 
-        COUNT(*) as total_purchases,
-        COALESCE(SUM(amount_rub), 0) as total_spent_rub,
-        COALESCE(SUM(amount_cny), 0) as total_bought_cny,
-        COALESCE(SUM(savings), 0) as total_savings
-      FROM yuan_purchases 
-      WHERE telegram_id = ? AND status = 'completed'
-    `, [telegram_id]);
+    // ВКР-приложение: покупка юаней отключена — не запрашиваем yuan_purchases для профиля.
+    const yuanStatsPlaceholder = {
+      total_purchases: 0,
+      total_spent_rub: 0,
+      total_bought_cny: 0,
+      total_savings: 0
+    };
 
     // Получаем экономию от заказов (заказы со статусом 'paid' или 'completed')
     // Экономия начисляется после подтверждения оплаты (status = 'paid')
@@ -3859,12 +3856,13 @@ app.get('/api/profile', async (req, res) => {
       statistics: {
         orders: orderStats[0],
         referrals: referralStats[0],
-        yuan_purchases: yuanStats[0],
+        yuan_purchases: yuanStatsPlaceholder,
         order_savings: orderSavingsStats[0],
+        // «Сэкономлено» в ВКР: только заказы (paid/completed), без экономии с покупки юаней.
         total_savings: {
-          yuan_savings: parseFloat(yuanStats[0].total_savings) || 0,
+          yuan_savings: 0,
           order_savings: parseFloat(orderSavingsStats[0].total_order_savings) || 0,
-          total: (parseFloat(yuanStats[0].total_savings) || 0) + (parseFloat(orderSavingsStats[0].total_order_savings) || 0)
+          total: parseFloat(orderSavingsStats[0].total_order_savings) || 0
         }
       },
       gamification: gamificationData
