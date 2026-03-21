@@ -2403,7 +2403,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
               </QuickStatCard>
               <QuickStatCard $isDark={isDarkTheme}>
                 <QuickStatValue $isDark={isDarkTheme}>{formatCurrency(stats.totalSavings)}</QuickStatValue>
-                <QuickStatLabel $isDark={isDarkTheme}>💵 Экономия клиентов</QuickStatLabel>
+                <QuickStatLabel $isDark={isDarkTheme}>💵 Экономия клиентов (заказы)</QuickStatLabel>
               </QuickStatCard>
               <QuickStatCard $isDark={isDarkTheme}>
                 <QuickStatValue $isDark={isDarkTheme}>{stats.activeUsers}</QuickStatValue>

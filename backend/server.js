@@ -4366,15 +4366,12 @@ app.get('/api/admin/stats', async (req, res) => {
     );
     const yuanPurchasesToday = yuanTodayResult[0].total;
     
-    // Общая экономия (только завершенные заказы)
+    // Общая экономия клиентов: только заказы (оплаченные / завершённые).
+    // Покупки юаней в ВКР-приложении отключены — экономию с юаней сюда не суммируем.
     const [totalSavingsResult] = await dbConnection.execute(`
-      SELECT 
-        COALESCE(SUM(yuan_savings), 0) + COALESCE(SUM(order_savings), 0) as total_savings
-      FROM (
-        SELECT SUM(savings) as yuan_savings, 0 as order_savings FROM yuan_purchases WHERE status = 'completed'
-        UNION ALL
-        SELECT 0 as yuan_savings, SUM(estimated_savings) as order_savings FROM orders WHERE (status = 'paid' OR status = 'completed')
-      ) as combined_savings
+      SELECT COALESCE(SUM(estimated_savings), 0) AS total_savings
+      FROM orders
+      WHERE status = 'paid' OR status = 'completed'
     `);
     const totalSavings = totalSavingsResult[0].total_savings || 0;
     
@@ -4454,7 +4451,8 @@ app.get('/api/admin/users', async (req, res) => {
         COUNT(DISTINCT CASE WHEN yp.status = 'completed' THEN yp.id END) as yuan_purchases_count,
         COALESCE(SUM(CASE WHEN yp.status = 'completed' THEN yp.savings ELSE 0 END), 0) as yuan_savings,
         COALESCE(SUM(CASE WHEN (o.status = 'paid' OR o.status = 'completed') THEN o.estimated_savings ELSE 0 END), 0) as order_savings,
-        COALESCE(SUM(CASE WHEN yp.status = 'completed' THEN yp.savings ELSE 0 END), 0) + COALESCE(SUM(CASE WHEN o.status = 'completed' THEN o.estimated_savings ELSE 0 END), 0) as total_savings,
+        /* ВКР: в админке «экономия» пользователя = только заказы, без юаней */
+        COALESCE(SUM(CASE WHEN (o.status = 'paid' OR o.status = 'completed') THEN o.estimated_savings ELSE 0 END), 0) as total_savings,
         COUNT(DISTINCT r.telegram_id) as referrals_count
       FROM users u
       LEFT JOIN orders o ON u.telegram_id = o.telegram_id
