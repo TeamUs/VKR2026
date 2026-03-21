@@ -97,11 +97,6 @@ const BottomNavigation: React.FC<BottomNavigationProps> = ({
 
   const navItems = [
     {
-      id: 'yuan',
-      label: 'Купить юань',
-      icon: '¥'
-    },
-    {
       id: 'main',
       label: 'Главное меню',
       icon: '🏠'

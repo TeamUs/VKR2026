@@ -680,7 +680,7 @@ const MainMenu: React.FC<MainMenuProps> = ({ onNavigate, toggleTheme, isDarkThem
             <ButtonText>Инструкции</ButtonText>
             <ChineseAccent>學</ChineseAccent>
           </MenuButton>
-          
+
           <MenuButton $isDark={isDarkTheme} onClick={() => handleButtonClick('exchange-rate')}>
             <ButtonIcon>📊</ButtonIcon>
             <ButtonText>Курс юаня</ButtonText>

@@ -344,7 +344,6 @@ const LevelsModal: React.FC<LevelsModalProps> = ({
       xpRequired: 100000,
       rewards: [
         'Комиссия 0₽ навсегда',
-        'Специальные предложения на покупку юаней',
         'Рефералы получают заказы без комиссии (0₽) на 14 дней при активации реферальной ссылки'
       ]
     }
@@ -387,10 +386,6 @@ const LevelsModal: React.FC<LevelsModalProps> = ({
             <XPInfoItem>
               <XPInfoIcon>✅</XPInfoIcon>
               50 XP за приведенного реферала
-            </XPInfoItem>
-            <XPInfoItem>
-              <XPInfoIcon>✅</XPInfoIcon>
-              1 XP за каждые 100₽ потраченных на юани
             </XPInfoItem>
           </XPInfoSection>
           

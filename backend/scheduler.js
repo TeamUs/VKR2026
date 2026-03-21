@@ -97,12 +97,9 @@ async function getOrdersStats() {
       WHERE created_at >= DATE_SUB(NOW(), INTERVAL 24 HOUR)
     `);
     
-    // Покупки юаней за последние 24 часа
-    const [newYuanPurchases] = await connection.execute(`
-      SELECT COUNT(*) as count 
-      FROM yuan_purchases 
-      WHERE created_at >= DATE_SUB(NOW(), INTERVAL 24 HOUR)
-    `);
+    // Покупки юаней в ВКР-приложении отключены.
+    // Не делаем запросы в `yuan_purchases`, чтобы полностью убрать функциональность.
+    const newYuanPurchases = 0;
     
     connection.release(); // Возвращаем соединение в pool вместо закрытия
     
@@ -113,7 +110,7 @@ async function getOrdersStats() {
       readyOrders: readyOrders[0].count,
       shippedOrders: shippedOrders[0].count,
       newUsers: newUsers[0].count,
-      newYuanPurchases: newYuanPurchases[0].count
+      newYuanPurchases
     };
   } catch (error) {
     console.error('❌ Ошибка получения статистики заказов:', error);
@@ -349,8 +346,6 @@ async function sendDailyNotification() {
       `🚚 В пути: ${stats.shippedOrders}\n\n` +
       `👥 <b>ПОЛЬЗОВАТЕЛИ</b>\n` +
       `🆕 Новые за 24ч: ${stats.newUsers}\n\n` +
-      `💵 <b>ПОКУПКИ ЮАНЕЙ</b>\n` +
-      `🆕 Новые за 24ч: ${stats.newYuanPurchases}\n\n` +
       `🖥️ <b>СЕРВЕР</b>\n` +
       `💾 Память: ${serverStats.memory.used}GB / ${serverStats.memory.total}GB (${serverStats.memory.percent}%)\n` +
       `⚙️ CPU: ${serverStats.cpu.load}% (${serverStats.cpu.cores} ядер)\n` +

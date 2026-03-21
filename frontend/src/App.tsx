@@ -6,15 +6,14 @@ import PriceCalculator from './components/PriceCalculator';
 import FAQ from './components/FAQ';
 import Instructions from './components/Instructions';
 import ReferralSystem from './components/ReferralSystem';
-import ExchangeRate from './components/ExchangeRate';
 import AboutUs from './components/AboutUs';
 import Reviews from './components/Reviews';
+import ExchangeRate from './components/ExchangeRate';
 import BottomNavigation from './components/BottomNavigation';
 import { HapticFeedback, isBackButtonSupported } from './utils/hapticFeedback';
 
 // Lazy load new components
 const Profile = React.lazy(() => import('./components/Profile'));
-const YuanPurchase = React.lazy(() => import('./components/YuanPurchase'));
 const AdminPanel = React.lazy(() => import('./components/AdminPanel'));
 const TrackingForm = React.lazy(() => import('./components/TrackingForm'));
 
@@ -730,9 +729,9 @@ type AppView =
   | 'about'
   | 'reviews'
   | 'profile'
-  | 'yuan-purchase';
+  ;
 
-type TabView = 'main' | 'profile' | 'yuan';
+type TabView = 'main' | 'profile';
 
 // Пул мудростей о доставке из Китая для экрана загрузки
 const chineseWisdom = [
@@ -1215,7 +1214,7 @@ const App: React.FC = () => {
             {currentView === 'referral' && (
               <ReferralSystem onNavigate={navigateTo} toggleTheme={toggleTheme} isDarkTheme={isDarkTheme} onModalStateChange={setHideNavigation} />
             )}
-            
+
             {currentView === 'exchange-rate' && (
               <ExchangeRate onNavigate={navigateTo} isDarkTheme={isDarkTheme} toggleTheme={toggleTheme} />
             )}
@@ -1260,17 +1259,7 @@ const App: React.FC = () => {
           </Suspense>
         )}
 
-        {/* Yuan Purchase tab content */}
-        {activeTab === 'yuan' && (
-          <Suspense fallback={<div style={{ padding: '20px', textAlign: 'center' }}>Загрузка...</div>}>
-            <YuanPurchase 
-              telegramId={telegramUser?.id?.toString()} 
-              isDarkTheme={isDarkTheme}
-              toggleTheme={toggleTheme}
-              onModalStateChange={setHideNavigation}
-            />
-          </Suspense>
-        )}
+        {/* Покупка юаней удалена из ВКР-приложения */}
 
       </AppContainer>
       
