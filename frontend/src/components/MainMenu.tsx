@@ -669,9 +669,9 @@ const MainMenu: React.FC<MainMenuProps> = ({ onNavigate, toggleTheme, isDarkThem
             <ChineseAccent>運</ChineseAccent>
           </MenuButton>
           
-          <MenuButton $isDark={isDarkTheme} onClick={() => handleButtonClick('faq')}>
-            <ButtonIcon>❓</ButtonIcon>
-            <ButtonText>FAQ</ButtonText>
+          <MenuButton $isDark={isDarkTheme} onClick={() => handleButtonClick('ai-assistant')}>
+            <ButtonIcon>🤖</ButtonIcon>
+            <ButtonText>ИИ-помощник</ButtonText>
             <ChineseAccent>智</ChineseAccent>
           </MenuButton>
           

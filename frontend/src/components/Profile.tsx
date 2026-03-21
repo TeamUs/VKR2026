@@ -1650,9 +1650,7 @@ const Profile: React.FC<ProfileProps> = ({ telegramId, isDarkTheme, toggleTheme,
       const profileData = await profileResponse.json();
       
       // Основные данные профиля уже содержат всю необходимую информацию
-      // из таблиц users, orders, referrals, yuan_purchases
-      // total_savings уже правильно рассчитано на бэкенде:
-      // total = сумма estimated_savings из orders + сумма savings из yuan_purchases
+      // ВКР: total_savings.total на бэкенде = только estimated_savings по заказам (paid/completed), без юаней.
       // Не нужно перезаписывать это значение!
       
       // Загружаем реальные данные геймификации
@@ -2298,7 +2296,7 @@ const Profile: React.FC<ProfileProps> = ({ telegramId, isDarkTheme, toggleTheme,
           </StatItem>
           <StatItem $isDark={isDarkTheme}>
             <StatValue>{formatCurrency(Number(profileData.statistics.total_savings?.total) || 0)}</StatValue>
-            <StatLabel>Сэкономлено</StatLabel>
+            <StatLabel>Сэкономлено (заказы)</StatLabel>
           </StatItem>
         </UserStats>
       </UserCard>
