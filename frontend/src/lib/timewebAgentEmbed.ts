@@ -44,6 +44,114 @@ export function tryCloseTimewebAgent(): void {
 
 const TIMWEB_USER_CLOSE_EVENT = 'timeweb-embed-closed-by-user';
 
+/** Крестик в виджете не всегда вызывает window.twc_agent_close — смотрим iframe / большой fixed-слой с чатом. */
+function isTimewebWidgetLikelyOpen(): boolean {
+  for (const f of document.querySelectorAll('iframe')) {
+    const src = f.getAttribute('src') || '';
+    if (!src) continue;
+    if (/timeweb|cloud-ai|api\/v1\/cloud-ai/i.test(src)) return true;
+  }
+  for (const el of Array.from(document.body.querySelectorAll('body > *'))) {
+    if (!(el instanceof HTMLElement)) continue;
+    if (getComputedStyle(el).position !== 'fixed') continue;
+    const r = el.getBoundingClientRect();
+    if (r.width < 200 || r.height < 200 || r.bottom < 30) continue;
+    const t = el.innerText || '';
+    if (t.includes('Введите сообщение') || t.includes('Задайте мне')) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/** Метит первый реальный open — помогает, если панель не попала в селекторы выше. */
+export function installTimewebOpenUserMarkerOnce(): void {
+  const w = window as unknown as {
+    __poizonicTwcOpenPatched?: boolean;
+    twc_agent_open?: (...a: unknown[]) => unknown;
+  };
+  if (w.__poizonicTwcOpenPatched) return;
+  if (typeof w.twc_agent_open !== 'function') return;
+  w.__poizonicTwcOpenPatched = true;
+  const orig = w.twc_agent_open;
+  w.twc_agent_open = function (this: unknown, ...a: unknown[]) {
+    (window as unknown as { __poizonicTwcUserOpened?: boolean }).__poizonicTwcUserOpened = true;
+    return (orig as (...x: unknown[]) => unknown).apply(this, a);
+  };
+}
+
+/**
+ * Переход «панель была открыта → пропала» (крестик), с debounce, чтобы не ловить кратковременные глитчи.
+ */
+export function startTimewebWidgetDomCloseDetection(
+  onUserClosed: () => void,
+  debounceMs = 600
+): () => void {
+  if (!useTimewebScriptEmbed()) return () => undefined;
+  let wasOpen = false;
+  let closeTimer: number | null = null;
+  const tick = () => {
+    const open = isTimewebWidgetLikelyOpen();
+    if (open) {
+      wasOpen = true;
+      if (closeTimer != null) {
+        window.clearTimeout(closeTimer);
+        closeTimer = null;
+      }
+    } else if (wasOpen) {
+      if (closeTimer == null) {
+        closeTimer = window.setTimeout(() => {
+          closeTimer = null;
+          if (!isTimewebWidgetLikelyOpen()) {
+            wasOpen = false;
+            onUserClosed();
+          }
+        }, debounceMs);
+      }
+    }
+  };
+  const pollId = window.setInterval(tick, 200);
+  return () => {
+    if (closeTimer != null) window.clearTimeout(closeTimer);
+    if (pollId != null) window.clearInterval(pollId);
+  };
+}
+
+function installTimewebPostMessageCloseListener(notify: () => void): () => void {
+  const h = (e: MessageEvent) => {
+    const o = String(e.origin || '');
+    if (!o.includes('timeweb.cloud') && !o.includes('timeweb.com')) return;
+    const d = e.data;
+    if (d == null || typeof d !== 'object') return;
+    const r = d as { type?: string; event?: string; action?: string; state?: string };
+    const t = [r.type, r.event, r.action, r.state]
+      .map(x => (x == null ? '' : String(x)))
+      .join(' ');
+    if (t && /close|hidden|minimize|closed/i.test(t)) {
+      notify();
+    }
+  };
+  window.addEventListener('message', h);
+  return () => window.removeEventListener('message', h);
+}
+
+/**
+ * «Крестик» часто не вызывает window.twc_agent_close — дублируем выход: DOM (iframe исчез) + postMessage.
+ * Все пути ведут в одно событие, которое ловит AiAssistant.
+ */
+export function startTimewebUserExitStrategies(): () => void {
+  if (!useTimewebScriptEmbed()) return () => undefined;
+  const report = () => {
+    window.dispatchEvent(new CustomEvent(TIMWEB_USER_CLOSE_EVENT));
+  };
+  const a = startTimewebWidgetDomCloseDetection(report);
+  const b = installTimewebPostMessageCloseListener(report);
+  return () => {
+    a();
+    b();
+  };
+}
+
 /** TimeWeb: один раз оборачиваем twc_agent_close, чтобы отличать закрытие из приложения от крестика в виджете. */
 function installTimewebCloseUserHookOnce(): void {
   if (typeof window.twc_agent_close !== 'function') return;
@@ -84,6 +192,7 @@ export function startWatchForTimewebCloseUserHook(maxMs = 15000): () => void {
   }
   const t0 = performance.now();
   const id = window.setInterval(() => {
+    installTimewebOpenUserMarkerOnce();
     installTimewebCloseUserHookOnce();
     const w = window as unknown as { __twcCloseHookInstalled?: boolean };
     if (w.__twcCloseHookInstalled || performance.now() - t0 > maxMs) {
