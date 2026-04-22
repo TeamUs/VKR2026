@@ -1086,19 +1086,24 @@ const App: React.FC = () => {
   };
 
   const navigateTo = (view: string) => {
-    setCurrentView(view as AppView);
-
+    /** TimeWeb embed.js: открываем виджет поверх текущего экрана, раздел «ИИ-помощник» не показываем. */
     if (view === 'ai-assistant' && useTimewebScriptEmbed()) {
       void ensureTimewebAgentScript()
         .then(() => {
           tryOpenTimewebAgent();
         })
         .catch(() => {
-          /* ошибка сети — экран ИИ подставит подсказку */
+          /* сеть / домен — можно повторить клик по кнопке */
         });
       scheduleTimewebAgentOpenJitter();
+      if (window.Telegram?.WebApp?.HapticFeedback) {
+        window.Telegram.WebApp.HapticFeedback.impactOccurred('light');
+      }
+      return;
     }
-    
+
+    setCurrentView(view as AppView);
+
     // Сбрасываем скролл при переходе на главное меню или раздел заказа
     if (view === 'main' || view === 'order') {
       window.scrollTo(0, 0);
@@ -1227,7 +1232,7 @@ const App: React.FC = () => {
               </Suspense>
             )}
             
-            {currentView === 'ai-assistant' && (
+            {currentView === 'ai-assistant' && !useTimewebScriptEmbed() && (
               <AiAssistant onNavigate={navigateTo} toggleTheme={toggleTheme} isDarkTheme={isDarkTheme} />
             )}
             

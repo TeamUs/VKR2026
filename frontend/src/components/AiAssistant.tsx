@@ -1,21 +1,9 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useMemo } from 'react';
 import styled from 'styled-components';
-import {
-  cancelAllTimewebOpenJitter,
-  ensureTimewebAgentScript,
-  scheduleTimewebAgentOpenJitter,
-  startTimewebOpenPoll,
-  startTimewebUserExitStrategies,
-  startWatchForTimewebCloseUserHook,
-  timewebUserCloseEvent,
-  tryCloseTimewebAgent,
-  tryOpenTimewebAgent,
-} from '../lib/timewebAgentEmbed';
 
 /**
- * Экран ИИ-помощника. TimeWeb: скрипт предзагружается в App, при клике «ИИ-помощник» в меню
- * вызывается twc_agent_open; здесь — догоняющий опрос и закрытие панели при уходе с экрана.
- * VITE_AI_ASSISTANT_EMBED_URL — режим iframe вместо TimeWeb-скрипта.
+ * Экран «ИИ-помощник» только в режиме iframe (VITE_AI_ASSISTANT_EMBED_URL).
+ * Встроенный TimeWeb-скрипт: чат открывается с главного меню, без этого экрана (см. App navigateTo).
  */
 
 const Page = styled.div`
@@ -118,36 +106,25 @@ const ToggleIconDark = styled.span<{ $isDark: boolean }>`
   font-size: 0.7rem;
 `;
 
-const EmbedWrap = styled.div<{ $clip?: boolean }>`
+const EmbedWrap = styled.div`
   margin: 0 16px;
   border-radius: 16px;
-  overflow: ${p => (p.$clip ? 'hidden' : 'visible')};
+  overflow: hidden;
   border: 1px solid var(--border-color);
   background: var(--bg-card);
   min-height: min(72vh, 640px);
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
-  position: relative;
 `;
 
-const ScriptEmbedPanel = styled.div`
-  min-height: min(64vh, 580px);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: 20px 16px 28px;
+const Placeholder = styled.p`
+  margin: 0 16px;
+  padding: 20px;
   text-align: center;
   color: var(--text-secondary);
-  font-size: 0.9rem;
   line-height: 1.5;
-`;
-
-const EmbedNote = styled.p`
-  margin: 0;
-  max-width: 32rem;
   code {
     font-family: ui-monospace, monospace;
-    font-size: 0.82em;
+    font-size: 0.85em;
     background: var(--bg-secondary);
     padding: 2px 6px;
     border-radius: 6px;
@@ -170,6 +147,12 @@ const ContactSection = styled.div`
   background: transparent;
 `;
 
+const Subtitle2 = styled.p`
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--text-primary);
+`;
+
 const ContactButton = styled.button`
   margin-top: 10px;
   background: var(--matte-red);
@@ -184,17 +167,6 @@ const ContactButton = styled.button`
   }
 `;
 
-const SubtleButton = styled.button`
-  margin-top: 10px;
-  background: none;
-  border: none;
-  color: var(--terracotta);
-  font-size: 0.85rem;
-  text-decoration: underline;
-  cursor: pointer;
-  padding: 4px 8px;
-`;
-
 interface AiAssistantProps {
   onNavigate: (view: string) => void;
   toggleTheme: () => void;
@@ -202,10 +174,6 @@ interface AiAssistantProps {
 }
 
 const AiAssistant: React.FC<AiAssistantProps> = ({ onNavigate, toggleTheme, isDarkTheme }) => {
-  const onNavigateRef = useRef(onNavigate);
-  onNavigateRef.current = onNavigate;
-  const exitOnceRef = useRef(false);
-
   const embedUrl = useMemo(
     () => (import.meta.env.VITE_AI_ASSISTANT_EMBED_URL || '').trim(),
     []
@@ -214,63 +182,6 @@ const AiAssistant: React.FC<AiAssistantProps> = ({ onNavigate, toggleTheme, isDa
     () => import.meta.env.VITE_AI_ASSISTANT_EMBED_HEIGHT || 'min(72vh, 640px)',
     []
   );
-  const [scriptEmbedError, setScriptEmbedError] = useState<string | null>(null);
-
-  const handleRetryOpen = useCallback(() => {
-    if (tryOpenTimewebAgent()) {
-      setScriptEmbedError(null);
-      return;
-    }
-    setScriptEmbedError(
-      'Скрипт TimeWeb ещё не готов. Подождите или проверьте домен в панели агента (www и без www — отдельно).'
-    );
-  }, []);
-
-  useEffect(() => {
-    if (embedUrl) return;
-
-    setScriptEmbedError(null);
-    exitOnceRef.current = false;
-    let unJitter: (() => void) | undefined;
-    let unPoll: (() => void) | null = null;
-    const unWatchClose = startWatchForTimewebCloseUserHook();
-    const unExitStrategies = startTimewebUserExitStrategies();
-
-    const onWidgetClosedByUser = () => {
-      if (exitOnceRef.current) return;
-      exitOnceRef.current = true;
-      try {
-        (window as unknown as { __poizonicTwcUserOpened?: boolean }).__poizonicTwcUserOpened = false;
-      } catch {
-        /* ignore */
-      }
-      cancelAllTimewebOpenJitter();
-      onNavigateRef.current('main');
-    };
-    window.addEventListener(timewebUserCloseEvent, onWidgetClosedByUser as EventListener);
-
-    void ensureTimewebAgentScript()
-      .then(() => {
-        if (!tryOpenTimewebAgent()) {
-          unJitter = scheduleTimewebAgentOpenJitter();
-          unPoll = startTimewebOpenPoll() ?? (() => undefined);
-        }
-      })
-      .catch(() => {
-        setScriptEmbedError(
-          'Не удалось загрузить embed.js. Проверьте сеть, HTTPS и разрешённые домены в панели TimeWeb AI.'
-        );
-      });
-
-    return () => {
-      window.removeEventListener(timewebUserCloseEvent, onWidgetClosedByUser as EventListener);
-      unExitStrategies();
-      unWatchClose();
-      unJitter?.();
-      unPoll?.();
-      tryCloseTimewebAgent();
-    };
-  }, [embedUrl]);
 
   const handleContactManager = () => {
     if (window.Telegram?.WebApp?.openTelegramLink) {
@@ -296,40 +207,25 @@ const AiAssistant: React.FC<AiAssistantProps> = ({ onNavigate, toggleTheme, isDa
       </Header>
 
       {embedUrl ? (
-        <EmbedWrap $clip>
+        <EmbedWrap>
           <StyledIframe
             title="ИИ-помощник"
             src={embedUrl}
             style={{ height: embedHeight, minHeight: '320px' }}
-            // Разрешите нужные флаги, когда подключите реальный виджет (часто нужны scripts + forms).
             sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox"
             referrerPolicy="no-referrer-when-downgrade"
             allow="clipboard-write; microphone *"
           />
         </EmbedWrap>
       ) : (
-        <EmbedWrap>
-          <ScriptEmbedPanel>
-            <EmbedNote>Чат TimeWeb открывается сразу при нажатии «ИИ-помощник» в главном меню (поверх текущего экрана).</EmbedNote>
-            {scriptEmbedError && (
-              <>
-                <EmbedNote
-                  style={{ marginTop: 12, color: 'var(--matte-red, #c45)' }}
-                  role="alert"
-                >
-                  {scriptEmbedError}
-                </EmbedNote>
-                <SubtleButton type="button" onClick={handleRetryOpen}>
-                  Повторить открытие
-                </SubtleButton>
-              </>
-            )}
-          </ScriptEmbedPanel>
-        </EmbedWrap>
+        <Placeholder>
+          Не задан <code>VITE_AI_ASSISTANT_EMBED_URL</code>. С TimeWeb-скриптом чат открывается из главного меню без
+          этого раздела.
+        </Placeholder>
       )}
 
       <ContactSection>
-        <Subtitle style={{ color: 'var(--text-primary)' }}>Нужен менеджер?</Subtitle>
+        <Subtitle2>Нужен менеджер?</Subtitle2>
         <ContactButton type="button" onClick={handleContactManager}>
           Написать в Telegram
         </ContactButton>
