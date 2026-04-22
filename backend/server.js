@@ -5,6 +5,7 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
+const crypto = require('crypto');
 const { execSync } = require('child_process');
 const https = require('https');
 const axios = require('axios');
@@ -102,6 +103,18 @@ const { startScheduler, testNotification, checkExpiredDiscounts, checkDiscountsE
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+const DEFAULT_ADMIN_PASSWORD_HASH = '4813494d137e1631bba301d5acab6e7bb7aa74ce1185d456565ef51d737677b2';
+const ADMIN_PASSWORD_HASH = (process.env.ADMIN_PASSWORD_HASH || DEFAULT_ADMIN_PASSWORD_HASH).trim().toLowerCase();
+const ADMIN_TELEGRAM_IDS = (process.env.ADMIN_TELEGRAM_IDS || '690296532,7696515351')
+  .split(',')
+  .map(id => id.trim())
+  .filter(Boolean);
+const ADMIN_SESSION_TTL_MS = 8 * 60 * 60 * 1000; // 8 hours
+const ADMIN_SESSION_COOKIE = 'admin_session';
+const ADMIN_SESSION_SECRET = process.env.ADMIN_SESSION_SECRET
+  || process.env.SESSION_SECRET
+  || `${process.env.BOT_TOKEN}:${process.env.DB_PASSWORD}`;
+
 // Middleware
 // CORS настройки для Telegram Mini App
 app.use(cors({
@@ -135,6 +148,68 @@ app.use('/api/user/orders', (req, res, next) => {
 
 // Статическая раздача загруженных файлов (отзывы)
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+
+function safeEqualHex(expectedHex, actualHex) {
+  const expected = Buffer.from((expectedHex || '').toLowerCase(), 'hex');
+  const actual = Buffer.from((actualHex || '').toLowerCase(), 'hex');
+  if (expected.length === 0 || expected.length !== actual.length) {
+    return false;
+  }
+  return crypto.timingSafeEqual(expected, actual);
+}
+
+function hashPassword(password) {
+  return crypto.createHash('sha256').update(String(password || '')).digest('hex');
+}
+
+function signAdminPayload(payloadBase64) {
+  return crypto.createHmac('sha256', ADMIN_SESSION_SECRET).update(payloadBase64).digest('base64url');
+}
+
+function createAdminSessionToken(telegramId) {
+  const payload = {
+    telegramId: String(telegramId),
+    exp: Date.now() + ADMIN_SESSION_TTL_MS
+  };
+  const payloadBase64 = Buffer.from(JSON.stringify(payload)).toString('base64url');
+  const signature = signAdminPayload(payloadBase64);
+  return `${payloadBase64}.${signature}`;
+}
+
+function parseCookies(req) {
+  const cookieHeader = req.headers.cookie || '';
+  return cookieHeader.split(';').reduce((acc, item) => {
+    const [rawKey, ...rawValue] = item.trim().split('=');
+    if (!rawKey) return acc;
+    acc[rawKey] = decodeURIComponent(rawValue.join('=') || '');
+    return acc;
+  }, {});
+}
+
+function verifyAdminSessionToken(token) {
+  if (!token || !token.includes('.')) {
+    return { valid: false, reason: 'missing_or_malformed_token' };
+  }
+
+  const [payloadBase64, signature] = token.split('.');
+  const expectedSignature = signAdminPayload(payloadBase64);
+  if (!safeEqualHex(Buffer.from(expectedSignature).toString('hex'), Buffer.from(signature || '').toString('hex'))) {
+    return { valid: false, reason: 'invalid_signature' };
+  }
+
+  try {
+    const payload = JSON.parse(Buffer.from(payloadBase64, 'base64url').toString('utf8'));
+    if (!payload?.telegramId || !payload?.exp || payload.exp < Date.now()) {
+      return { valid: false, reason: 'expired_or_invalid_payload' };
+    }
+    if (!ADMIN_TELEGRAM_IDS.includes(String(payload.telegramId))) {
+      return { valid: false, reason: 'forbidden_telegram_id' };
+    }
+    return { valid: true, payload };
+  } catch (error) {
+    return { valid: false, reason: 'payload_parse_error' };
+  }
+}
 
 // Настройка multer для загрузки файлов
 const storage = multer.diskStorage({
@@ -2927,6 +3002,81 @@ app.get('/api/reviews', async (req, res) => {
     console.error('Ошибка получения отзывов:', error);
     res.status(500).json({ error: 'Ошибка получения отзывов' });
   }
+});
+
+// ========== ADMIN AUTH ==========
+app.post('/api/admin/auth/login', async (req, res) => {
+  try {
+    const { telegramId, password } = req.body || {};
+
+    if (!telegramId || !password) {
+      return res.status(400).json({ success: false, error: 'telegramId и password обязательны' });
+    }
+
+    const normalizedTelegramId = String(telegramId);
+    if (!ADMIN_TELEGRAM_IDS.includes(normalizedTelegramId)) {
+      return res.status(403).json({ success: false, error: 'Доступ запрещен' });
+    }
+
+    const passwordHash = hashPassword(password);
+    if (!safeEqualHex(ADMIN_PASSWORD_HASH, passwordHash)) {
+      return res.status(401).json({ success: false, error: 'Неверный пароль' });
+    }
+
+    const sessionToken = createAdminSessionToken(normalizedTelegramId);
+    const isSecureCookie = process.env.NODE_ENV === 'production';
+    const cookieParts = [
+      `${ADMIN_SESSION_COOKIE}=${sessionToken}`,
+      'Path=/',
+      'HttpOnly',
+      'SameSite=Lax',
+      `Max-Age=${Math.floor(ADMIN_SESSION_TTL_MS / 1000)}`
+    ];
+    if (isSecureCookie) cookieParts.push('Secure');
+
+    res.setHeader('Set-Cookie', cookieParts.join('; '));
+    return res.json({ success: true, message: 'Авторизация администратора успешна' });
+  } catch (error) {
+    console.error('Ошибка admin auth/login:', error);
+    return res.status(500).json({ success: false, error: 'Ошибка авторизации' });
+  }
+});
+
+app.post('/api/admin/auth/logout', (req, res) => {
+  const isSecureCookie = process.env.NODE_ENV === 'production';
+  const cookieParts = [
+    `${ADMIN_SESSION_COOKIE}=`,
+    'Path=/',
+    'HttpOnly',
+    'SameSite=Lax',
+    'Max-Age=0'
+  ];
+  if (isSecureCookie) cookieParts.push('Secure');
+  res.setHeader('Set-Cookie', cookieParts.join('; '));
+  return res.json({ success: true });
+});
+
+app.use('/api/admin', (req, res, next) => {
+  if (req.path === '/auth/login' || req.path === '/auth/logout') {
+    return next();
+  }
+
+  const cookies = parseCookies(req);
+  const sessionToken = cookies[ADMIN_SESSION_COOKIE];
+  const verification = verifyAdminSessionToken(sessionToken);
+
+  if (!verification.valid) {
+    return res.status(401).json({
+      success: false,
+      error: 'Требуется авторизация администратора',
+      reason: verification.reason
+    });
+  }
+
+  req.admin = {
+    telegramId: verification.payload.telegramId
+  };
+  return next();
 });
 
 // Получение средней оценки отзывов

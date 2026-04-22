@@ -1260,8 +1260,6 @@ const Profile: React.FC<ProfileProps> = ({ telegramId, isDarkTheme, toggleTheme,
       const userId = user?.id?.toString();
       
       // Доступ только для администратора и менеджера
-      // ADMIN_TELEGRAM_ID: 690296532
-      // MANAGER_TELEGRAM_ID: 7696515351
       const adminIds = ['690296532', '7696515351'];
       return adminIds.includes(userId || '');
     };
@@ -1910,20 +1908,28 @@ const Profile: React.FC<ProfileProps> = ({ telegramId, isDarkTheme, toggleTheme,
     return icons[category] || '🏆';
   };
 
-  // Функция для проверки пароля
+  // Функция для проверки пароля через backend (ID + пароль)
   const checkPassword = async (inputPassword: string) => {
     try {
-      // Хешируем пароль для сравнения
-      const encoder = new TextEncoder();
-      const data = encoder.encode(inputPassword);
-      const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-      const hashArray = Array.from(new Uint8Array(hashBuffer));
-      const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-      
-      // Хеш пароля "root" (SHA-256)
-      const rootHash = '4813494d137e1631bba301d5acab6e7bb7aa74ce1185d456565ef51d737677b2';
-      
-      return hashHex === rootHash;
+      const tg = window.Telegram?.WebApp;
+      const userId = tg?.initDataUnsafe?.user?.id?.toString();
+      if (!userId) {
+        return false;
+      }
+
+      const response = await fetch('api/admin/auth/login', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        credentials: 'include',
+        body: JSON.stringify({
+          telegramId: userId,
+          password: inputPassword
+        })
+      });
+
+      return response.ok;
     } catch (error) {
       console.error('Ошибка проверки пароля:', error);
       return false;

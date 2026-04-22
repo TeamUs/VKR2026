@@ -1062,6 +1062,8 @@ const PriceCalculator: React.FC<PriceCalculatorProps> = ({ onNavigate, toggleThe
     HapticFeedback.medium();
 
     try {
+      const telegramId = (window as any).Telegram?.WebApp?.initDataUnsafe?.user?.id;
+
       const response = await fetch('api/calculate-price', {
         method: 'POST',
         headers: {
@@ -1070,7 +1072,8 @@ const PriceCalculator: React.FC<PriceCalculatorProps> = ({ onNavigate, toggleThe
         body: JSON.stringify({
           price: priceNum,
           weight: selectedCategory.weight,
-          category: selectedCategory.value
+          category: selectedCategory.value,
+          telegramId: telegramId || undefined
         }),
       });
 
