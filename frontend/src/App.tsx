@@ -11,6 +11,12 @@ import Reviews from './components/Reviews';
 import ExchangeRate from './components/ExchangeRate';
 import BottomNavigation from './components/BottomNavigation';
 import { HapticFeedback, isBackButtonSupported } from './utils/hapticFeedback';
+import {
+  ensureTimewebAgentScript,
+  scheduleTimewebAgentOpenJitter,
+  tryOpenTimewebAgent,
+  useTimewebScriptEmbed,
+} from './lib/timewebAgentEmbed';
 
 // Lazy load new components
 const Profile = React.lazy(() => import('./components/Profile'));
@@ -883,6 +889,13 @@ const App: React.FC = () => {
     return () => clearTimeout(timer);
   }, []); // Выполняется только один раз при монтировании компонента
 
+  /** Ранний старт TimeWeb embed.js, чтобы к клику «ИИ-помощник» скрипт чаще уже был в памяти. */
+  useEffect(() => {
+    if (useTimewebScriptEmbed()) {
+      void ensureTimewebAgentScript().catch(() => {});
+    }
+  }, []);
+
   useEffect(() => {
     console.log('[App] useEffect запущен');
     
@@ -1074,6 +1087,17 @@ const App: React.FC = () => {
 
   const navigateTo = (view: string) => {
     setCurrentView(view as AppView);
+
+    if (view === 'ai-assistant' && useTimewebScriptEmbed()) {
+      void ensureTimewebAgentScript()
+        .then(() => {
+          tryOpenTimewebAgent();
+        })
+        .catch(() => {
+          /* ошибка сети — экран ИИ подставит подсказку */
+        });
+      scheduleTimewebAgentOpenJitter();
+    }
     
     // Сбрасываем скролл при переходе на главное меню или раздел заказа
     if (view === 'main' || view === 'order') {

@@ -1,18 +1,17 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import styled from 'styled-components';
-
-/** Скрипт с панели TimeWeb «Вставка»; collapsed=true + явный twc_agent_open() после загрузки (как в примере). */
-const DEFAULT_TIMEWEB_EMBED_SCRIPT =
-  'https://timeweb.cloud/api/v1/cloud-ai/agents/545b3436-0c1a-423f-bfa2-a8445797a751/embed.js?collapsed=true';
-const TIMWEB_EMBED_SCRIPT_ID = 'poizonic-timeweb-ai-embed-js';
-const TW_OPEN_POLL_MS = 200;
-const TW_OPEN_MAX_ATTEMPTS = 50;
+import {
+  ensureTimewebAgentScript,
+  scheduleTimewebAgentOpenJitter,
+  startTimewebOpenPoll,
+  tryCloseTimewebAgent,
+  tryOpenTimewebAgent,
+} from '../lib/timewebAgentEmbed';
 
 /**
- * Экран ИИ-помощника.
- * · TimeWeb: подключается embed.js, после onload вызывается window.twc_agent_open() (иначе панель может остаться свёрнутой).
- * · VITE_TIMEWEB_AI_EMBED_SCRIPT — полный URL из вкладки «Вставка».
- * · VITE_AI_ASSISTANT_EMBED_URL — приоритетно: вместо скрипта используется iframe.
+ * Экран ИИ-помощника. TimeWeb: скрипт предзагружается в App, при клике «ИИ-помощник» в меню
+ * вызывается twc_agent_open; здесь — догоняющий опрос и закрытие панели при уходе с экрана.
+ * VITE_AI_ASSISTANT_EMBED_URL — режим iframe вместо TimeWeb-скрипта.
  */
 
 const Page = styled.div`
@@ -181,20 +180,15 @@ const ContactButton = styled.button`
   }
 `;
 
-const OpenChatButton = styled.button`
-  margin-top: 16px;
-  background: var(--terracotta);
+const SubtleButton = styled.button`
+  margin-top: 10px;
+  background: none;
   border: none;
-  border-radius: 12px;
-  padding: 12px 24px;
-  color: var(--bg-primary);
-  font-weight: 600;
-  font-size: 1rem;
+  color: var(--terracotta);
+  font-size: 0.85rem;
+  text-decoration: underline;
   cursor: pointer;
-  box-shadow: 0 4px 12px var(--shadow-card);
-  &:hover {
-    filter: brightness(1.05);
-  }
+  padding: 4px 8px;
 `;
 
 interface AiAssistantProps {
@@ -208,80 +202,48 @@ const AiAssistant: React.FC<AiAssistantProps> = ({ onNavigate, toggleTheme, isDa
     () => (import.meta.env.VITE_AI_ASSISTANT_EMBED_URL || '').trim(),
     []
   );
-  const timewebScriptUrl = useMemo(() => {
-    const fromEnv = (import.meta.env.VITE_TIMEWEB_AI_EMBED_SCRIPT || '').trim();
-    return fromEnv || DEFAULT_TIMEWEB_EMBED_SCRIPT;
-  }, []);
   const embedHeight = useMemo(
     () => import.meta.env.VITE_AI_ASSISTANT_EMBED_HEIGHT || 'min(72vh, 640px)',
     []
   );
   const [scriptEmbedError, setScriptEmbedError] = useState<string | null>(null);
 
-  const callTimewebOpen = useCallback((): boolean => {
-    if (typeof window.twc_agent_open !== 'function') return false;
-    try {
-      window.twc_agent_open();
-      return true;
-    } catch {
-      return false;
-    }
-  }, []);
-
-  const handleOpenChat = useCallback(() => {
-    if (callTimewebOpen()) {
+  const handleRetryOpen = useCallback(() => {
+    if (tryOpenTimewebAgent()) {
       setScriptEmbedError(null);
       return;
     }
     setScriptEmbedError(
-      'Чат ещё не готов (twc_agent_open). Подождите пару секунд или убедитесь, что домен страницы совпадает с разрешённым в TimeWeb (включая www / поддомен).'
+      'Скрипт TimeWeb ещё не готов. Подождите или проверьте домен в панели агента (www и без www — отдельно).'
     );
-  }, [callTimewebOpen]);
+  }, []);
 
   useEffect(() => {
     if (embedUrl) return;
 
     setScriptEmbedError(null);
-    document.getElementById(TIMWEB_EMBED_SCRIPT_ID)?.remove();
+    let unJitter: (() => void) | undefined;
+    let unPoll: (() => void) | null = null;
 
-    let pollId: number | null = null;
-
-    const startOpenPolling = () => {
-      if (callTimewebOpen()) return;
-      let n = 0;
-      pollId = window.setInterval(() => {
-        n += 1;
-        if (callTimewebOpen() || n >= TW_OPEN_MAX_ATTEMPTS) {
-          if (pollId != null) window.clearInterval(pollId);
-          pollId = null;
+    void ensureTimewebAgentScript()
+      .then(() => {
+        if (!tryOpenTimewebAgent()) {
+          unJitter = scheduleTimewebAgentOpenJitter();
+          unPoll = startTimewebOpenPoll() ?? (() => undefined);
         }
-      }, TW_OPEN_POLL_MS);
-    };
-
-    const s = document.createElement('script');
-    s.id = TIMWEB_EMBED_SCRIPT_ID;
-    s.async = true;
-    s.src = timewebScriptUrl;
-    s.onload = () => {
-      if (!callTimewebOpen()) startOpenPolling();
-    };
-    s.onerror = () =>
-      setScriptEmbedError('Не удалось загрузить скрипт embed.js. Проверьте сеть, HTTPS и разрешённые домены в панели TimeWeb AI.');
-
-    document.body.appendChild(s);
+      })
+      .catch(() => {
+        setScriptEmbedError(
+          'Не удалось загрузить embed.js. Проверьте сеть, HTTPS и разрешённые домены в панели TimeWeb AI.'
+        );
+      });
 
     return () => {
-      if (pollId != null) window.clearInterval(pollId);
-      s.onerror = null;
-      s.onload = null;
-      try {
-        window.twc_agent_close?.();
-      } catch {
-        /* ignore */
-      }
-      s.remove();
+      unJitter?.();
+      unPoll?.();
+      tryCloseTimewebAgent();
     };
-  }, [embedUrl, timewebScriptUrl, callTimewebOpen]);
+  }, [embedUrl]);
 
   const handleContactManager = () => {
     if (window.Telegram?.WebApp?.openTelegramLink) {
@@ -321,22 +283,19 @@ const AiAssistant: React.FC<AiAssistantProps> = ({ onNavigate, toggleTheme, isDa
       ) : (
         <EmbedWrap>
           <ScriptEmbedPanel>
-            <EmbedNote>
-              Окно чата TimeWeb открывается поверх экрана. Если панель не появилась, нажмите кнопку ниже — в панели агента
-              тот же вызов, что <code>twc_agent_open()</code>. В разделе «Домены» укажите <strong>точный</strong> хост
-              (например, <code>www.poizonic.ru</code> и <code>poizonic.ru</code> — это разные записи) и тот, с которого
-              открыт Web App в настройках бота.
-            </EmbedNote>
-            <OpenChatButton type="button" onClick={handleOpenChat}>
-              Открыть чат
-            </OpenChatButton>
+            <EmbedNote>Чат TimeWeb открывается сразу при нажатии «ИИ-помощник» в главном меню (поверх текущего экрана).</EmbedNote>
             {scriptEmbedError && (
-              <EmbedNote
-                style={{ marginTop: 12, color: 'var(--matte-red, #c45)' }}
-                role="alert"
-              >
-                {scriptEmbedError}
-              </EmbedNote>
+              <>
+                <EmbedNote
+                  style={{ marginTop: 12, color: 'var(--matte-red, #c45)' }}
+                  role="alert"
+                >
+                  {scriptEmbedError}
+                </EmbedNote>
+                <SubtleButton type="button" onClick={handleRetryOpen}>
+                  Повторить открытие
+                </SubtleButton>
+              </>
             )}
           </ScriptEmbedPanel>
         </EmbedWrap>
