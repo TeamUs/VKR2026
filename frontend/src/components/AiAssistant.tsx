@@ -1,9 +1,12 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import styled from 'styled-components';
 import {
+  cancelAllTimewebOpenJitter,
   ensureTimewebAgentScript,
   scheduleTimewebAgentOpenJitter,
   startTimewebOpenPoll,
+  startWatchForTimewebCloseUserHook,
+  timewebUserCloseEvent,
   tryCloseTimewebAgent,
   tryOpenTimewebAgent,
 } from '../lib/timewebAgentEmbed';
@@ -198,6 +201,9 @@ interface AiAssistantProps {
 }
 
 const AiAssistant: React.FC<AiAssistantProps> = ({ onNavigate, toggleTheme, isDarkTheme }) => {
+  const onNavigateRef = useRef(onNavigate);
+  onNavigateRef.current = onNavigate;
+
   const embedUrl = useMemo(
     () => (import.meta.env.VITE_AI_ASSISTANT_EMBED_URL || '').trim(),
     []
@@ -224,6 +230,13 @@ const AiAssistant: React.FC<AiAssistantProps> = ({ onNavigate, toggleTheme, isDa
     setScriptEmbedError(null);
     let unJitter: (() => void) | undefined;
     let unPoll: (() => void) | null = null;
+    const unWatchClose = startWatchForTimewebCloseUserHook();
+
+    const onWidgetClosedByUser = () => {
+      cancelAllTimewebOpenJitter();
+      onNavigateRef.current('main');
+    };
+    window.addEventListener(timewebUserCloseEvent, onWidgetClosedByUser as EventListener);
 
     void ensureTimewebAgentScript()
       .then(() => {
@@ -239,6 +252,8 @@ const AiAssistant: React.FC<AiAssistantProps> = ({ onNavigate, toggleTheme, isDa
       });
 
     return () => {
+      window.removeEventListener(timewebUserCloseEvent, onWidgetClosedByUser as EventListener);
+      unWatchClose();
       unJitter?.();
       unPoll?.();
       tryCloseTimewebAgent();
