@@ -15,3 +15,10 @@ interface ImportMetaEnv {
 interface ImportMeta {
   readonly env: ImportMetaEnv;
 }
+
+/** Telegram Web App, виджет TimeWeb AI (embed.js) */
+interface Window {
+  Telegram?: { WebApp?: { openTelegramLink?: (url: string) => void } };
+  twc_agent_open?: () => void;
+  twc_agent_close?: () => void;
+}
