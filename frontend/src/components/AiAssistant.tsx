@@ -1,10 +1,15 @@
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import styled from 'styled-components';
 
+/** Скрипт встраивания — по умолчанию collapsed=false, чтобы в разделе сразу был открыт чат (не только кнопка). */
+const DEFAULT_TIMEWEB_EMBED_SCRIPT =
+  'https://timeweb.cloud/api/v1/cloud-ai/agents/545b3436-0c1a-423f-bfa2-a8445797a751/embed.js?collapsed=false';
+const TIMWEB_EMBED_SCRIPT_ID = 'poizonic-timeweb-ai-embed-js';
+
 /**
- * Экран ИИ-помощника (на месте бывшего FAQ).
- * Встраивание: задайте VITE_AI_ASSISTANT_EMBED_URL на URL виджета/чата с Timeweb (или другого провайдера).
- * См. INTEGRATE_AI_ASSISTANT.md в корне mini_app_vkr.
+ * Экран ИИ-помощника.
+ * · По умолчанию подключается TimeWeb Cloud AI: embed.js (VITE_TIMEWEB_AI_EMBED_SCRIPT — опциональная подмена URL).
+ * · Если задан VITE_AI_ASSISTANT_EMBED_URL — вместо скрипта используется iframe (старый вариант).
  */
 
 const Page = styled.div`
@@ -21,6 +26,8 @@ const Header = styled.div`
   justify-content: space-between;
   margin-bottom: 20px;
   padding: 0 16px;
+  position: relative;
+  z-index: 20;
 `;
 
 const BackButton = styled.button`
@@ -105,14 +112,40 @@ const ToggleIconDark = styled.span<{ $isDark: boolean }>`
   font-size: 0.7rem;
 `;
 
-const EmbedWrap = styled.div`
+const EmbedWrap = styled.div<{ $clip?: boolean }>`
   margin: 0 16px;
   border-radius: 16px;
-  overflow: hidden;
+  overflow: ${p => (p.$clip ? 'hidden' : 'visible')};
   border: 1px solid var(--border-color);
   background: var(--bg-card);
   min-height: min(72vh, 640px);
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+  position: relative;
+`;
+
+const ScriptEmbedPanel = styled.div`
+  min-height: min(64vh, 580px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 20px 16px 28px;
+  text-align: center;
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+  line-height: 1.5;
+`;
+
+const EmbedNote = styled.p`
+  margin: 0;
+  max-width: 32rem;
+  code {
+    font-family: ui-monospace, monospace;
+    font-size: 0.82em;
+    background: var(--bg-secondary);
+    padding: 2px 6px;
+    border-radius: 6px;
+  }
 `;
 
 const StyledIframe = styled.iframe`
@@ -120,35 +153,6 @@ const StyledIframe = styled.iframe`
   border: none;
   display: block;
   background: var(--bg-secondary);
-`;
-
-const PlaceholderCard = styled.div`
-  margin: 0 16px;
-  padding: 20px;
-  border-radius: 16px;
-  background: var(--bg-card);
-  border: 1px solid var(--border-color);
-  color: var(--text-secondary);
-  font-size: 0.95rem;
-  line-height: 1.55;
-  box-shadow: 0 2px 12px var(--shadow-soft);
-
-  h2 {
-    margin: 0 0 12px 0;
-    font-size: 1.1rem;
-    color: var(--text-primary);
-  }
-  ul {
-    margin: 8px 0 0 18px;
-    padding: 0;
-  }
-  code {
-    font-family: ui-monospace, monospace;
-    font-size: 0.82rem;
-    background: var(--bg-secondary);
-    padding: 2px 6px;
-    border-radius: 6px;
-  }
 `;
 
 const ContactSection = styled.div`
@@ -185,10 +189,36 @@ const AiAssistant: React.FC<AiAssistantProps> = ({ onNavigate, toggleTheme, isDa
     () => (import.meta.env.VITE_AI_ASSISTANT_EMBED_URL || '').trim(),
     []
   );
+  const timewebScriptUrl = useMemo(() => {
+    const fromEnv = (import.meta.env.VITE_TIMEWEB_AI_EMBED_SCRIPT || '').trim();
+    return fromEnv || DEFAULT_TIMEWEB_EMBED_SCRIPT;
+  }, []);
   const embedHeight = useMemo(
     () => import.meta.env.VITE_AI_ASSISTANT_EMBED_HEIGHT || 'min(72vh, 640px)',
     []
   );
+  const [scriptEmbedError, setScriptEmbedError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (embedUrl) return;
+
+    setScriptEmbedError(null);
+    document.getElementById(TIMWEB_EMBED_SCRIPT_ID)?.remove();
+
+    const s = document.createElement('script');
+    s.id = TIMWEB_EMBED_SCRIPT_ID;
+    s.async = true;
+    s.src = timewebScriptUrl;
+    s.onerror = () =>
+      setScriptEmbedError('Не удалось загрузить виджет. Проверьте сеть и разрешённые домены в панели TimeWeb AI.');
+
+    document.body.appendChild(s);
+
+    return () => {
+      s.onerror = null;
+      s.remove();
+    };
+  }, [embedUrl, timewebScriptUrl]);
 
   const handleContactManager = () => {
     if (window.Telegram?.WebApp?.openTelegramLink) {
@@ -214,7 +244,7 @@ const AiAssistant: React.FC<AiAssistantProps> = ({ onNavigate, toggleTheme, isDa
       </Header>
 
       {embedUrl ? (
-        <EmbedWrap>
+        <EmbedWrap $clip>
           <StyledIframe
             title="ИИ-помощник"
             src={embedUrl}
@@ -226,22 +256,23 @@ const AiAssistant: React.FC<AiAssistantProps> = ({ onNavigate, toggleTheme, isDa
           />
         </EmbedWrap>
       ) : (
-        <PlaceholderCard>
-          <h2>Подключение ассистента</h2>
-          <p>
-            Сейчас чат не встроен: задайте переменную окружения при сборке фронта{' '}
-            <code>VITE_AI_ASSISTANT_EMBED_URL</code> — полный URL страницы виджета (Timeweb AI / iframe).
-          </p>
-          <p style={{ marginTop: 10 }}>
-            Опционально: <code>VITE_AI_ASSISTANT_EMBED_HEIGHT</code> — высота блока (CSS), по умолчанию{' '}
-            <code>min(72vh, 640px)</code>.
-          </p>
-          <ul>
-            <li>Создайте агента и получите URL для встраивания (iframe).</li>
-            <li>Добавьте переменные в <code>.env.production</code> на сервере перед <code>npm run build</code>.</li>
-            <li>Подробности — файл <code>INTEGRATE_AI_ASSISTANT.md</code> в проекте ВКР.</li>
-          </ul>
-        </PlaceholderCard>
+        <EmbedWrap>
+          <ScriptEmbedPanel>
+            <EmbedNote>
+              Чат агента TimeWeb (ваша база знаний) подключается к странице. Панель обычно фиксируется внизу экрана; при
+              отключённых доменах в панели агента скрипт не инициализируется — добавьте хост мини-приложения (и при
+              необходимости <code>web.telegram.org</code>).
+            </EmbedNote>
+            {scriptEmbedError && (
+              <EmbedNote
+                style={{ marginTop: 12, color: 'var(--matte-red, #c45)' }}
+                role="alert"
+              >
+                {scriptEmbedError}
+              </EmbedNote>
+            )}
+          </ScriptEmbedPanel>
+        </EmbedWrap>
       )}
 
       <ContactSection>
