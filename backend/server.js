@@ -6,6 +6,7 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 const crypto = require('crypto');
+const pii = require('./piiCrypto');
 const { execSync } = require('child_process');
 const https = require('https');
 const axios = require('axios');
@@ -103,7 +104,7 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 const DEFAULT_ADMIN_PASSWORD_HASH = '4813494d137e1631bba301d5acab6e7bb7aa74ce1185d456565ef51d737677b2';
-const ADMIN_PASSWORD_HASH = (process.env.ADMIN_PASSWORD_HASH || DEFAULT_ADMIN_PASSWORD_HASH).trim().toLowerCase();
+// Хэш админ-пароля: SHA-256 (64 hex) либо scrypt$N$r$p$saltB64$hashB64 (см. verifyAdminPassword)
 const ADMIN_TELEGRAM_IDS = (process.env.ADMIN_TELEGRAM_IDS || '690296532,7696515351')
   .split(',')
   .map(id => id.trim())
@@ -147,8 +148,49 @@ function safeEqualHex(expectedHex, actualHex) {
   return crypto.timingSafeEqual(expected, actual);
 }
 
+function safeEqualBuf(a, b) {
+  if (!a || !b || a.length !== b.length) {
+    return false;
+  }
+  return crypto.timingSafeEqual(a, b);
+}
+
 function hashPassword(password) {
   return crypto.createHash('sha256').update(String(password || '')).digest('hex');
+}
+
+/** scrypt$16384$8$1$<salt_b64>$<hash_b64> — предпочтительный формат ADMIN_PASSWORD_HASH */
+function verifyScryptPassword(plain, stored) {
+  const parts = String(stored).split('$');
+  if (parts[0] !== 'scrypt' || parts.length < 6) {
+    return false;
+  }
+  const N = parseInt(parts[1], 10);
+  const r = parseInt(parts[2], 10);
+  const p = parseInt(parts[3], 10);
+  if (!Number.isFinite(N) || !Number.isFinite(r) || !Number.isFinite(p)) {
+    return false;
+  }
+  const salt = Buffer.from(parts[4], 'base64');
+  const expected = Buffer.from(parts[5], 'base64');
+  if (expected.length === 0) {
+    return false;
+  }
+  const actual = crypto.scryptSync(String(plain), salt, expected.length, {
+    N, r, p, maxmem: 64 * 1024 * 1024
+  });
+  return safeEqualBuf(expected, actual);
+}
+
+function verifyAdminPassword(plain) {
+  const stored = (process.env.ADMIN_PASSWORD_HASH || DEFAULT_ADMIN_PASSWORD_HASH).trim();
+  if (stored.startsWith('scrypt$')) {
+    return verifyScryptPassword(plain, stored);
+  }
+  if (/^[0-9a-f]{64}$/i.test(stored)) {
+    return safeEqualHex(stored, hashPassword(plain));
+  }
+  return false;
 }
 
 function signAdminPayload(payloadBase64) {
@@ -182,7 +224,9 @@ function verifyAdminSessionToken(token) {
 
   const [payloadBase64, signature] = token.split('.');
   const expectedSignature = signAdminPayload(payloadBase64);
-  if (!safeEqualHex(Buffer.from(expectedSignature).toString('hex'), Buffer.from(signature || '').toString('hex'))) {
+  const a = Buffer.from(String(expectedSignature), 'utf8');
+  const b = Buffer.from(String(signature || ''), 'utf8');
+  if (!safeEqualBuf(a, b)) {
     return { valid: false, reason: 'invalid_signature' };
   }
 
@@ -2195,14 +2239,26 @@ app.post('/api/orders', async (req, res) => {
         'SELECT username FROM users WHERE telegram_id = ?',
         [telegramId]
       );
-      
-      const dbUsername = userRows.length > 0 ? userRows[0].username : username;
+
+      const fromDb = userRows.length > 0
+        ? pii.mapPiiOut({ username: userRows[0].username })
+        : null;
+      const dbUsername = (fromDb && fromDb.username != null) ? fromDb.username : username;
+
+      const oP = pii.mapPiiIn({
+        username: dbUsername,
+        full_name: fullName,
+        phone_number: phoneNumber,
+        pickup_point: pickupPoint,
+        pickup_point_address: pickupPointAddress,
+        comments: comments || ''
+      });
 
               // Создаем заказ (без товаров)
       const [result] = await dbConnection.execute(
                 `INSERT INTO orders (telegram_id, username, full_name, phone_number, pickup_point, pickup_point_address, comments, status) 
                  VALUES (?, ?, ?, ?, ?, ?, ?, 'pending')`,
-                [telegramId, dbUsername, fullName, phoneNumber, pickupPoint, pickupPointAddress, comments || '']
+                [telegramId, oP.username, oP.full_name, oP.phone_number, oP.pickup_point, oP.pickup_point_address, oP.comments]
               );
 
       const orderId = result.insertId;
@@ -2322,19 +2378,21 @@ app.post('/api/user/init', async (req, res) => {
         );
 
         if (existingUser.length > 0) {
+          const uP = pii.mapPiiIn({ username: username || null, full_name: fullName || null });
           // Обновляем существующего пользователя (username, full_name и last_activity)
           await dbConnection.execute(
             `UPDATE users SET username = ?, full_name = ?, last_activity = NOW() 
              WHERE telegram_id = ?`,
-            [username || null, fullName || null, telegramId]
+            [uP.username, uP.full_name, telegramId]
           );
         } else {
             // Создаем нового пользователя с базовой комиссией и временем активности
           // Автоматически присваиваем бронзовый уровень (0 XP требуется)
+          const uP = pii.mapPiiIn({ username: username || null, full_name: fullName || null });
           await dbConnection.execute(
             `INSERT INTO users (telegram_id, username, full_name, commission, current_level, last_activity) 
              VALUES (?, ?, ?, 1000, 'Bronze', NOW())`,
-            [telegramId, username || null, fullName || null]
+            [telegramId, uP.username, uP.full_name]
           );
         }
 
@@ -2684,7 +2742,7 @@ app.get('/api/user/orders', async (req, res) => {
 
     res.json({
       success: true,
-      orders: rows
+      orders: pii.mapPiiOutRows(rows)
     });
 
   } catch (error) {
@@ -2789,10 +2847,11 @@ app.get('/api/reviews', async (req, res) => {
         photosArray.push(review.photo_url);
       }
 
+      const base = pii.mapPiiOut(review);
       return {
-        ...review,
+        ...base,
         photos: photosArray,
-        photo_url: review.photo_url // Оставляем для обратной совместимости
+        photo_url: base.photo_url // Оставляем для обратной совместимости
       };
     }));
 
@@ -2825,8 +2884,7 @@ app.post('/api/admin/auth/login', async (req, res) => {
       return res.status(403).json({ success: false, error: 'Доступ запрещен' });
     }
 
-    const passwordHash = hashPassword(password);
-    if (!safeEqualHex(ADMIN_PASSWORD_HASH, passwordHash)) {
+    if (!verifyAdminPassword(password)) {
       return res.status(401).json({ success: false, error: 'Неверный пароль' });
     }
 
@@ -2939,12 +2997,14 @@ app.post('/api/reviews', upload.array('photos', 10), async (req, res) => {
     );
 
     if (existingUser.length === 0) {
+      const uP = pii.mapPiiIn({ username: username || null, full_name: full_name || null });
       // Автоматически присваиваем бронзовый уровень (0 XP требуется)
       await dbConnection.execute(`
         INSERT INTO users (telegram_id, commission, username, full_name, avatar_url, current_level, created_at)
         VALUES (?, 1000, ?, ?, ?, 'Bronze', NOW())
-      `, [telegram_id, username || null, full_name || null, avatar_url || null]);
+      `, [telegram_id, uP.username, uP.full_name, avatar_url || null]);
     } else if (avatar_url || username || full_name) {
+      const uP = pii.mapPiiIn({ username: username || null, full_name: full_name || null });
       // Обновляем данные пользователя, если они переданы (особенно avatar_url)
       await dbConnection.execute(`
         UPDATE users 
@@ -2952,7 +3012,7 @@ app.post('/api/reviews', upload.array('photos', 10), async (req, res) => {
             full_name = COALESCE(?, full_name),
             avatar_url = COALESCE(?, avatar_url)
         WHERE telegram_id = ?
-      `, [username || null, full_name || null, avatar_url || null, telegram_id]);
+      `, [uP.username, uP.full_name, avatar_url || null, telegram_id]);
     }
 
     // Обрабатываем фото: первое фото сохраняем в photo_url для обратной совместимости
@@ -2963,10 +3023,15 @@ app.post('/api/reviews', upload.array('photos', 10), async (req, res) => {
       photo_url = `/uploads/reviews/${photoFiles[0].filename}`;
     }
 
+    const rP = pii.mapPiiIn({
+      username: username || null,
+      full_name: full_name || null,
+      review_text: review_text || null
+    });
     const [result] = await dbConnection.execute(`
       INSERT INTO reviews (telegram_id, username, full_name, rating, review_text, photo_url, is_approved)
       VALUES (?, ?, ?, ?, ?, ?, 0)
-    `, [telegram_id, username, full_name, rating, review_text, photo_url]);
+    `, [telegram_id, rP.username, rP.full_name, rating, rP.review_text, photo_url]);
 
     const reviewId = result.insertId;
 
@@ -3062,7 +3127,7 @@ app.get('/api/admin/reviews', async (req, res) => {
     const totalPages = Math.ceil(total / limit);
     
     res.json({ 
-      reviews: rows,
+      reviews: pii.mapPiiOutRows(rows),
       total: total,
       page: page,
       limit: limit,
@@ -3098,7 +3163,7 @@ app.post('/api/admin/reviews/:reviewId/approve', async (req, res) => {
     `, [reviewId]);
     
     if (reviewRows.length > 0) {
-      const review = reviewRows[0];
+      const review = pii.mapPiiOut(reviewRows[0]);
       
       // ЗАКОММЕНТИРОВАНО: Отправка отзыва в канал отзывов (раскомментировать для продакшена)
       // Отправляем отзыв в канал отзывов
@@ -3626,7 +3691,7 @@ app.get('/api/profile', async (req, res) => {
       return res.status(404).json({ error: 'Пользователь не найден' });
     }
 
-    const user = userRows[0];
+    const user = pii.mapPiiOut(userRows[0]);
     
     // Получаем статистику заказов (оплаченные и завершенные)
     const [orderStats] = await dbConnection.execute(`
@@ -3751,13 +3816,14 @@ app.patch('/api/users', async (req, res) => {
       [telegram_id]
     );
     
+    const prof = pii.mapPiiIn({ full_name, phone_number });
     if (existingUser.length === 0) {
       // Создаем нового пользователя
       // Автоматически присваиваем бронзовый уровень (0 XP требуется)
       await dbConnection.execute(`
         INSERT INTO users (telegram_id, commission, full_name, phone_number, preferred_currency, avatar_url, current_level, created_at) 
         VALUES (?, 1000, ?, ?, ?, ?, 'Bronze', NOW())
-      `, [telegram_id, full_name, phone_number, preferred_currency, avatar_url]);
+      `, [telegram_id, prof.full_name, prof.phone_number, preferred_currency, avatar_url]);
     } else {
       // Обновляем существующего пользователя
       await dbConnection.execute(`
@@ -3767,7 +3833,7 @@ app.patch('/api/users', async (req, res) => {
             preferred_currency = COALESCE(?, preferred_currency),
             avatar_url = COALESCE(?, avatar_url)
         WHERE telegram_id = ?
-      `, [full_name, phone_number, preferred_currency, avatar_url, telegram_id]);
+      `, [prof.full_name, prof.phone_number, preferred_currency, avatar_url, telegram_id]);
     }
     
     res.json({ success: true, message: 'Профиль обновлен успешно' });
@@ -3809,15 +3875,16 @@ app.get('/api/orders-history', async (req, res) => {
 
     // Для каждого заказа получаем товары
     const ordersWithItems = await Promise.all(orders.map(async (order) => {
+      const oDec = pii.mapPiiOut(order);
       const [items] = await dbConnection.execute(`
         SELECT product_link, product_size, quantity, estimated_savings
         FROM order_items 
         WHERE order_id = ?
         ORDER BY id
-      `, [order.order_id]);
+      `, [oDec.order_id]);
 
       return {
-        ...order,
+        ...oDec,
         items: items,
         itemsCount: items.length,
         // Добавляем первый товар для отображения в истории (для обратной совместимости)
@@ -4166,7 +4233,7 @@ app.get('/api/admin/users', async (req, res) => {
       ORDER BY u.created_at DESC
     `);
     
-    res.json({ users });
+    res.json({ users: pii.mapPiiOutRows(users) });
     
   } catch (error) {
     console.error('Ошибка получения пользователей:', error);
@@ -4201,7 +4268,7 @@ app.get('/api/admin/orders', async (req, res) => {
       ORDER BY o.created_at DESC
     `);
     
-    res.json({ orders });
+    res.json({ orders: pii.mapPiiOutRows(orders) });
     
   } catch (error) {
     console.error('Ошибка получения заказов:', error);
@@ -4241,7 +4308,7 @@ app.get('/api/admin/pending-orders', async (req, res) => {
     `);
     
     res.json({ 
-      orders: pendingOrders
+      orders: pii.mapPiiOutRows(pendingOrders)
     });
     
   } catch (error) {
@@ -4299,8 +4366,8 @@ app.get('/api/admin/user-details/:telegramId', async (req, res) => {
     }
     
     res.json({
-      user: userInfo[0],
-      orders,
+      user: pii.mapPiiOut(userInfo[0]),
+      orders: pii.mapPiiOutRows(orders),
       activity,
       achievements
     });
@@ -4585,11 +4652,12 @@ app.post('/api/admin/send-notification-all', async (req, res) => {
         // Отправляем уведомления всем пользователям
         for (const user of users) {
           try {
+            const u = pii.mapPiiOut(user);
             const notificationMessage = title 
               ? `🔔 <b>${title}</b>\n\n${message}`
               : `🔔 ${message}`;
 
-            await sendTelegramMessage(user.telegram_id, notificationMessage);
+            await sendTelegramMessage(u.telegram_id, notificationMessage);
             successCount++;
             
             // Небольшая задержка между отправками, чтобы не превысить лимиты Telegram
@@ -4653,7 +4721,7 @@ app.post('/api/admin/send-notification-user', async (req, res) => {
           return res.status(404).json({ error: 'Пользователь не найден' });
         }
 
-        const user = users[0];
+        const user = pii.mapPiiOut(users[0]);
         const notificationMessage = title 
           ? `🔔 <b>${title}</b>\n\n${message}`
           : `🔔 ${message}`;
@@ -4708,14 +4776,17 @@ app.get('/api/admin/users-list', async (req, res) => {
 
         res.json({ 
           success: true, 
-          users: users.map((user) => ({
-            telegram_id: user.telegram_id,
-            username: user.username,
-            full_name: user.full_name,
-            created_at: user.created_at,
-            orders_count: user.orders_count,
-            display_name: user.full_name || user.username || `ID: ${user.telegram_id}`
-          }))
+          users: users.map((user) => {
+            const u = pii.mapPiiOut(user);
+            return {
+              telegram_id: u.telegram_id,
+              username: u.username,
+              full_name: u.full_name,
+              created_at: u.created_at,
+              orders_count: u.orders_count,
+              display_name: u.full_name || u.username || `ID: ${u.telegram_id}`
+            };
+          })
         });
       } catch (dbError) {
         console.error('Ошибка работы с базой данных:', dbError);
@@ -4869,8 +4940,9 @@ app.post('/api/admin/update-user-commission', async (req, res) => {
           return res.status(404).json({ error: 'Пользователь не найден' });
         }
 
+        const uRow = pii.mapPiiOut(users[0]);
         // Получаем старую комиссию для уведомления
-        const oldCommission = users[0].commission || 1000;
+        const oldCommission = uRow.commission || 1000;
 
         // Обновляем комиссию (в рублях)
         await dbConnection.execute(
@@ -4893,8 +4965,8 @@ app.post('/api/admin/update-user-commission', async (req, res) => {
           telegramId,
           oldCommission: oldCommission,
           newCommission: commissionRub,
-          username: users[0].username,
-          fullName: users[0].full_name
+          username: uRow.username,
+          fullName: uRow.full_name
         });
 
         res.json({ 
@@ -4944,7 +5016,7 @@ app.get('/api/admin/user-history/:telegramId', async (req, res) => {
           return res.status(404).json({ error: 'Пользователь не найден' });
         }
 
-        const user = userInfo[0];
+        const user = pii.mapPiiOut(userInfo[0]);
 
         // Получаем историю заказов
         const [orders] = await dbConnection.execute(`
@@ -4988,7 +5060,7 @@ app.get('/api/admin/user-history/:telegramId', async (req, res) => {
 
         const responseData = {
           user: user,
-          orders: orders,
+          orders: pii.mapPiiOutRows(orders),
           activity: activity,
           achievements: achievements
         };
@@ -5233,7 +5305,7 @@ app.get('/api/admin/order-details/:orderId', async (req, res) => {
         res.json({ 
           success: true, 
           data: {
-            order: orderInfo[0],
+            order: pii.mapPiiOut(orderInfo[0]),
             items: orderItems
           }
         });
@@ -5274,7 +5346,7 @@ app.post('/api/admin/update-order-status', async (req, res) => {
           return res.status(404).json({ error: 'Заказ не найден' });
         }
 
-        const order = orderRows[0];
+        const order = pii.mapPiiOut(orderRows[0]);
 
         // Обновляем статус заказа
         await dbConnection.execute(
@@ -5443,7 +5515,7 @@ app.get('/api/admin/orders-for-profit', async (req, res) => {
           ORDER BY o.created_at DESC
         `);
 
-        res.json({ success: true, orders });
+        res.json({ success: true, orders: pii.mapPiiOutRows(orders) });
       } catch (dbError) {
         console.error('Ошибка получения заказов:', dbError);
         res.status(500).json({ error: 'Ошибка получения заказов для расчета' });
@@ -5546,7 +5618,7 @@ app.get('/api/admin/delivery', async (req, res) => {
 
     res.json({
       success: true,
-      orders: rows
+      orders: pii.mapPiiOutRows(rows)
     });
 
   } catch (error) {
@@ -5589,7 +5661,7 @@ app.get('/api/admin/referrals-data', async (req, res) => {
 
     res.json({ 
       success: true, 
-      referrals: referrals 
+      referrals: pii.mapPiiOutRows(referrals) 
     });
 
   } catch (error) {
@@ -5627,7 +5699,7 @@ app.post('/api/admin/extend-discount', async (req, res) => {
       return res.status(404).json({ error: 'Пользователь не найден' });
     }
 
-    const user = users[0];
+    const user = pii.mapPiiOut(users[0]);
     const now = new Date();
     let newExpiryDate;
 
@@ -5736,65 +5808,6 @@ app.post('/api/admin/orders/:orderId/update-status', async (req, res) => {
   } catch (error) {
     console.error('Ошибка обновления статуса доставки:', error);
     res.status(500).json({ error: 'Ошибка обновления статуса' });
-  }
-});
-
-// Получение отзывов с пагинацией
-app.get('/api/reviews', async (req, res) => {
-  try {
-    await ensureDBConnection();
-
-    const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 5;
-    const offset = (page - 1) * limit;
-
-    // Получаем общее количество одобренных отзывов
-    const [totalRows] = await dbConnection.execute(`
-      SELECT COUNT(*) as total FROM reviews WHERE is_approved = 1
-    `);
-    const total = totalRows[0].total;
-
-    // Получаем только одобренные отзывы с пагинацией
-    const [rows] = await dbConnection.execute(`
-      SELECT review_id, telegram_id, username, full_name, rating, review_text, photo_url, created_at, moderated_at
-      FROM reviews
-      WHERE is_approved = 1
-      ORDER BY moderated_at DESC, created_at DESC
-      LIMIT ${limit} OFFSET ${offset}
-    `);
-
-    // Для каждого отзыва загружаем все фотографии из review_photos
-    const reviewsWithPhotos = await Promise.all(rows.map(async (review) => {
-      const [photos] = await dbConnection.execute(
-        'SELECT photo_url FROM review_photos WHERE review_id = ? ORDER BY id ASC',
-        [review.review_id]
-      );
-
-      // Формируем массив фотографий: сначала из review_photos, если нет - используем photo_url для обратной совместимости
-      const photosArray = photos.map(p => p.photo_url);
-      if (photosArray.length === 0 && review.photo_url) {
-        photosArray.push(review.photo_url);
-      }
-
-      return {
-        ...review,
-        photos: photosArray,
-        photo_url: review.photo_url // Оставляем для обратной совместимости
-      };
-    }));
-
-    const totalPages = Math.ceil(total / limit);
-
-    res.json({
-      reviews: reviewsWithPhotos,
-      total: total,
-      page: page,
-      limit: limit,
-      totalPages: totalPages
-    });
-  } catch (error) {
-    console.error('Ошибка получения отзывов:', error);
-    res.status(500).json({ error: 'Ошибка получения отзывов' });
   }
 });
 
