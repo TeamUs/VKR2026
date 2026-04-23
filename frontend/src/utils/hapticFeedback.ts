@@ -1,126 +1,44 @@
 // Haptic Feedback утилиты для Telegram Mini App
-const isHapticFeedbackSupported = () => {
+const isTelegramWebAppVersionAtLeast = (min: number) => {
   try {
-    return window.Telegram?.WebApp?.HapticFeedback && 
-           (window.Telegram.WebApp as any)?.version && 
-           parseFloat((window.Telegram.WebApp as any).version) >= 6.1;
+    const v = (window.Telegram?.WebApp as { version?: string } | undefined)?.version;
+    return !!v && parseFloat(v) >= min;
   } catch {
     return false;
   }
 };
 
-export const isBackButtonSupported = () => {
+const isHapticFeedbackSupported = () =>
+  Boolean(window.Telegram?.WebApp?.HapticFeedback) && isTelegramWebAppVersionAtLeast(6.1);
+
+export const isBackButtonSupported = () =>
+  Boolean(window.Telegram?.WebApp?.BackButton) && isTelegramWebAppVersionAtLeast(6.1);
+
+const wrap = (fn: () => void) => {
+  if (!isHapticFeedbackSupported()) return;
   try {
-    return window.Telegram?.WebApp?.BackButton && 
-           (window.Telegram.WebApp as any)?.version && 
-           parseFloat((window.Telegram.WebApp as any).version) >= 6.1;
+    fn();
   } catch {
-    return false;
+    /* ignore */
   }
 };
 
 export const HapticFeedback = {
-  // Успешное действие
-  success: () => {
-    if (isHapticFeedbackSupported()) {
-      try {
-        window.Telegram.WebApp.HapticFeedback.impactOccurred('medium');
-      } catch (error) {
-        console.log('HapticFeedback not available');
-      }
-    }
-  },
+  success: () => wrap(() => window.Telegram!.WebApp!.HapticFeedback.impactOccurred('medium')),
 
-  // Ошибка
-  error: () => {
-    if (isHapticFeedbackSupported()) {
-      try {
-        window.Telegram.WebApp.HapticFeedback.impactOccurred('heavy');
-      } catch (error) {
-        console.log('HapticFeedback not available');
-      }
-    }
-  },
+  error: () => wrap(() => window.Telegram!.WebApp!.HapticFeedback.impactOccurred('heavy')),
 
-  // Легкое нажатие
-  light: () => {
-    if (isHapticFeedbackSupported()) {
-      try {
-        window.Telegram.WebApp.HapticFeedback.impactOccurred('light');
-      } catch (error) {
-        console.log('HapticFeedback not available');
-      }
-    }
-  },
+  light: () => wrap(() => window.Telegram!.WebApp!.HapticFeedback.impactOccurred('light')),
 
-  // Среднее нажатие
-  medium: () => {
-    if (isHapticFeedbackSupported()) {
-      try {
-        window.Telegram.WebApp.HapticFeedback.impactOccurred('medium');
-      } catch (error) {
-        console.log('HapticFeedback not available');
-      }
-    }
-  },
+  medium: () => wrap(() => window.Telegram!.WebApp!.HapticFeedback.impactOccurred('medium')),
 
-  // Сильное нажатие
-  heavy: () => {
-    if (isHapticFeedbackSupported()) {
-      try {
-        window.Telegram.WebApp.HapticFeedback.impactOccurred('heavy');
-      } catch (error) {
-        console.log('HapticFeedback not available');
-      }
-    }
-  },
+  heavy: () => wrap(() => window.Telegram!.WebApp!.HapticFeedback.impactOccurred('heavy')),
 
-  // Уведомление
-  notification: () => {
-    if (isHapticFeedbackSupported()) {
-      try {
-        window.Telegram.WebApp.HapticFeedback.notificationOccurred('success');
-      } catch (error) {
-        console.log('HapticFeedback not available');
-      }
-    }
-  },
+  notification: () => wrap(() => window.Telegram!.WebApp!.HapticFeedback.notificationOccurred('success')),
 
-  // Предупреждение
-  warning: () => {
-    if (isHapticFeedbackSupported()) {
-      try {
-        window.Telegram.WebApp.HapticFeedback.notificationOccurred('warning');
-      } catch (error) {
-        console.log('HapticFeedback not available');
-      }
-    }
-  },
+  warning: () => wrap(() => window.Telegram!.WebApp!.HapticFeedback.notificationOccurred('warning')),
 
-  // Ошибка уведомления
-  errorNotification: () => {
-    if (isHapticFeedbackSupported()) {
-      try {
-        window.Telegram.WebApp.HapticFeedback.notificationOccurred('error');
-      } catch (error) {
-        console.log('HapticFeedback not available');
-      }
-    }
-  },
+  errorNotification: () => wrap(() => window.Telegram!.WebApp!.HapticFeedback.notificationOccurred('error')),
 
-  // Выбор
-  selection: () => {
-    if (isHapticFeedbackSupported()) {
-      try {
-        window.Telegram.WebApp.HapticFeedback.selectionChanged();
-      } catch (error) {
-        console.log('HapticFeedback not available');
-      }
-    }
-  }
-};
-
-// Хук для использования haptic feedback в компонентах
-export const useHapticFeedback = () => {
-  return HapticFeedback;
+  selection: () => wrap(() => window.Telegram!.WebApp!.HapticFeedback.selectionChanged())
 };

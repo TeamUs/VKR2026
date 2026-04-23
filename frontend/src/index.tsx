@@ -22,8 +22,6 @@ if (typeof document !== 'undefined') {
   }
 }
 
-console.log('[index.tsx] Инициализация приложения...');
-
 try {
   const rootElement = document.getElementById('root');
   if (!rootElement) {
@@ -37,8 +35,6 @@ try {
       <App />
     </React.StrictMode>
   );
-  
-  console.log('[index.tsx] Приложение запущено');
 } catch (error) {
   console.error('[index.tsx] Ошибка запуска приложения:', error);
 }

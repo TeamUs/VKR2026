@@ -91,14 +91,13 @@ if (isProduction) {
     }
   }
 
-  console.log('✅ Проверка окружения: production настройки корректны');
 }
 
 // Gamification System
 const { GamificationService, LEVELS, LEVEL_REWARDS, XP_RULES } = require('./gamification');
 
 // Scheduler for daily notifications
-const { startScheduler, testNotification, checkExpiredDiscounts, checkDiscountsExpiringSoon } = require('./scheduler');
+const { startScheduler, checkExpiredDiscounts } = require('./scheduler');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -135,16 +134,6 @@ app.use(cors({
 // но они нужны для других типов запросов
 app.use(express.json({ limit: '200mb' }));
 app.use(express.urlencoded({ limit: '200mb', extended: true }));
-
-// Middleware для логирования всех запросов к /api/user/orders
-app.use('/api/user/orders', (req, res, next) => {
-  console.log('📍 MIDDLEWARE: Запрос к /api/user/orders');
-  console.log('📍 MIDDLEWARE: Method:', req.method);
-  console.log('📍 MIDDLEWARE: Headers x-telegram-init-data:', !!req.headers['x-telegram-init-data']);
-  console.log('📍 MIDDLEWARE: Вызываем next()...');
-  next();
-  console.log('📍 MIDDLEWARE: next() вызван, продолжаем...');
-});
 
 // Статическая раздача загруженных файлов (отзывы)
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
@@ -247,10 +236,8 @@ const purchasesStorage = multer.diskStorage({
       const uploadDirDev = path.join(__dirname, '../frontend/public/images/purchases');
       const uploadDirProd = path.join(__dirname, '../frontend/dist/images/purchases');
       const uploadDir = isProduction ? uploadDirProd : uploadDirDev;
-      
-      console.log(`📁 Multer destination: ${uploadDir} (${isProduction ? 'production' : 'development'})`);
+
       if (!fs.existsSync(uploadDir)) {
-        console.log(`📁 Создание директории: ${uploadDir}`);
         fs.mkdirSync(uploadDir, { recursive: true });
       }
       
@@ -269,7 +256,6 @@ const purchasesStorage = multer.diskStorage({
     // Временное имя, потом переименуем
     const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
     const tempName = 'temp-' + uniqueSuffix + path.extname(file.originalname);
-    console.log(`📝 Временное имя файла: ${tempName}`);
     cb(null, tempName);
   }
 });
@@ -306,7 +292,6 @@ async function sendManagerMessage(message) {
   const managerChatId = process.env.MANAGER_CHAT_ID || process.env.MANAGER_TELEGRAM_ID;
   
   if (!botToken || !managerChatId) {
-    console.log('⚠️ BOT_TOKEN или MANAGER_CHAT_ID не настроены, сообщение не отправлено');
     return false;
   }
   
@@ -334,7 +319,6 @@ async function sendManagerMessage(message) {
         });
         res.on('end', () => {
           if (res.statusCode === 200) {
-            console.log('✅ Сообщение менеджеру отправлено успешно');
             resolve(true);
           } else {
             console.error('❌ Ошибка отправки сообщения менеджеру:', responseData);
@@ -414,7 +398,6 @@ async function sendReviewToFeedbackChannel(reviewData, userInfo) {
         await sendTelegramPhoto(channelId, fullPhotoUrl, message);
       } catch (photoError) {
         console.error('❌ Ошибка отправки фото, отправляем только текст:', photoError.message);
-        console.log('💡 Примечание: Фото будет работать когда будет настроен домен с SSL');
         // Если фото не отправилось, отправляем только текст
         await sendTelegramMessage(channelId, message);
       }
@@ -453,39 +436,6 @@ async function sendTelegramPhoto(chatId, photoUrl, caption = '') {
       error: errorData,
       chatId: chatId,
       photoUrl: photoUrl
-    });
-    throw new Error(`Telegram API error: ${response.status} - ${errorData}`);
-  }
-  
-  return await response.json();
-}
-
-// Функция отправки текстового сообщения в Telegram
-async function sendTelegramMessage(chatId, message) {
-  const botToken = BOT_TOKEN;
-  const telegramApiUrl = `https://api.telegram.org/bot${botToken}/sendMessage`;
-  
-  const response = await fetch(telegramApiUrl, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      chat_id: chatId,
-      text: message,
-      parse_mode: 'HTML',
-      disable_web_page_preview: true
-    })
-  });
-  
-  if (!response.ok) {
-    const errorData = await response.text();
-    console.error('❌ Telegram API Message Error:', {
-      status: response.status,
-      statusText: response.statusText,
-      error: errorData,
-      chatId: chatId,
-      message: message
     });
     throw new Error(`Telegram API error: ${response.status} - ${errorData}`);
   }
@@ -663,11 +613,9 @@ const BOT_TOKEN = process.env.BOT_TOKEN;
 async function sendTelegramMessage(chatId, message) {
   try {
     if (!BOT_TOKEN) {
-      console.log('⚠️ BOT_TOKEN не настроен, сообщение не отправлено');
       return false;
     }
 
-    console.log(`📤 sendTelegramMessage: отправляем сообщение пользователю ${chatId} (${message.substring(0, 50)}...)`);
     const response = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
       method: 'POST',
       headers: {
@@ -681,7 +629,6 @@ async function sendTelegramMessage(chatId, message) {
     });
 
     if (response.ok) {
-      console.log(`✅ Сообщение пользователю ${chatId} отправлено успешно`);
       return true;
     } else {
       const errorText = await response.text();
@@ -866,13 +813,10 @@ async function parseProductPage(url) {
         const priceElement = $(selector).first();
         if (priceElement.length > 0) {
           const priceText = priceElement.text().trim();
-          console.log(`🔍 Проверяем селектор "${selector}": "${priceText}"`);
-          
           // Ищем цену в тексте (включая символы ¥, 元, 块)
           const priceMatch = priceText.match(/(\d+(?:\.\d+)?)\s*(?:¥|元|块|RMB|CNY)?/);
           if (priceMatch) {
             price = parseFloat(priceMatch[1]);
-            console.log(`✅ Найдена цена через селектор "${selector}": ${price}`);
             break;
           }
         }
@@ -893,13 +837,11 @@ async function parseProductPage(url) {
           const num = parseFloat(numberMatch[1]);
           // Проверяем, что это похоже на цену (от 1 до 10000 юаней)
           if (num >= 1 && num <= 10000) {
-            console.log(`🔍 Найдена потенциальная цена в кнопке: "${text}" -> ${num}`);
             // Если в тексте есть символы валюты или это кнопка с голубым фоном
             if (text.includes('¥') || text.includes('元') || text.includes('块') || 
                 $el.css('background-color').includes('blue') || 
                 $el.attr('class')?.includes('blue')) {
               price = num;
-              console.log(`✅ Найдена цена в кнопке: ${price}`);
               return false; // Прерываем цикл
             }
           }
@@ -916,7 +858,6 @@ async function parseProductPage(url) {
           const num = parseFloat(dataPrice);
           if (!isNaN(num) && num > 0) {
             price = num;
-            console.log(`✅ Найдена цена в атрибуте: ${price}`);
             return false;
           }
         }
@@ -1465,26 +1406,15 @@ async function parseProductPage(url) {
       
       return isReasonableSize;
     });
-    
-    const extraSizes = availableSizes.filter(size => !filteredSizes.includes(size));
-    
-    if (extraSizes.length > 0) {
-      console.log(`⚠️ Найдены лишние размеры: ${extraSizes.join(', ')}`);
-    }
-    
+
     if (filteredSizes.length !== availableSizes.length) {
-      console.log(`🔧 Фильтруем размеры, убираем лишние...`);
-      console.log(`📏 Размеров до фильтрации: ${availableSizes.length}, после: ${filteredSizes.length}`);
       availableSizes = filteredSizes;
     }
     
     // Умная фильтрация по логической последовательности размеров
     if (filteredSizes.length > 0) {
-      console.log(`🔧 Анализируем логическую последовательность размеров...`);
-      
       // Сортируем размеры по числовому значению
       const sortedSizes = filteredSizes.sort((a, b) => parseFloat(a) - parseFloat(b));
-      console.log(`📏 Отсортированные размеры: ${sortedSizes.join(', ')}`);
       
       // Анализируем последовательность размеров
       const logicalSizes = [];
@@ -1513,17 +1443,13 @@ async function parseProductPage(url) {
       
       // Если найдена хорошая последовательность, используем ее
       if (maxConsecutiveCount >= 3) {
-        console.log(`✅ Найдена хорошая последовательность из ${maxConsecutiveCount} размеров`);
         logicalSizes.push(...sortedSizes.slice(bestSequenceStart, bestSequenceStart + maxConsecutiveCount));
       } else {
         // Если последовательность не найдена, используем все отфильтрованные размеры
-        console.log(`⚠️ Хорошая последовательность не найдена, используем все размеры`);
         logicalSizes.push(...sortedSizes);
       }
       
       if (logicalSizes.length !== filteredSizes.length) {
-        console.log(`🔧 Убираем размеры, не вписывающиеся в последовательность...`);
-        console.log(`📏 Размеров до фильтрации: ${filteredSizes.length}, после: ${logicalSizes.length}`);
         availableSizes = logicalSizes;
       } else {
         availableSizes = filteredSizes;
@@ -1535,25 +1461,6 @@ async function parseProductPage(url) {
     // Если цена не найдена, логируем ошибку
     if (!price) {
       console.error('❌ Не удалось извлечь цену из товара');
-      console.error('📄 Размер HTML:', html.length, 'символов');
-      
-      // Выводим первые 10 кнопок с их текстом
-      $('button').slice(0, 10).each((i, element) => {
-        const $el = $(element);
-        const text = $el.text().trim();
-        if (text) {
-          console.log(`🔘 Кнопка ${i + 1}: "${text}"`);
-        }
-      });
-      
-      // Выводим первые 10 ссылок с их текстом
-      $('a').slice(0, 10).each((i, element) => {
-        const $el = $(element);
-        const text = $el.text().trim();
-        if (text && text.length < 50) {
-          console.log(`🔗 Ссылка ${i + 1}: "${text}"`);
-        }
-      });
     }
     
     return {
@@ -1585,7 +1492,6 @@ async function getYuanToRubExchangeRate() {
     
     if (!cbrResponse.ok) {
       console.error(`❌ ЦБРФ недоступен: HTTP ${cbrResponse.status}`);
-      console.log(`⚠️ Используется резервный курс: ${DEFAULT_EXCHANGE_RATE}`);
       return DEFAULT_EXCHANGE_RATE;
     }
 
@@ -1594,7 +1500,6 @@ async function getYuanToRubExchangeRate() {
     
     if (cnyRate && cnyRate > 0) {
       const adjustedRate = cnyRate + 1.1;
-      console.log(`✅ Курс юаня получен с ЦБРФ: ${cnyRate} + 1.1 = ${adjustedRate}`);
       return adjustedRate;
     } else {
       console.error('⚠️ Курс юаня не найден в данных ЦБРФ, используется резервный');
@@ -1602,7 +1507,6 @@ async function getYuanToRubExchangeRate() {
     }
   } catch (error) {
     console.error('❌ Ошибка получения курса юаня:', error.message);
-    console.log(`⚠️ Используется резервный курс: ${DEFAULT_EXCHANGE_RATE}`);
     return DEFAULT_EXCHANGE_RATE;
   }
 }
@@ -1735,8 +1639,6 @@ app.post('/api/calculate-from-link', async (req, res) => {
 // Функция для получения цены с голубой кнопки после выбора размера
 async function getPriceWithSize(url, selectedSize) {
   try {
-    console.log(`🔍 Получаем цену для размера ${selectedSize} с ${url}`);
-    
     // Делаем запрос к странице товара с правильными заголовками
     const response = await fetch(url, {
       headers: {
@@ -1782,11 +1684,8 @@ async function getPriceWithSize(url, selectedSize) {
       const button = $(selector).first();
       if (button.length > 0) {
         const buttonText = button.text().trim();
-        console.log(`🔍 Проверяем кнопку "${selector}": "${buttonText}"`);
-        
         // Проверяем, есть ли кнопка "找相似" (поиск похожих) - значит размер недоступен
         if (buttonText.includes('找相似') || buttonText.includes('找类似') || buttonText.includes('相似商品')) {
-          console.log(`❌ Размер недоступен - найдена кнопка "找相似"`);
           return { price: null, isUnavailable: true };
         }
         
@@ -1797,11 +1696,9 @@ async function getPriceWithSize(url, selectedSize) {
         if (approximateMatch) {
           // Если есть знак ≈, это частный случай - рассчитываем с предупреждением
           price = parseInt(approximateMatch[1]);
-          console.log(`⚠️ Найдена примерная цена (≈): ¥${price}`);
           return { price, isApproximate: true };
         } else if (priceMatch) {
           price = parseInt(priceMatch[1]);
-          console.log(`✅ Найдена точная цена в кнопке: ¥${price}`);
           break;
         }
       }
@@ -1820,7 +1717,6 @@ async function getPriceWithSize(url, selectedSize) {
           const foundPrice = parseInt(priceMatch[1]);
           if (foundPrice > 100 && foundPrice < 2000) { // Разумный диапазон цен
             price = foundPrice;
-            console.log(`✅ Найдена цена в элементе: ¥${price}`);
             return false; // Прерываем цикл
           }
         }
@@ -1860,7 +1756,6 @@ app.post('/api/get-price-with-size', async (req, res) => {
           // Если цена примерная (≈), рассчитываем с предупреждением
           estimatedPrice = priceResult.price;
           isApproximate = true;
-          console.log(`⚠️ Получена примерная цена: ≈¥${estimatedPrice}`);
         } else {
           estimatedPrice = priceResult.price;
         }
@@ -1871,8 +1766,6 @@ app.post('/api/get-price-with-size', async (req, res) => {
     
     // Если не удалось получить цену с голубой кнопки, используем резервные варианты
     if (!estimatedPrice) {
-      console.log('⚠️ Не удалось получить цену с голубой кнопки, используем резервные варианты');
-      
       // Для данного товара используем примерные цены на основе ваших данных
       const examplePrices = {
         '32': 439,
@@ -1887,13 +1780,11 @@ app.post('/api/get-price-with-size', async (req, res) => {
       
       if (examplePrices[selectedSize]) {
         estimatedPrice = examplePrices[selectedSize];
-        console.log(`💰 Используем примерную цену для размера ${selectedSize}: ¥${estimatedPrice}`);
       } else {
         // Если нет точной цены, используем среднюю цену
         const prices = Object.values(examplePrices);
         const avgPrice = prices.reduce((sum, price) => sum + price, 0) / prices.length;
         estimatedPrice = Math.round(avgPrice);
-        console.log(`💰 Используем среднюю цену: ¥${estimatedPrice}`);
       }
     }
     
@@ -1988,7 +1879,6 @@ app.post('/api/submit-review', async (req, res) => {
       await sendTelegramMessage(managerId, message);
     }
     
-    console.log('Review submitted:', { telegramId, username, reviewText });
 
     res.json({ 
       success: true, 
@@ -2102,7 +1992,6 @@ app.post('/api/submit-review-direct', async (req, res) => {
         await sendTelegramMessage(managerId, message);
       }
       
-      console.log('Review saved to database:', { telegramId, username, reviewText });
     }
 
     res.json({ 
@@ -2121,7 +2010,7 @@ app.post('/api/calculate-price', async (req, res) => {
     const { price, weight, category, telegramId } = req.body;
     
     if (!price || !weight) {
-      console.log('❌ Отсутствуют обязательные поля:', { price, weight });
+      console.warn('Отсутствуют обязательные поля calculate-price:', { price, weight });
       return res.status(400).json({ error: 'Необходимы цена товара и вес' });
     }
 
@@ -2439,8 +2328,6 @@ app.post('/api/user/init', async (req, res) => {
              WHERE telegram_id = ?`,
             [username || null, fullName || null, telegramId]
           );
-          
-          console.log(`✅ Обновлен пользователь ${telegramId}: username=${username}, fullName=${fullName}`);
         } else {
             // Создаем нового пользователя с базовой комиссией и временем активности
           // Автоматически присваиваем бронзовый уровень (0 XP требуется)
@@ -2449,8 +2336,6 @@ app.post('/api/user/init', async (req, res) => {
              VALUES (?, ?, ?, 1000, 'Bronze', NOW())`,
             [telegramId, username || null, fullName || null]
           );
-          
-          console.log(`✅ Создан новый пользователь ${telegramId}: username=${username}, fullName=${fullName}, level=Bronze`);
         }
 
         res.json({ 
@@ -2562,8 +2447,6 @@ app.post('/api/referral', async (req, res) => {
            VALUES (?, ?, ?, DATE_ADD(NOW(), INTERVAL ? DAY), 'Bronze')`,
           [telegramId, referralCommission, referralId, referralDays]
         );
-        
-        console.log(`✅ Создан новый пользователь ${telegramId} по реферальной ссылке, level=Bronze, commission=${referralCommission}₽, days=${referralDays}`);
 
         // Продлеваем скидку реферера на 1 неделю (или даем первую скидку)
         // НО только если реферер НЕ имеет уровень Diamond (у Diamond комиссия уже 0₽ навсегда)
@@ -2734,20 +2617,10 @@ app.post('/api/referral', async (req, res) => {
 // ========== ВАЖНО: Этот маршрут должен быть ПЕРЕД /api/user/:telegramId ==========
 // Получение всех заказов пользователя для профиля
 app.get('/api/user/orders', async (req, res) => {
-  console.log('🚀 ========== /api/user/orders ОБРАБОТЧИК ВЫЗВАН ==========');
-  console.log('🚀 Время:', new Date().toISOString());
-  console.log('🚀 URL:', req.url);
-  console.log('🚀 Method:', req.method);
-  console.log('🚀 Headers x-telegram-init-data присутствует:', !!req.headers['x-telegram-init-data']);
-  console.log('🚀 Query:', JSON.stringify(req.query, null, 2));
-  
   try {
     // Получаем данные из Telegram WebApp
     const initData = req.headers['x-telegram-init-data'];
-    console.log('🔍 /api/user/orders - initData присутствует:', !!initData);
-    console.log('🔍 /api/user/orders - initData длина:', initData?.length || 0);
-    console.log('🔍 /api/user/orders - initData первые 100 символов:', initData?.substring(0, 100) || 'нет');
-    
+
     if (!initData) {
       console.error('❌ /api/user/orders - initData отсутствует');
       return res.status(401).json({ error: 'Не авторизован' });
@@ -2762,18 +2635,14 @@ app.get('/api/user/orders', async (req, res) => {
         if (userDataStr) {
           const userData = JSON.parse(decodeURIComponent(userDataStr));
           telegramId = userData.id?.toString();
-          console.log('✅ /api/user/orders - telegram_id из initData:', telegramId);
-          console.log('📋 Полные данные user из initData:', JSON.stringify(userData, null, 2));
         } else {
           console.error('❌ /api/user/orders - user параметр отсутствует в initData');
-          console.error('📋 initData (первые 200 символов):', initData.substring(0, 200));
         }
       } else {
         console.error('❌ /api/user/orders - initData имеет неверный формат:', typeof initData, initData?.substring(0, 100));
       }
     } catch (parseError) {
       console.error('❌ /api/user/orders - Ошибка парсинга initData:', parseError);
-      console.error('📋 initData (первые 200 символов):', initData?.substring(0, 200));
     }
 
     if (!telegramId) {
@@ -2785,40 +2654,7 @@ app.get('/api/user/orders', async (req, res) => {
 
     // Нормализуем telegram_id (приводим к строке для сравнения)
     const normalizedTelegramId = String(telegramId).trim();
-    console.log(`📋 Ищем заказы для telegram_id: "${normalizedTelegramId}" (тип: ${typeof normalizedTelegramId})`);
 
-    // Сначала проверим, сколько всего заказов у пользователя (ищем и по строке, и по числу)
-    // Пробуем разные варианты сравнения для telegram_id
-    const [allOrdersCount] = await dbConnection.execute(`
-      SELECT COUNT(*) as total 
-      FROM orders 
-      WHERE telegram_id = ? 
-         OR CAST(telegram_id AS CHAR) = ?
-         OR telegram_id = CAST(? AS UNSIGNED)
-    `, [normalizedTelegramId, normalizedTelegramId, normalizedTelegramId]);
-    console.log(`📊 Всего заказов у пользователя ${normalizedTelegramId}: ${allOrdersCount[0]?.total || 0}`);
-
-    // Проверим заказы по статусам
-    const [statusCounts] = await dbConnection.execute(`
-      SELECT status, COUNT(*) as count 
-      FROM orders 
-      WHERE telegram_id = ? 
-         OR CAST(telegram_id AS CHAR) = ?
-         OR telegram_id = CAST(? AS UNSIGNED)
-      GROUP BY status
-    `, [normalizedTelegramId, normalizedTelegramId, normalizedTelegramId]);
-    console.log(`📊 Статусы заказов пользователя ${normalizedTelegramId}:`, statusCounts);
-
-    // Сначала проверим, какие заказы есть у пользователя с разными статусами
-    const [testQuery] = await dbConnection.execute(`
-      SELECT order_id, status, created_at
-      FROM orders
-      WHERE (telegram_id = ? OR CAST(telegram_id AS CHAR) = ?)
-      ORDER BY created_at DESC
-      LIMIT 10
-    `, [normalizedTelegramId, normalizedTelegramId]);
-    console.log(`🔍 Все заказы пользователя ${normalizedTelegramId} (последние 10):`, testQuery);
-    
     // Получаем все незавершенные заказы пользователя
     // Показываем заказы, у которых delivery_status != 'Доставлен' или delivery_status отсутствует
     // И заказ не отменен (status != 'cancelled')
@@ -2846,39 +2682,10 @@ app.get('/api/user/orders', async (req, res) => {
       ORDER BY o.created_at DESC
     `, [normalizedTelegramId, normalizedTelegramId, normalizedTelegramId]);
 
-    console.log(`📦 Заказы пользователя ${telegramId}: найдено ${rows.length} незавершенных заказов`);
-    if (rows.length > 0) {
-      console.log('📋 Детали всех найденных заказов:');
-      rows.forEach((order, index) => {
-        console.log(`  Заказ ${index + 1}:`, {
-          order_id: order.order_id,
-          order_status: order.order_status,
-          delivery_status: order.delivery_status,
-          tracking_number: order.internal_tracking_number,
-          created_at: order.created_at
-        });
-      });
-    } else {
-      console.log(`⚠️ Не найдено незавершенных заказов для пользователя ${telegramId}`);
-      // Проверим, есть ли вообще заказы с другими статусами
-      const [allOrders] = await dbConnection.execute(`
-        SELECT order_id, status, created_at 
-        FROM orders 
-        WHERE telegram_id = ?
-        ORDER BY created_at DESC
-        LIMIT 5
-      `, [telegramId]);
-      if (allOrders.length > 0) {
-        console.log('📋 Последние заказы пользователя (все статусы):', allOrders);
-      }
-    }
-
-    console.log('✅ /api/user/orders - Успешно возвращаем', rows.length, 'заказов');
     res.json({
       success: true,
       orders: rows
     });
-    console.log('✅ /api/user/orders - Ответ отправлен');
 
   } catch (error) {
     console.error('❌ ========== ОШИБКА в /api/user/orders ==========');
@@ -3118,15 +2925,6 @@ app.post('/api/reviews', upload.array('photos', 10), async (req, res) => {
     const rating = req.body.rating;
     const review_text = req.body.review_text || req.body.reviewText || req.body.comment;
     const avatar_url = req.body.avatar_url || req.body.avatarUrl;
-    
-    console.log('Получены данные отзыва:', {
-      telegram_id,
-      username,
-      full_name,
-      rating,
-      review_text,
-      filesCount: req.files ? req.files.length : 0
-    });
 
     // Валидация
     if (!telegram_id || !rating || rating < 1 || rating > 5) {
@@ -3141,14 +2939,11 @@ app.post('/api/reviews', upload.array('photos', 10), async (req, res) => {
     );
 
     if (existingUser.length === 0) {
-      console.log('Создаем нового пользователя:', telegram_id);
       // Автоматически присваиваем бронзовый уровень (0 XP требуется)
       await dbConnection.execute(`
         INSERT INTO users (telegram_id, commission, username, full_name, avatar_url, current_level, created_at)
         VALUES (?, 1000, ?, ?, ?, 'Bronze', NOW())
       `, [telegram_id, username || null, full_name || null, avatar_url || null]);
-      
-      console.log(`✅ Создан новый пользователь ${telegram_id}, level=Bronze`);
     } else if (avatar_url || username || full_name) {
       // Обновляем данные пользователя, если они переданы (особенно avatar_url)
       await dbConnection.execute(`
@@ -3215,11 +3010,9 @@ app.post('/api/reviews', upload.array('photos', 10), async (req, res) => {
                           `⚠️ <b>Статус:</b> Ожидает модерации`;
     
     await sendManagerMessage(managerMessage);
-    console.log('✅ Уведомление менеджеру о новом отзыве отправлено');
-    
+
     // НЕ отправляем отзыв в канал - только после модерации
-    console.log('⏳ Отзыв ожидает модерации, публикация в канал отложена');
-    
+
     res.json({ 
       success: true, 
       review_id: result.insertId,
@@ -3414,13 +3207,8 @@ app.get('/api/purchases/images', (req, res) => {
     }
 
     if (!purchasesDir) {
-      console.log('📂 Директория выкупов не найдена. Проверяемые пути:');
-      console.log(`   Dev: ${purchasesDirDev}`);
-      console.log(`   Prod: ${purchasesDirProd}`);
       return res.json([]);
     }
-
-    console.log(`📂 Используется директория: ${purchasesDir}`);
 
     const files = fs.readdirSync(purchasesDir)
       .filter(file => {
@@ -3443,7 +3231,6 @@ app.get('/api/purchases/images', (req, res) => {
       .sort((a, b) => b.mtime - a.mtime) // Сортировка по дате изменения (новые сверху)
       .map(file => file.path); // Возвращаем только пути
 
-    console.log(`📸 Найдено ${files.length} изображений выкупов`);
     res.json(files);
   } catch (error) {
     console.error('❌ Ошибка получения изображений выкупов:', error);
@@ -3488,17 +3275,6 @@ app.post('/api/admin/purchases/upload', (req, res, next) => {
   });
 }, async (req, res) => {
   try {
-    console.log('📤 Начало загрузки изображений выкупов');
-    console.log('📊 Размер запроса (Content-Length):', req.headers['content-length'], 'байт');
-    console.log('📊 Количество файлов:', req.files ? req.files.length : 0);
-    if (req.files && req.files.length > 0) {
-      const totalSize = req.files.reduce((sum, file) => sum + file.size, 0);
-      console.log('📊 Общий размер файлов:', totalSize, 'байт (', (totalSize / 1024 / 1024).toFixed(2), 'MB)');
-      req.files.forEach((file, index) => {
-        console.log(`📊 Файл ${index + 1}: ${file.originalname}, размер: ${file.size} байт (${(file.size / 1024 / 1024).toFixed(2)} MB)`);
-      });
-    }
-    
     // Проверка прав администратора
     let initData = req.headers['x-telegram-init-data'];
     
@@ -3509,9 +3285,7 @@ app.post('/api/admin/purchases/upload', (req, res, next) => {
     if (!initData) {
       initData = req.headers['X-TELEGRAM-INIT-DATA'];
     }
-    
-    console.log('📋 Получен initData:', initData ? `${typeof initData}, длина: ${initData.length}, первые 50 символов: ${initData.substring(0, 50)}...` : 'НЕТ');
-    
+
     if (!initData) {
       console.error('❌ Нет initData в заголовках');
       console.error('   Все заголовки:', Object.keys(req.headers).filter(h => h.toLowerCase().includes('telegram')));
@@ -3575,7 +3349,6 @@ app.post('/api/admin/purchases/upload', (req, res, next) => {
           const decoded = decodeURIComponent(userData);
           const user = JSON.parse(decoded);
           telegram_id = user.id?.toString();
-          console.log(`👤 Telegram ID пользователя: ${telegram_id}`);
         } catch (parseError) {
           console.error('❌ Ошибка парсинга userData:', parseError.message);
           console.error('   userData (первые 200 символов):', userData?.substring(0, 200));
@@ -3583,42 +3356,31 @@ app.post('/api/admin/purchases/upload', (req, res, next) => {
         }
       } else {
         console.error('❌ userData не найден в initData');
-        console.error('   Все параметры в initData:', Array.from(urlParams.keys()));
-        console.error('   initData (первые 200 символов):', initData.substring(0, 200));
         return res.status(401).json({ error: 'Ошибка авторизации: данные пользователя не найдены' });
       }
     } catch (error) {
       console.error('❌ Ошибка парсинга initData:', error);
-      console.error('   Ошибка:', error.message);
-      console.error('   Stack:', error.stack);
-      console.error('   initData (первые 200 символов):', initData?.substring(0, 200));
       return res.status(401).json({ error: 'Ошибка авторизации: неверный формат данных' });
     }
 
     // Проверка, что это администратор
     const adminTelegramId = process.env.ADMIN_TELEGRAM_ID;
     const managerTelegramId = process.env.MANAGER_TELEGRAM_ID;
-    
-    console.log(`🔐 Проверка прав: admin=${adminTelegramId}, manager=${managerTelegramId}, user=${telegram_id}`);
-    
+
     if (!telegram_id) {
       console.error('❌ Telegram ID не определен');
       return res.status(401).json({ error: 'Telegram ID не определен' });
     }
-    
+
     if (telegram_id !== adminTelegramId && telegram_id !== managerTelegramId) {
       console.error(`❌ Доступ запрещен для пользователя ${telegram_id}`);
       return res.status(403).json({ error: 'Доступ запрещен' });
     }
 
-    console.log(`📁 Проверка файлов: req.files = ${req.files ? req.files.length : 'null'}`);
-    
     if (!req.files || req.files.length === 0) {
       console.error('❌ Файлы не загружены');
       return res.status(400).json({ error: 'Файлы не загружены' });
     }
-    
-    console.log(`✅ Получено ${req.files.length} файлов`);
 
     // Проверяем оба возможных пути (dev и production)
     const purchasesDirDev = path.join(__dirname, '../frontend/public/images/purchases');
@@ -3627,15 +3389,10 @@ app.post('/api/admin/purchases/upload', (req, res, next) => {
     // В production используем dist, в dev - public
     const isProduction = process.env.NODE_ENV === 'production';
     const purchasesDir = isProduction ? purchasesDirProd : purchasesDirDev;
-    
-    console.log(`📂 Путь к директории выкупов: ${purchasesDir} (${isProduction ? 'production' : 'development'})`);
-    
+
     // Создаем директории, если их нет
     if (!fs.existsSync(purchasesDir)) {
-      console.log(`📁 Создание директории: ${purchasesDir}`);
       fs.mkdirSync(purchasesDir, { recursive: true });
-    } else {
-      console.log(`✅ Директория существует: ${purchasesDir}`);
     }
     
     // Также создаем в public для совместимости
@@ -3676,20 +3433,14 @@ app.post('/api/admin/purchases/upload', (req, res, next) => {
       const newFilePath = path.join(purchasesDir, newFileName);
 
       // Перемещаем файл
-      console.log(`💾 Сохранение файла: ${file.originalname} -> ${newFileName}`);
-      console.log(`   Временный путь: ${file.path}`);
-      console.log(`   Финальный путь: ${newFilePath}`);
-      
       try {
         fs.renameSync(file.path, newFilePath);
-        console.log(`✅ Файл сохранен: ${newFileName}`);
-        
+
         // В production также копируем в public для совместимости
         if (isProduction) {
           const publicFilePath = path.join(purchasesDirDev, newFileName);
           try {
             fs.copyFileSync(newFilePath, publicFilePath);
-            console.log(`📋 Файл также скопирован в public: ${publicFilePath}`);
           } catch (copyError) {
             console.warn(`⚠️ Не удалось скопировать в public: ${copyError.message}`);
           }
@@ -3700,13 +3451,11 @@ app.post('/api/admin/purchases/upload', (req, res, next) => {
         try {
           fs.copyFileSync(file.path, newFilePath);
           fs.unlinkSync(file.path); // Удаляем временный файл
-          console.log(`✅ Файл скопирован: ${newFileName}`);
-          
+
           // В production также копируем в public
           if (isProduction) {
             const publicFilePath = path.join(purchasesDirDev, newFileName);
             fs.copyFileSync(newFilePath, publicFilePath);
-            console.log(`📋 Файл также скопирован в public: ${publicFilePath}`);
           }
         } catch (copyError) {
           console.error(`❌ Ошибка копирования файла ${file.originalname}:`, copyError);
@@ -3724,8 +3473,6 @@ app.post('/api/admin/purchases/upload', (req, res, next) => {
     if (uploadedFiles.length === 0) {
       return res.status(400).json({ error: 'Нет подходящих изображений для загрузки' });
     }
-
-    console.log(`✅ Загружено ${uploadedFiles.length} изображений выкупов администратором ${telegram_id}`);
 
     res.json({
       success: true,
@@ -3746,8 +3493,6 @@ app.post('/api/admin/purchases/upload', (req, res, next) => {
 // Удаление изображения выкупа (только для админа)
 app.delete('/api/admin/purchases/images/:filename', async (req, res) => {
   try {
-    console.log('🗑️ Запрос на удаление изображения выкупа:', req.params.filename);
-    
     // Проверка прав администратора
     const initData = req.headers['x-telegram-init-data'];
     if (!initData) {
@@ -3776,7 +3521,6 @@ app.delete('/api/admin/purchases/images/:filename', async (req, res) => {
           const decoded = decodeURIComponent(userData);
           const user = JSON.parse(decoded);
           telegram_id = user.id?.toString();
-          console.log(`👤 Telegram ID пользователя: ${telegram_id}`);
         } catch (parseError) {
           console.error('❌ Ошибка парсинга userData:', parseError);
           return res.status(401).json({ error: 'Ошибка парсинга данных пользователя' });
@@ -3787,7 +3531,6 @@ app.delete('/api/admin/purchases/images/:filename', async (req, res) => {
       }
     } catch (error) {
       console.error('❌ Ошибка парсинга initData:', error);
-      console.error('   Ошибка:', error.message);
       return res.status(401).json({ error: 'Ошибка авторизации: неверный формат данных' });
     }
 
@@ -3821,16 +3564,12 @@ app.delete('/api/admin/purchases/images/:filename', async (req, res) => {
     // Удаляем файл из основного места
     if (fs.existsSync(filePath)) {
       fs.unlinkSync(filePath);
-      console.log(`✅ Файл удален: ${filePath}`);
     }
-    
+
     // Удаляем файл из public для совместимости
     if (fs.existsSync(filePathDev)) {
       fs.unlinkSync(filePathDev);
-      console.log(`✅ Файл удален из public: ${filePathDev}`);
     }
-
-    console.log(`✅ Изображение ${filename} удалено администратором ${telegram_id}`);
 
     res.json({
       success: true,
@@ -3850,60 +3589,43 @@ app.delete('/api/admin/purchases/images/:filename', async (req, res) => {
 // Получение профиля пользователя
 app.get('/api/profile', async (req, res) => {
   const startTime = Date.now();
-  console.log('🔍 /api/profile - Запрос получен');
-  console.log('🔍 /api/profile - Headers:', {
-    'x-telegram-init-data': !!req.headers['x-telegram-init-data'],
-    'origin': req.headers['origin'],
-    'user-agent': req.headers['user-agent']?.substring(0, 50)
-  });
-  console.log('🔍 /api/profile - Query:', req.query);
   try {
     await ensureDBConnection();
-    console.log('✅ /api/profile - Соединение с БД установлено');
-    
+
     let telegram_id = req.query.telegram_id;
-    
+
     // Если telegram_id не передан в query, пытаемся получить из Telegram WebApp initData
     if (!telegram_id) {
       const initData = req.headers['x-telegram-init-data'];
-      console.log('🔍 /api/profile - initData присутствует:', !!initData);
       if (initData) {
         try {
           const urlParams = new URLSearchParams(initData);
           const userData = urlParams.get('user');
-          console.log('🔍 /api/profile - userData из initData:', userData ? 'присутствует' : 'отсутствует');
           if (userData) {
             const user = JSON.parse(decodeURIComponent(userData));
             telegram_id = user.id?.toString();
-            console.log('🔍 /api/profile - telegram_id из initData:', telegram_id);
           }
         } catch (error) {
           console.error('❌ /api/profile - Ошибка парсинга initData:', error);
         }
       }
     }
-    
+
     if (!telegram_id) {
-      console.log('❌ /api/profile - telegram_id не найден ни в query, ни в initData');
       return res.status(401).json({ error: 'Не авторизован' });
     }
-    
-    console.log('🔍 /api/profile - Ищем пользователя:', telegram_id);
-    
+
     // Получаем данные пользователя
     const [userRows] = await dbConnection.execute(`
       SELECT telegram_id, commission, created_at, full_name, phone_number, preferred_currency, avatar_url
       FROM users 
       WHERE telegram_id = ?
     `, [telegram_id]);
-    
+
     if (userRows.length === 0) {
-      console.log('❌ /api/profile - Пользователь не найден в БД:', telegram_id);
       return res.status(404).json({ error: 'Пользователь не найден' });
     }
-    
-    console.log('✅ /api/profile - Пользователь найден:', telegram_id);
-    
+
     const user = userRows[0];
     
     // Получаем статистику заказов (оплаченные и завершенные)
@@ -4047,8 +3769,6 @@ app.patch('/api/users', async (req, res) => {
         INSERT INTO users (telegram_id, commission, full_name, phone_number, preferred_currency, avatar_url, current_level, created_at) 
         VALUES (?, 1000, ?, ?, ?, ?, 'Bronze', NOW())
       `, [telegram_id, full_name, phone_number, preferred_currency, avatar_url]);
-      
-      console.log(`✅ Создан новый пользователь ${telegram_id}, level=Bronze`);
     } else {
       // Обновляем существующего пользователя
       await dbConnection.execute(`
@@ -4111,8 +3831,6 @@ app.post('/api/yuan-purchase', async (req, res) => {
         INSERT INTO users (telegram_id, username, full_name, commission, current_level, created_at) 
         VALUES (?, ?, ?, 1000, 'Bronze', NOW())
       `, [telegramId, username || 'unknown', (firstName && lastName) ? `${firstName} ${lastName}` : (firstName || 'Пользователь')]);
-      
-      console.log(`✅ Создан новый пользователь ${telegramId}, level=Bronze`);
     }
     
     // Создаем запись о покупке
@@ -4842,11 +4560,9 @@ app.post('/api/admin/confirm-order', async (req, res) => {
     
     // Отправляем уведомление пользователю
     const telegramId = await getTelegramIdByOrderId(orderId, type);
-    console.log(`🔍 Подтверждение заказа: orderId=${orderId}, type=${type}, telegramId=${telegramId}`);
     if (telegramId) {
-      const notificationResult = await sendUserNotification(telegramId, 'confirm', type, orderId);
-      console.log(`📤 Результат отправки уведомления: ${notificationResult}`);
-      
+      await sendUserNotification(telegramId, 'confirm', type, orderId);
+
       // Обновляем статистику пользователя только после подтверждения
       await updateUserStatsAfterConfirmation(telegramId, orderId, type);
       
@@ -4942,7 +4658,6 @@ app.post('/api/admin/confirm-order', async (req, res) => {
                     `✨ Всего XP: ${xpResult.totalXP}`;
                   // Включаем уведомления для продакшена
               await sendTelegramMessage(telegramId, levelUpMsg);
-              console.log('🎊 Level up notification sent:', levelUpMsg);
                 }
                 
                 for (const achievement of achievements) {
@@ -5044,7 +4759,6 @@ async function getTelegramIdByOrderId(orderId, type) {
 
 async function sendUserNotification(telegramId, action, type, orderId) {
   try {
-    console.log(`📤 sendUserNotification вызвана: telegramId=${telegramId}, action=${action}, type=${type}, orderId=${orderId}`);
     const botToken = process.env.BOT_TOKEN;
     
     if (!botToken) {
@@ -5062,8 +4776,7 @@ async function sendUserNotification(telegramId, action, type, orderId) {
     } else if (action === 'cancel') {
       message = `😔 К сожалению, ваш заказ #${orderId} был отменен. Очень жаль, надеемся в следующий раз закажете еще! Если у вас есть вопросы, обращайтесь к нашему менеджеру.`;
     }
-    
-    console.log(`📤 Отправляем уведомление пользователю ${telegramId}: ${message.substring(0, 50)}...`);
+
     const url = `https://api.telegram.org/bot${botToken}/sendMessage`;
     const data = JSON.stringify({
       chat_id: telegramId,
@@ -5087,7 +4800,6 @@ async function sendUserNotification(telegramId, action, type, orderId) {
         });
         res.on('end', () => {
           if (res.statusCode === 200) {
-            console.log(`✅ Уведомление пользователю ${telegramId} отправлено успешно`);
             resolve(true);
           } else {
             console.error(`❌ Ошибка отправки уведомления пользователю ${telegramId}:`, responseData);
@@ -5129,8 +4841,6 @@ async function updateUserStatsAfterConfirmation(telegramId, orderId, type) {
               last_activity = NOW()
           WHERE telegram_id = ?
         `, [savings, telegramId]);
-        
-        console.log(`✅ Обновлена статистика пользователя ${telegramId}: +${savings} руб. экономии`);
       }
     } else if (type === 'yuan') {
       // Получаем данные покупки юаней
@@ -5148,9 +4858,7 @@ async function updateUserStatsAfterConfirmation(telegramId, orderId, type) {
               last_activity = NOW()
           WHERE telegram_id = ?
         `, [savings, telegramId]);
-        
-        console.log(`✅ Обновлена статистика пользователя ${telegramId}: +${savings} руб. экономии`);
-        
+
         // Уровень и достижения обновляются через gamification (XP-based) в confirm-order
         // Здесь только обновляем total_savings — не перезаписываем current_level по заказам
       }
@@ -5334,7 +5042,6 @@ app.get('/api/admin/users-list', async (req, res) => {
 
 // Мониторинг системы
 app.get('/api/admin/system-status', async (req, res) => {
-  console.log('📊 /api/admin/system-status - запрос получен');
   try {
     const startTime = Date.now();
 
@@ -5437,7 +5144,6 @@ app.get('/api/admin/system-status', async (req, res) => {
       responseTime
     };
 
-    console.log('📊 /api/admin/system-status - успешно');
     res.json({ success: true, data: systemStats });
   } catch (error) {
     console.error('❌ Ошибка получения статуса системы:', error);
@@ -5911,9 +5617,7 @@ app.get('/api/admin/order-details/:orderId', async (req, res) => {
 app.post('/api/admin/update-order-status', async (req, res) => {
   try {
     const { orderId, status } = req.body;
-    
-    console.log('📝 Запрос на обновление статуса заказа:', { orderId, status, body: req.body });
-    
+
     if (!orderId || !status) {
       console.error('❌ Отсутствуют необходимые параметры:', { orderId, status });
       return res.status(400).json({ error: 'Необходимы orderId и status' });
@@ -5951,7 +5655,6 @@ app.post('/api/admin/update-order-status', async (req, res) => {
 
           try {
             await sendTelegramMessage(order.telegram_id, message);
-            console.log(`✅ Уведомление отправлено пользователю ${order.telegram_id} о смене статуса заказа ${orderId}`);
           } catch (telegramError) {
             console.error('❌ Ошибка отправки уведомления в Telegram:', telegramError);
             // Не прерываем выполнение, если уведомление не отправилось
@@ -6126,14 +5829,11 @@ app.get('/api/admin/orders-for-profit', async (req, res) => {
 app.get('/api/tracking/:trackingNumber', async (req, res) => {
   try {
     const { trackingNumber } = req.params;
-    console.log(`🔍 Поиск заказа по трек-номеру: ${trackingNumber}`);
-    
+
     // Получаем данные из Telegram WebApp
     const initData = req.headers['x-telegram-init-data'];
-    console.log('📱 InitData получен:', !!initData);
-    
+
     if (!initData) {
-      console.log('❌ Нет initData');
       return res.status(401).json({ error: 'Не авторизован' });
     }
 
@@ -6141,10 +5841,8 @@ app.get('/api/tracking/:trackingNumber', async (req, res) => {
     const urlParams = new URLSearchParams(initData);
     const userData = JSON.parse(decodeURIComponent(urlParams.get('user') || '{}'));
     const telegramId = userData.id;
-    console.log('👤 Telegram ID:', telegramId);
 
     if (!telegramId) {
-      console.log('❌ Нет telegram_id');
       return res.status(401).json({ error: 'Не авторизован' });
     }
 
@@ -6165,20 +5863,12 @@ app.get('/api/tracking/:trackingNumber', async (req, res) => {
       WHERE dt.internal_tracking_number = ? AND o.telegram_id = ?
     `, [trackingNumber, telegramId]);
 
-    console.log(`📦 Найдено записей: ${rows.length}`);
-
     if (rows.length === 0) {
-      console.log('❌ Заказ не найден');
       return res.status(404).json({ error: 'Заказ не найден или не принадлежит вам' });
     }
 
     const trackingData = rows[0];
-    console.log('✅ Найден заказ:', {
-      order_id: trackingData.order_id,
-      status: trackingData.status,
-      tracking_number: trackingData.internal_tracking_number
-    });
-    
+
     res.json({
       success: true,
       trackingNumber: trackingData.internal_tracking_number,
@@ -6196,7 +5886,6 @@ app.get('/api/tracking/:trackingNumber', async (req, res) => {
 // Получение всех заказов для админ панели доставки
 app.get('/api/admin/delivery', async (req, res) => {
   try {
-    console.log('🔍 Запрос на получение заказов для доставки');
     await ensureDBConnection();
 
     const [rows] = await dbConnection.execute(`
@@ -6217,15 +5906,6 @@ app.get('/api/admin/delivery', async (req, res) => {
       LEFT JOIN delivery_tracking dt ON o.order_id = dt.order_id
       ORDER BY o.created_at DESC
     `);
-
-    console.log(`📦 Найдено заказов: ${rows.length}`);
-    if (rows.length > 0) {
-      console.log('📋 Пример заказа:', {
-        order_id: rows[0].order_id,
-        tracking_number: rows[0].internal_tracking_number,
-        status: rows[0].delivery_status
-      });
-    }
 
     res.json({
       success: true,
@@ -6566,19 +6246,16 @@ app.post('/api/gamification/daily-login', async (req, res) => {
     
     // Если запрос был пропущен из-за concurrent access, не отправляем уведомления
     if (result.skipped) {
-      console.log(`[Daily Login] Запрос пропущен для ${telegramId}: ${result.reason}`);
       return res.json(result);
     }
-    
+
     // Если уже заходил сегодня, не отправляем никаких уведомлений
     if (result.alreadyLoggedToday) {
-      console.log(`[Daily Login] Пользователь ${telegramId} уже заходил сегодня. Стрик: ${result.streak}`);
       return res.json(result);
     }
-    
+
     // Отправляем уведомления о достижениях, если они были разблокированы
     if (result.unlockedAchievements && result.unlockedAchievements.length > 0) {
-      console.log(`[Daily Login] Разблокировано ${result.unlockedAchievements.length} достижений для ${telegramId}`);
       for (const achievement of result.unlockedAchievements) {
         if (achievement.achievement) {
           let achievementMsg = `🏆 <b>Достижение разблокировано!</b>\n\n` +
@@ -6592,7 +6269,6 @@ app.post('/api/gamification/daily-login', async (req, res) => {
           
           try {
             await sendTelegramMessage(telegramId, achievementMsg);
-            console.log(`[Daily Login] Отправлено уведомление о достижении ${achievement.achievement.key} для ${telegramId}`);
           } catch (msgError) {
             console.warn('⚠️ Не удалось отправить уведомление о достижении:', msgError);
           }
@@ -6610,7 +6286,6 @@ app.post('/api/gamification/daily-login', async (req, res) => {
       
       try {
         await sendTelegramMessage(telegramId, streakMsg);
-        console.log(`[Daily Login] Отправлено уведомление о стрике ${result.streak} дней для ${telegramId}`);
       } catch (msgError) {
         console.warn('⚠️ Не удалось отправить уведомление о стрике:', msgError);
       }
@@ -6719,7 +6394,6 @@ app.get('/api/gamification/:telegramId/achievements-by-category', async (req, re
 // Ручная проверка истечения скидок
 app.post('/api/check-expired-discounts', async (req, res) => {
   try {
-    console.log('🔍 Ручная проверка истечения скидок...');
     await checkExpiredDiscounts();
     res.json({ 
       success: true, 
@@ -6888,7 +6562,6 @@ process.on('SIGTERM', async () => {
 // Ручной endpoint для тестирования проверки комиссий
 app.post('/api/admin/check-expired-commissions', async (req, res) => {
   try {
-    console.log('🔍 Ручная проверка истечения комиссий...');
     await checkExpiredDiscounts();
     res.json({ success: true, message: 'Проверка комиссий выполнена' });
   } catch (error) {
@@ -7076,11 +6749,7 @@ app.post('/api/calculate-price', async (req, res) => {
     // Проверяем достижения по расчетам
     if (gamificationService) {
       try {
-        const result = await gamificationService.checkSavingsAchievements(telegramId);
-        
-        if (result.length > 0) {
-          console.log(`🎉 Разблокировано ${result.length} достижений для пользователя ${telegramId}`);
-        }
+        await gamificationService.checkSavingsAchievements(telegramId);
       } catch (gamificationError) {
         console.error('Ошибка проверки достижений:', gamificationError);
       }

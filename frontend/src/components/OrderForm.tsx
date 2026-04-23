@@ -2328,15 +2328,8 @@ const OrderForm: React.FC<OrderFormProps> = ({ onNavigate, toggleTheme, isDarkTh
               <VideoPlayer 
                 controls 
                 preload="metadata"
-                onError={(e) => {
-                  console.log('Видео не загрузилось, показываем текстовую инструкцию');
+                onError={() => {
                   setVideoError(true);
-                }}
-                onLoadStart={() => {
-                  console.log('Начинаем загрузку видео...');
-                }}
-                onCanPlay={() => {
-                  console.log('Видео готово к воспроизведению');
                 }}
               >
                 <source src="/images/tutorial.mp4" type="video/mp4" />
@@ -2465,7 +2458,6 @@ const OrderForm: React.FC<OrderFormProps> = ({ onNavigate, toggleTheme, isDarkTh
                 src="/images/HelpImage.JPEG" 
                 alt="Инструкция по поиску ссылки"
                 onError={(e) => {
-                  console.log('Изображение не загрузилось');
                   e.currentTarget.style.display = 'none';
                 }}
               />

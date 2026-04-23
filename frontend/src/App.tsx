@@ -817,9 +817,7 @@ const App: React.FC = () => {
         }),
       });
 
-      if (response.ok) {
-        console.log('User initialized successfully');
-      } else {
+      if (!response.ok) {
         console.error('Failed to initialize user');
       }
     } catch (error) {
@@ -836,7 +834,6 @@ const App: React.FC = () => {
         const telegramId = user?.id?.toString();
         
         if (!telegramId) {
-          console.log('[App] Telegram ID не найден, пропускаем ежедневный вход');
           return;
         }
         
@@ -847,7 +844,6 @@ const App: React.FC = () => {
         const lastCallDate = localStorage.getItem(lastCallKey);
         
         if (lastCallDate === today) {
-          console.log('[App] Ежедневный вход уже вызывался сегодня, пропускаем');
           return;
         }
         
@@ -862,18 +858,11 @@ const App: React.FC = () => {
         
         if (response.ok) {
           const result = await response.json();
-          console.log('[App] Ежедневный вход обновлен:', result);
-          
-          // Если уже заходил сегодня, обновляем метку в localStorage текущей датой
           if (result.alreadyLoggedToday) {
-            console.log('[App] Пользователь уже заходил сегодня, обновляем метку');
             localStorage.setItem(lastCallKey, today);
           }
-          // Если вход был успешным, метка уже установлена выше
         } else {
-          // Если ошибка, удаляем ключ, чтобы можно было повторить
           localStorage.removeItem(lastCallKey);
-          console.warn('[App] Ошибка обновления ежедневного входа:', response.status);
         }
       } catch (error) {
         console.error('[App] Ошибка при обновлении ежедневного входа:', error);
@@ -897,8 +886,6 @@ const App: React.FC = () => {
   }, []);
 
   useEffect(() => {
-    console.log('[App] useEffect запущен');
-    
     try {
       // Выбор случайной китайской мудрости
       const randomIndex = Math.floor(Math.random() * chineseWisdom.length);
@@ -945,8 +932,6 @@ const App: React.FC = () => {
       const user = tg.initDataUnsafe?.user;
       if (user) {
         setTelegramUser(user);
-        console.log('[App] Telegram user:', user);
-        
         // Инициализируем пользователя в базе данных
         initializeUser(user).catch(err => {
           console.error('[App] Ошибка инициализации пользователя:', err);
@@ -1006,20 +991,14 @@ const App: React.FC = () => {
     // Завершение загрузки - ВСЕГДА завершаем через 2 секунды, независимо от состояния
     // Это гарантирует, что приложение запустится даже при проблемах
     const loadingTimeout = setTimeout(() => {
-      console.log('[App] Загрузка завершена по таймауту (2 сек)');
       setIsLoading(false);
     }, 2000);
     
-    // Также завершаем загрузку быстрее, если Telegram WebApp готов
     if (window.Telegram?.WebApp) {
-      console.log('[App] Telegram WebApp обнаружен');
       setTimeout(() => {
-        console.log('[App] Завершаем загрузку (Telegram готов)');
         setIsLoading(false);
         clearTimeout(loadingTimeout);
       }, 500);
-    } else {
-      console.warn('[App] Telegram WebApp не обнаружен при инициализации');
     }
     
     return () => {
@@ -1074,8 +1053,6 @@ const App: React.FC = () => {
       });
 
       if (response.ok) {
-        console.log('Referral processed successfully');
-        // Haptic feedback
         if (window.Telegram?.WebApp?.HapticFeedback) {
           window.Telegram.WebApp.HapticFeedback.notificationOccurred('success');
         }

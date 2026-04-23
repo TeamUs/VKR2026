@@ -1325,7 +1325,6 @@ const PriceCalculator: React.FC<PriceCalculatorProps> = ({ onNavigate, toggleThe
                 src="/images/HelpImageCalculator.JPEG" 
                 alt="Пример страницы товара с ценой в юанях"
                 onError={(e) => {
-                  console.log('Изображение не загрузилось');
                   e.currentTarget.style.display = 'none';
                 }}
               />

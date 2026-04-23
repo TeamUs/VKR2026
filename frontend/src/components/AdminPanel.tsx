@@ -1579,15 +1579,12 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
       
       if (response.ok) {
         const data = await response.json();
-        console.log('📊 Загружены заказы для расчета прибыли:', data.orders);
         setProfitOrders(data.orders || []);
       } else {
-        console.error('❌ Ошибка загрузки заказов для расчета:', response.status);
-        // Fallback - показываем все заказы со статусом paid или completed
+        console.error('Ошибка загрузки заказов для расчета:', response.status);
         const filteredOrders = orders.filter(order => 
           order.status === 'paid' || order.status === 'completed'
         );
-        console.log('⚠️ Используем fallback, найдено заказов:', filteredOrders.length);
         setProfitOrders(filteredOrders);
       }
     } catch (error) {
@@ -1860,16 +1857,12 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
 
   // Обновление статуса заказа
   const updateOrderStatus = async (orderId: number, newStatus: string) => {
-    console.log('📝 Обновление статуса заказа:', { orderId, newStatus });
-    
     try {
       const payload = {
         orderId: orderId,
         status: newStatus
       };
-      
-      console.log('📤 Отправляем payload:', payload);
-      
+
       const response = await fetch('api/admin/update-order-status', {
         method: 'POST',
         headers: {
@@ -1880,8 +1873,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
       });
 
       if (response.ok) {
-        const result = await response.json();
-        console.log('✅ Статус обновлен:', result);
+        await response.json();
         HapticFeedback.success();
         alert('Статус заказа обновлен!');
         loadAdminData();
@@ -6034,8 +6026,6 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
                               if (response.ok) {
                                 HapticFeedback.success();
                                 setExistingPurchases(prev => prev.filter(p => p !== imagePath));
-                                // Уведомление через console, alert убран для лучшего UX
-                                console.log('✅ Изображение удалено:', filename);
                               } else {
                                 HapticFeedback.error();
                                 alert(`❌ Ошибка: ${result.error || 'Неизвестная ошибка'}`);
@@ -6243,7 +6233,6 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
                       try {
                         if (window.Telegram?.WebApp) {
                           initData = window.Telegram.WebApp.initData || '';
-                          console.log('📤 initData получен:', initData ? `${initData.substring(0, 50)}...` : 'пустой');
                         }
                       } catch (err) {
                         console.error('❌ Ошибка получения initData:', err);
@@ -6298,9 +6287,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate, toggleTheme, isDark
 
                         // Убеждаемся, что initData - это строка и правильно закодирована
                         const cleanInitData = String(initData).trim();
-                        
-                        console.log(`📤 Отправка ${selectedFiles.length} файлов на сервер...`);
-                        
+
                         let response;
                         try {
                           response = await fetch('api/admin/purchases/upload', {

@@ -366,7 +366,6 @@ const PurchasesGallery: React.FC<PurchasesGalleryProps> = ({ isDarkTheme, onModa
   // Функция для загрузки изображений через API
   const loadPurchaseImages = async () => {
     try {
-      console.log('Загружаем изображения выкупов...');
       const response = await fetch('api/purchases/images');
       if (!response.ok) {
         throw new Error('Ошибка получения списка изображений');
@@ -374,8 +373,6 @@ const PurchasesGallery: React.FC<PurchasesGalleryProps> = ({ isDarkTheme, onModa
       
       const data = await response.json();
       const loadedImages: string[] = data || [];
-      
-      console.log(`Загружено ${loadedImages.length} изображений выкупов`);
       setPurchaseImages(loadedImages);
       
     } catch (error) {
@@ -446,8 +443,7 @@ const PurchasesGallery: React.FC<PurchasesGalleryProps> = ({ isDarkTheme, onModa
     if (HapticFeedback.light) {
       HapticFeedback.light();
     }
-    console.log('Opening full item:', item);
-    
+
     // Прокрутка уже заблокирована модальным окном, просто открываем полноэкранный просмотр
     setSelectedImage(item);
   };
@@ -515,7 +511,6 @@ const PurchasesGallery: React.FC<PurchasesGalleryProps> = ({ isDarkTheme, onModa
                     onClick={(e) => {
                       e.preventDefault();
                       e.stopPropagation();
-                      console.log('Image clicked:', imageSrc);
                       handleImageClick(imageSrc);
                     }}
                     onError={(e) => {
@@ -551,7 +546,6 @@ const PurchasesGallery: React.FC<PurchasesGalleryProps> = ({ isDarkTheme, onModa
                     onClick={(e) => {
                       e.preventDefault();
                       e.stopPropagation();
-                      console.log('Item clicked:', item);
                       handleImageClick(item);
                     }}
                   >
@@ -577,9 +571,6 @@ const PurchasesGallery: React.FC<PurchasesGalleryProps> = ({ isDarkTheme, onModa
               onError={(e) => {
                 console.error('Error loading full image:', selectedImage);
                 e.currentTarget.style.display = 'none';
-              }}
-              onLoad={() => {
-                console.log('Full image loaded successfully:', selectedImage);
               }}
             />
           ) : (

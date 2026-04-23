@@ -534,14 +534,6 @@ const WriteReviewModal: React.FC<WriteReviewModalProps> = ({ isOpen, onClose, on
       // В Telegram WebApp аватарка может быть доступна через photo_url
       // Если нет, нужно получить через Telegram Bot API
       const avatarUrl = telegramUser?.photo_url || null;
-      
-      console.log('Отправляемые данные:', {
-        telegram_id: telegramId,
-        username: username,
-        full_name: fullName,
-        rating: rating,
-        review_text: reviewText
-      });
 
       const formData = new FormData();
       formData.append('telegram_id', telegramId);

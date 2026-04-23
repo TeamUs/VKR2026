@@ -534,7 +534,6 @@ const ReferralSystem: React.FC<ReferralSystemProps> = ({ onNavigate, toggleTheme
   const [success, setSuccess] = useState('');
   const [showCopyModal, setShowCopyModal] = useState(false);
 
-  // Username бота для реферальной ссылки (для ВКР задаётся VITE_BOT_USERNAME в .env.production)
   const botUsername = import.meta.env.VITE_BOT_USERNAME || 'poizonic_bot';
 
   useEffect(() => {
@@ -553,15 +552,10 @@ const ReferralSystem: React.FC<ReferralSystemProps> = ({ onNavigate, toggleTheme
   const loadReferralStats = async () => {
     try {
       const telegramId = (window as any).Telegram?.WebApp?.initDataUnsafe?.user?.id;
-      console.log('🔍 Telegram ID:', telegramId);
-      console.log('🔍 Telegram WebApp:', (window as any).Telegram?.WebApp);
-      
       if (!telegramId) {
-        console.log('⚠️ Telegram ID не найден - используем значения по умолчанию');
         return;
       }
 
-      console.log('📡 Отправляем запрос к API с Telegram ID:', telegramId);
       const response = await fetch('api/referral-stats', {
         method: 'POST',
         headers: {
@@ -572,15 +566,12 @@ const ReferralSystem: React.FC<ReferralSystemProps> = ({ onNavigate, toggleTheme
 
       if (response.ok) {
         const result = await response.json();
-        console.log('📊 Получены данные статистики:', result);
         if (result.success) {
           setStats(result.data);
         }
-      } else {
-        console.log('❌ Ошибка API:', response.status, response.statusText);
       }
     } catch (error) {
-      console.error('❌ Ошибка загрузки статистики:', error);
+      console.error('Ошибка загрузки статистики:', error);
     }
   };
 

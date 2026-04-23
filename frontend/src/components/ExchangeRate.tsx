@@ -393,22 +393,16 @@ const ExchangeRate: React.FC<ExchangeRateProps> = ({ onNavigate, isDarkTheme, to
   }, []);
 
   const loadExchangeRate = async () => {
-    console.log('Loading exchange rate...');
     setIsLoading(true);
     setError(null);
 
     try {
-      console.log('Fetching from /api/exchange-rate');
       const response = await fetch('api/exchange-rate');
-      console.log('Response status:', response.status);
-      
       const data = await response.json();
-      console.log('Response data:', data);
 
       if (response.ok) {
         setExchangeRate(data.rate);
         setLastUpdated(new Date());
-        console.log('Exchange rate updated:', data.rate);
       } else {
         throw new Error(data.error || 'Ошибка получения курса');
       }
@@ -423,7 +417,6 @@ const ExchangeRate: React.FC<ExchangeRateProps> = ({ onNavigate, isDarkTheme, to
   };
 
   const handleRefresh = () => {
-    console.log('Refresh button clicked');
     HapticFeedback.medium();
     loadExchangeRate();
   };

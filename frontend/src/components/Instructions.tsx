@@ -1261,15 +1261,6 @@ const Instructions: React.FC<InstructionsProps> = ({ onNavigate, toggleTheme, is
             <VideoPlayer 
               controls 
               preload="metadata"
-              onError={() => {
-                console.log('Видео не загрузилось');
-              }}
-              onLoadStart={() => {
-                console.log('Начинаем загрузку видео...');
-              }}
-              onCanPlay={() => {
-                console.log('Видео готово к воспроизведению');
-              }}
             >
               <source src="/images/tutorial.mp4" type="video/mp4" />
               <source src="/images/tutorial.MOV" type="video/quicktime" />

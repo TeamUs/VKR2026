@@ -1137,9 +1137,6 @@ const Reviews: React.FC<ReviewsProps> = ({ onNavigate, toggleTheme, isDarkTheme,
                                     console.error('Ошибка загрузки изображения в списке:', firstPhoto);
                                     e.currentTarget.style.display = 'none';
                                   }}
-                                  onLoad={() => {
-                                    console.log('Изображение в списке загружено:', firstPhoto);
-                                  }}
                                 />
                               )}
                               {remainingCount > 0 && (
@@ -1321,9 +1318,6 @@ const Reviews: React.FC<ReviewsProps> = ({ onNavigate, toggleTheme, isDarkTheme,
                     onError={(e) => {
                       console.error('Ошибка загрузки изображения:', photo);
                       e.currentTarget.style.display = 'none';
-                    }}
-                    onLoad={() => {
-                      console.log('Изображение загружено успешно:', photo);
                     }}
                   />
                 )}

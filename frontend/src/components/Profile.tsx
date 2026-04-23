@@ -1683,8 +1683,8 @@ const Profile: React.FC<ProfileProps> = ({ telegramId, isDarkTheme, toggleTheme,
                   }
                 }
               }
-            } catch (e) {
-              console.log('Не удалось проверить историю уровней');
+            } catch {
+              /* ignore */
             }
           };
           
@@ -1748,8 +1748,6 @@ const Profile: React.FC<ProfileProps> = ({ telegramId, isDarkTheme, toggleTheme,
           
           // Проверяем недавнее повышение уровня
           await checkRecentLevelUp();
-          
-          console.log('✅ Данные геймификации загружены:', gamificationData);
         }
       } catch (gamificationError) {
         console.error('❌ Ошибка загрузки геймификации:', gamificationError);
@@ -1816,7 +1814,6 @@ const Profile: React.FC<ProfileProps> = ({ telegramId, isDarkTheme, toggleTheme,
       
       if (data.success) {
         setAllAchievements(data.achievements);
-        console.log('✅ Достижения загружены:', data.achievements.length);
       } else {
         console.error('Ошибка загрузки достижений:', data.message);
       }
@@ -1834,7 +1831,6 @@ const Profile: React.FC<ProfileProps> = ({ telegramId, isDarkTheme, toggleTheme,
       const data = await response.json();
       
       if (data.success) {
-        console.log('✅ Статистика загружена:', data.stats);
         return data.stats;
       } else {
         console.error('Ошибка загрузки статистики:', data.message);
@@ -1860,8 +1856,6 @@ const Profile: React.FC<ProfileProps> = ({ telegramId, isDarkTheme, toggleTheme,
       const data = await response.json();
       
       if (data.success) {
-        console.log('✅ Ежедневный вход засчитан:', data);
-        
         // Показываем уведомление
         if (data.achievementsUnlocked > 0) {
           setSuccess(`🎉 Разблокировано ${data.achievementsUnlocked} достижений!`);
