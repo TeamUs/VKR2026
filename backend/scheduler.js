@@ -97,10 +97,6 @@ async function getOrdersStats() {
       WHERE created_at >= DATE_SUB(NOW(), INTERVAL 24 HOUR)
     `);
     
-    // Покупки юаней в ВКР-приложении отключены.
-    // Не делаем запросы в `yuan_purchases`, чтобы полностью убрать функциональность.
-    const newYuanPurchases = 0;
-    
     connection.release(); // Возвращаем соединение в pool вместо закрытия
     
     return {
@@ -109,8 +105,7 @@ async function getOrdersStats() {
       processingOrders: processingOrders[0].count,
       readyOrders: readyOrders[0].count,
       shippedOrders: shippedOrders[0].count,
-      newUsers: newUsers[0].count,
-      newYuanPurchases
+      newUsers: newUsers[0].count
     };
   } catch (error) {
     console.error('❌ Ошибка получения статистики заказов:', error);

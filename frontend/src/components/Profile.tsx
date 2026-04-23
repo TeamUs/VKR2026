@@ -67,12 +67,6 @@ interface ProfileData {
       total_referrals: number;
       total_clicks: number;
     };
-    yuan_purchases: {
-      total_purchases: number;
-      total_spent_rub: number;
-      total_bought_cny: number;
-      total_savings: number;
-    };
     total_savings: {
       total: number;
     };
@@ -1284,27 +1278,17 @@ const Profile: React.FC<ProfileProps> = ({ telegramId, isDarkTheme, toggleTheme,
     // чтобы избежать дублирования вызовов и повторных уведомлений
     // ========== End Daily Login ==========
     
-    // Обновляем данные при возврате на страницу
+    // Обновляем данные при возврате в приложение — без full-screen «Загрузка профиля…»
     const handleFocus = () => {
       fetchOrdersHistory(telegramId);
-      fetchUserOrders(telegramId);
-      fetchProfileData(telegramId);
+      void fetchUserOrders(telegramId, { silent: true });
+      void fetchProfileData(telegramId, { silent: true });
     };
     
     window.addEventListener('focus', handleFocus);
     
-    // Также обновляем данные периодически (каждые 30 секунд), если страница видима
-    const interval = setInterval(() => {
-      if (!document.hidden) {
-        fetchOrdersHistory(telegramId);
-        fetchUserOrders(telegramId);
-        fetchProfileData(telegramId);
-      }
-    }, 30000);
-    
     return () => {
       window.removeEventListener('focus', handleFocus);
-      clearInterval(interval);
     };
   }, [telegramId]);
 
@@ -1599,8 +1583,11 @@ const Profile: React.FC<ProfileProps> = ({ telegramId, isDarkTheme, toggleTheme,
   };
 
   // Загрузка заказов пользователя
-  const fetchUserOrders = async (userId?: string) => {
-    setLoadingOrders(true);
+  const fetchUserOrders = async (userId?: string, options?: { silent?: boolean }) => {
+    const silent = options?.silent === true;
+    if (!silent) {
+      setLoadingOrders(true);
+    }
     try {
       const response = await fetch('api/user/orders', {
         headers: {
@@ -1615,18 +1602,23 @@ const Profile: React.FC<ProfileProps> = ({ telegramId, isDarkTheme, toggleTheme,
     } catch (error) {
       console.error('Ошибка загрузки заказов:', error);
     } finally {
-      setLoadingOrders(false);
+      if (!silent) {
+        setLoadingOrders(false);
+      }
     }
   };
 
-  const fetchProfileData = async (userId?: string) => {
+  const fetchProfileData = async (userId?: string, options?: { silent?: boolean }) => {
+    const silent = options?.silent === true;
     const currentTelegramId = userId || telegramId;
     if (!currentTelegramId) {
       console.error('Telegram ID не найден');
       return;
     }
     try {
-      setLoading(true);
+      if (!silent) {
+        setLoading(true);
+      }
       
       // Получаем РЕАЛЬНЫЕ данные профиля из БД
       const profileResponse = await fetch('api/profile', {
@@ -1637,8 +1629,10 @@ const Profile: React.FC<ProfileProps> = ({ telegramId, isDarkTheme, toggleTheme,
       
       if (!profileResponse.ok) {
         if (profileResponse.status === 404 || profileResponse.status === 401) {
-          setError('Не удалось загрузить профиль. Пожалуйста, авторизуйтесь.');
-          setLoading(false);
+          if (!silent) {
+            setError('Не удалось загрузить профиль. Пожалуйста, авторизуйтесь.');
+            setLoading(false);
+          }
           return;
         } else {
           throw new Error('Ошибка загрузки профиля');
@@ -1758,9 +1752,13 @@ const Profile: React.FC<ProfileProps> = ({ telegramId, isDarkTheme, toggleTheme,
       setProfileData(profileData);
     } catch (err) {
       console.error('Ошибка загрузки профиля:', err);
-      setError(err instanceof Error ? err.message : 'Неизвестная ошибка');
+      if (!silent) {
+        setError(err instanceof Error ? err.message : 'Неизвестная ошибка');
+      }
     } finally {
-      setLoading(false);
+      if (!silent) {
+        setLoading(false);
+      }
     }
   };
 
@@ -1866,8 +1864,8 @@ const Profile: React.FC<ProfileProps> = ({ telegramId, isDarkTheme, toggleTheme,
           triggerConfetti(['#FFD700', '#FFA500', '#FF6B35']);
         }
         
-        // Обновляем данные профиля
-        await fetchProfileData();
+        // Обновляем данные профиля без full-screen загрузки
+        await fetchProfileData(undefined, { silent: true });
       } else {
         console.error('Ошибка ежедневного входа:', data.message);
       }

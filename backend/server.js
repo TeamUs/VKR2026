@@ -835,7 +835,7 @@ async function parseProductPage(url) {
         const numberMatch = text.match(/(\d+(?:\.\d+)?)/);
         if (numberMatch) {
           const num = parseFloat(numberMatch[1]);
-          // Проверяем, что это похоже на цену (от 1 до 10000 юаней)
+          // Проверяем, что это похоже на цену в CNY (от 1 до 10000)
           if (num >= 1 && num <= 10000) {
             // Если в тексте есть символы валюты или это кнопка с голубым фоном
             if (text.includes('¥') || text.includes('元') || text.includes('块') || 
@@ -1478,8 +1478,8 @@ async function parseProductPage(url) {
   }
 }
 
-// Функция получения курса юаня (только API Центробанка России)
-async function getYuanToRubExchangeRate() {
+// Курс CNY к RUB по данным ЦБ РФ (для расчёта заказов; не связано с покупкой валюты)
+async function getCnyToRubFromCbr() {
   try {
     const cbrResponse = await fetch('https://www.cbr-xml-daily.ru/daily_json.js', {
       headers: {
@@ -1502,11 +1502,11 @@ async function getYuanToRubExchangeRate() {
       const adjustedRate = cnyRate + 1.1;
       return adjustedRate;
     } else {
-      console.error('⚠️ Курс юаня не найден в данных ЦБРФ, используется резервный');
+      console.error('⚠️ CNY в ответе ЦБРФ не найден, используется резервный курс');
       return DEFAULT_EXCHANGE_RATE;
     }
   } catch (error) {
-    console.error('❌ Ошибка получения курса юаня:', error.message);
+    console.error('❌ Ошибка получения CNY/RUB (ЦБРФ):', error.message);
     return DEFAULT_EXCHANGE_RATE;
   }
 }
@@ -1516,10 +1516,10 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'OK', timestamp: new Date().toISOString() });
 });
 
-// Получение курса юаня
+// Курс CNY к RUB
 app.get('/api/exchange-rate', async (req, res) => {
   try {
-    const rate = await getYuanToRubExchangeRate();
+    const rate = await getCnyToRubFromCbr();
     res.json({ rate: rate, timestamp: new Date().toISOString() });
   } catch (error) {
     console.error('Ошибка получения курса:', error);
@@ -1608,7 +1608,7 @@ app.post('/api/calculate-from-link', async (req, res) => {
     }
 
     // 6. Рассчитываем стоимость
-    const currentRate = await getYuanToRubExchangeRate();
+    const currentRate = await getCnyToRubFromCbr();
     
     const itemCostRub = productData.price * currentRate;
     const deliveryCost = weight * DELIVERY_COST_PER_KG;
@@ -1829,7 +1829,7 @@ app.post('/api/get-price-with-size', async (req, res) => {
     }
 
     // Рассчитываем стоимость
-    const currentRate = await getYuanToRubExchangeRate();
+    const currentRate = await getCnyToRubFromCbr();
     const itemCostRub = estimatedPrice * currentRate;
     const deliveryCost = weight * DELIVERY_COST_PER_KG;
     const commissionAmount = commission; // Фиксированная сумма в рублях
@@ -2039,7 +2039,7 @@ app.post('/api/calculate-price', async (req, res) => {
       }
     }
     
-    const currentRate = await getYuanToRubExchangeRate();
+    const currentRate = await getCnyToRubFromCbr();
     
     const itemCostRub = price * currentRate;
     const deliveryCost = weight * DELIVERY_COST_PER_KG;
@@ -3646,14 +3646,6 @@ app.get('/api/profile', async (req, res) => {
       WHERE referred_by = ?
     `, [telegram_id]);
     
-    // ВКР-приложение: покупка юаней отключена — не запрашиваем yuan_purchases для профиля.
-    const yuanStatsPlaceholder = {
-      total_purchases: 0,
-      total_spent_rub: 0,
-      total_bought_cny: 0,
-      total_savings: 0
-    };
-
     // Получаем экономию от заказов (заказы со статусом 'paid' или 'completed')
     // Экономия начисляется после подтверждения оплаты (status = 'paid')
     const [orderSavingsStats] = await dbConnection.execute(`
@@ -3679,7 +3671,7 @@ app.get('/api/profile', async (req, res) => {
       try {
         // Получаем данные пользователя из users таблицы
         const [userGamification] = await dbConnection.execute(`
-          SELECT xp, current_level, total_orders, total_yuan_bought, total_referrals, total_savings
+          SELECT xp, current_level, total_orders, total_referrals, total_savings
           FROM users 
           WHERE telegram_id = ?
         `, [telegram_id]);
@@ -3728,11 +3720,8 @@ app.get('/api/profile', async (req, res) => {
       statistics: {
         orders: orderStats[0],
         referrals: referralStats[0],
-        yuan_purchases: yuanStatsPlaceholder,
         order_savings: orderSavingsStats[0],
-        // «Сэкономлено» в ВКР: только заказы (paid/completed), без экономии с покупки юаней.
         total_savings: {
-          yuan_savings: 0,
           order_savings: parseFloat(orderSavingsStats[0].total_order_savings) || 0,
           total: parseFloat(orderSavingsStats[0].total_order_savings) || 0
         }
@@ -3785,134 +3774,6 @@ app.patch('/api/users', async (req, res) => {
   } catch (error) {
     console.error('Ошибка обновления профиля:', error);
     res.status(500).json({ error: 'Ошибка обновления профиля' });
-  }
-});
-
-// Покупка юаня
-app.post('/api/yuan-purchase', async (req, res) => {
-  try {
-    // В ВКР-приложении полностью отключена функциональность покупки юаней.
-    return res.status(410).json({ success: false, error: 'Yuan purchases are disabled in VKR app.' });
-    
-    const { 
-      telegramId, 
-      username, 
-      firstName, 
-      lastName, 
-      amountCny, 
-      amountRub, 
-      tariff, 
-      rate, 
-      savings, 
-      userLink 
-    } = req.body;
-    
-    if (!telegramId || !amountCny || !amountRub) {
-      return res.status(400).json({ error: 'Telegram ID, количество юаней и сумма обязательны' });
-    }
-    
-    const amountCnyNum = parseFloat(amountCny);
-    const amountRubNum = parseFloat(amountRub);
-    
-    if (amountCnyNum < 200 || amountCnyNum > 100000) {
-      return res.status(400).json({ error: 'Количество юаней должно быть от 200 до 100,000' });
-    }
-    
-    // Проверяем, существует ли пользователь
-    const [existingUser] = await dbConnection.execute(
-      'SELECT telegram_id FROM users WHERE telegram_id = ?',
-      [telegramId]
-    );
-    
-    if (existingUser.length === 0) {
-      // Создаем нового пользователя
-      // Автоматически присваиваем бронзовый уровень (0 XP требуется)
-      await dbConnection.execute(`
-        INSERT INTO users (telegram_id, username, full_name, commission, current_level, created_at) 
-        VALUES (?, ?, ?, 1000, 'Bronze', NOW())
-      `, [telegramId, username || 'unknown', (firstName && lastName) ? `${firstName} ${lastName}` : (firstName || 'Пользователь')]);
-    }
-    
-    // Создаем запись о покупке
-    const [result] = await dbConnection.execute(`
-      INSERT INTO yuan_purchases (telegram_id, amount_rub, amount_cny, exchange_rate, favorable_rate, savings, status)
-      VALUES (?, ?, ?, ?, ?, ?, 'pending')
-    `, [telegramId, amountRubNum, amountCnyNum, 12.5, rate, savings || 0]);
-    
-    // Логируем активность пользователя
-    await logUserActivity(telegramId, 'yuan_purchase', {
-      purchaseId: result.insertId,
-      amountRub: amountRubNum,
-      amountCny: amountCnyNum,
-      savings: savings || 0,
-      tariff: tariff
-    });
-
-    // Создаем системный лог
-    await createSystemLog('info', `Заказ на покупку юаня: ${amountCnyNum} CNY за ${amountRubNum} RUB (${tariff})`, {
-      telegramId: telegramId,
-      purchaseId: result.insertId,
-      amountRub: amountRubNum,
-      amountCny: amountCnyNum,
-      savings: savings || 0,
-      tariff: tariff,
-      userLink: userLink
-    }, telegramId);
-    
-    // Отправляем сообщение менеджеру
-    const managerMessage = `🛒 <b>Новый заказ на покупку юаня</b>
-
-💰 <b>Количество:</b> ${amountCnyNum.toFixed(2)} юаней
-💵 <b>Стоимость:</b> ${amountRubNum.toLocaleString('ru-RU')} ₽
-📊 <b>Тариф:</b> ${tariff}
-💸 <b>Курс:</b> ${rate.toFixed(2)} ₽ за юань
-💎 <b>Экономия:</b> ${(savings || 0).toLocaleString('ru-RU')} ₽
-
-👤 <b>Пользователь:</b> ${userLink}
-📝 <b>Имя:</b> ${firstName}${lastName ? ' ' + lastName : ''}
-📅 <b>Дата:</b> ${new Date().toLocaleString('ru-RU')}
-
-🆔 <b>Telegram ID:</b> <code>${telegramId}</code>`;
-
-    await sendManagerMessage(managerMessage);
-    
-    // NOTE: XP начисляется только после подтверждения покупки юаней админом
-    // См. admin panel endpoint для подтверждения покупки юаней
-    
-    res.json({
-      success: true,
-      purchase_id: result.insertId,
-      message: 'Заказ на покупку юаня успешно отправлен менеджеру!'
-    });
-  } catch (error) {
-    console.error('Ошибка покупки юаня:', error);
-    res.status(500).json({ error: 'Ошибка покупки юаня' });
-  }
-});
-
-// Получение истории покупок юаня
-app.get('/api/yuan-purchases', async (req, res) => {
-  try {
-    // В ВКР-приложении полностью отключена функциональность покупки юаней.
-    return res.json({ purchases: [] });
-    
-    const { telegram_id } = req.query;
-    
-    if (!telegram_id) {
-      return res.status(400).json({ error: 'Telegram ID обязателен' });
-    }
-    
-    const [rows] = await dbConnection.execute(`
-      SELECT purchase_id AS id, amount_rub, amount_cny, exchange_rate, favorable_rate, savings, status, created_at
-      FROM yuan_purchases 
-      WHERE telegram_id = ? AND status = 'completed'
-      ORDER BY created_at DESC
-    `, [telegram_id]);
-    
-    res.json({ purchases: rows });
-  } catch (error) {
-    console.error('Ошибка получения истории покупок:', error);
-    res.status(500).json({ error: 'Ошибка получения истории покупок' });
   }
 });
 
@@ -4220,20 +4081,7 @@ app.get('/api/admin/stats', async (req, res) => {
     );
     const ordersToday = ordersTodayResult[0].total;
     
-    // Общее количество покупок юаней
-    const [totalYuanResult] = await dbConnection.execute(
-      'SELECT COUNT(*) as total FROM yuan_purchases'
-    );
-    const totalYuanPurchases = totalYuanResult[0].total;
-    
-    // Покупки юаней сегодня
-    const [yuanTodayResult] = await dbConnection.execute(
-      'SELECT COUNT(*) as total FROM yuan_purchases WHERE DATE(created_at) = CURDATE()'
-    );
-    const yuanPurchasesToday = yuanTodayResult[0].total;
-    
     // Общая экономия клиентов: только заказы (оплаченные / завершённые).
-    // Покупки юаней в ВКР-приложении отключены — экономию с юаней сюда не суммируем.
     const [totalSavingsResult] = await dbConnection.execute(`
       SELECT COALESCE(SUM(estimated_savings), 0) AS total_savings
       FROM orders
@@ -4254,21 +4102,17 @@ app.get('/api/admin/stats', async (req, res) => {
       SELECT COUNT(DISTINCT telegram_id) as active_users
       FROM (
         SELECT telegram_id FROM orders WHERE created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)
-        UNION
-        SELECT telegram_id FROM yuan_purchases WHERE created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)
       ) as active_users_combined
     `);
     const activeUsers = activeUsersResult[0].active_users || 0;
     
-    // Конверсия (процент пользователей, которые сделали заказ или покупку)
+    // Конверсия (процент пользователей, которые сделали заказ)
     const [conversionResult] = await dbConnection.execute(`
       SELECT 
         COUNT(DISTINCT active_users.telegram_id) as converted_users
       FROM users
       LEFT JOIN (
         SELECT telegram_id FROM orders
-        UNION
-        SELECT telegram_id FROM yuan_purchases
       ) as active_users ON users.telegram_id = active_users.telegram_id
       WHERE active_users.telegram_id IS NOT NULL
     `);
@@ -4280,8 +4124,6 @@ app.get('/api/admin/stats', async (req, res) => {
       newUsersToday,
       totalOrders,
       ordersToday,
-      totalYuanPurchases,
-      yuanPurchasesToday,
       totalSavings,
       totalRevenue,
       activeUsers,
@@ -4314,15 +4156,11 @@ app.get('/api/admin/users', async (req, res) => {
           ELSE 'offline'
         END as status,
         COUNT(DISTINCT CASE WHEN o.status = 'completed' THEN o.order_id END) as orders_count,
-        COUNT(DISTINCT CASE WHEN yp.status = 'completed' THEN yp.id END) as yuan_purchases_count,
-        COALESCE(SUM(CASE WHEN yp.status = 'completed' THEN yp.savings ELSE 0 END), 0) as yuan_savings,
         COALESCE(SUM(CASE WHEN (o.status = 'paid' OR o.status = 'completed') THEN o.estimated_savings ELSE 0 END), 0) as order_savings,
-        /* ВКР: в админке «экономия» пользователя = только заказы, без юаней */
         COALESCE(SUM(CASE WHEN (o.status = 'paid' OR o.status = 'completed') THEN o.estimated_savings ELSE 0 END), 0) as total_savings,
         COUNT(DISTINCT r.telegram_id) as referrals_count
       FROM users u
       LEFT JOIN orders o ON u.telegram_id = o.telegram_id
-      LEFT JOIN yuan_purchases yp ON u.telegram_id = yp.telegram_id
       LEFT JOIN users r ON u.telegram_id = r.referred_by
       GROUP BY u.telegram_id, u.username, u.full_name, u.created_at, u.last_activity, u.commission, u.referred_by
       ORDER BY u.created_at DESC
@@ -4371,34 +4209,7 @@ app.get('/api/admin/orders', async (req, res) => {
   }
 });
 
-// Получение всех покупок юаней для админов
-app.get('/api/admin/yuan-purchases', async (req, res) => {
-  try {
-    // В ВКР-приложении полностью отключена функциональность покупки юаней.
-    return res.json({ purchases: [] });
-    
-    const [purchases] = await dbConnection.execute(`
-      SELECT 
-        id,
-        telegram_id,
-        amount_cny,
-        amount_rub,
-        savings,
-        created_at,
-        status
-      FROM yuan_purchases
-      ORDER BY created_at DESC
-    `);
-    
-    res.json({ purchases });
-    
-  } catch (error) {
-    console.error('Ошибка получения покупок юаней:', error);
-    res.status(500).json({ error: 'Ошибка получения покупок юаней' });
-  }
-});
-
-// Получение ожидающих заказов и покупок юаней для админов
+// Получение ожидающих заказов для админов
 app.get('/api/admin/pending-orders', async (req, res) => {
   try {
     await ensureDBConnection();
@@ -4429,13 +4240,8 @@ app.get('/api/admin/pending-orders', async (req, res) => {
       ORDER BY o.created_at DESC
     `);
     
-    // Покупки юаней в ВКР-приложении отключены.
-    // Возвращаем пустой список, чтобы не трогать таблицу `yuan_purchases`.
-    const pendingYuanPurchases = [];
-    
     res.json({ 
-      orders: pendingOrders,
-      yuanPurchases: pendingYuanPurchases
+      orders: pendingOrders
     });
     
   } catch (error) {
@@ -4476,10 +4282,6 @@ app.get('/api/admin/user-details/:telegramId', async (req, res) => {
       ORDER BY o.created_at DESC
     `, [telegramId]);
     
-    // Покупки юаней в ВКР-приложении отключены.
-    // Возвращаем пустой список, чтобы не трогать таблицу `yuan_purchases`.
-    const yuanPurchases = [];
-    
     // Активность пользователя
     const [activity] = await dbConnection.execute(
       'SELECT * FROM user_activity WHERE telegram_id = ? ORDER BY created_at DESC LIMIT 50',
@@ -4499,7 +4301,6 @@ app.get('/api/admin/user-details/:telegramId', async (req, res) => {
     res.json({
       user: userInfo[0],
       orders,
-      yuanPurchases,
       activity,
       achievements
     });
@@ -4542,36 +4343,27 @@ app.get('/api/admin/system-logs', async (req, res) => {
 app.post('/api/admin/confirm-order', async (req, res) => {
   try {
     await ensureDBConnection();
-    const { orderId, type } = req.body; // type: 'order' или 'yuan'
+    const { orderId, type } = req.body;
+    if (type && type !== 'order') {
+      return res.status(400).json({ success: false, message: 'Поддерживается только подтверждение заказа' });
+    }
 
-    // В ВКР-приложении полностью отключена функциональность покупки юаней.
-    if (type === 'yuan') {
-      return res.status(410).json({ success: false, message: 'Yuan purchases are disabled in VKR app.' });
-    }
+    // При подтверждении оплаты статус меняется на 'paid', а не 'completed'
+    await dbConnection.execute(
+      'UPDATE orders SET status = ? WHERE order_id = ?',
+      ['paid', orderId]
+    );
     
-    if (type === 'order') {
-      // При подтверждении оплаты статус меняется на 'paid', а не 'completed'
-      // 'completed' - это финальный статус после доставки
-      await dbConnection.execute(
-        'UPDATE orders SET status = ? WHERE order_id = ?',
-        ['paid', orderId]
-      );
-    }
-    
-    // Отправляем уведомление пользователю
-    const telegramId = await getTelegramIdByOrderId(orderId, type);
+    const telegramId = await getTelegramIdByOrderId(orderId);
     if (telegramId) {
-      await sendUserNotification(telegramId, 'confirm', type, orderId);
+      await sendUserNotification(telegramId, 'confirm', orderId);
 
-      // Обновляем статистику пользователя только после подтверждения
-      await updateUserStatsAfterConfirmation(telegramId, orderId, type);
+      await updateUserStatsAfterConfirmation(telegramId, orderId);
       
       // ========== GAMIFICATION: Начисление XP после подтверждения ==========
       try {
         if (gamificationService) {
-          if (type === 'order') {
-            // Обновляем total_orders в таблице users (учитываем оплаченные и завершенные заказы)
-            const [orderStats] = await dbConnection.execute(`
+          const [orderStats] = await dbConnection.execute(`
               SELECT COUNT(*) as total_orders
               FROM orders 
               WHERE telegram_id = ? AND (status = 'paid' OR status = 'completed')
@@ -4583,7 +4375,6 @@ app.post('/api/admin/confirm-order', async (req, res) => {
               [totalOrders, telegramId]
             );
             
-            // Заказ подтверждён - даем 100 XP
             const orderHour = new Date().getHours();
             const xpResult = await gamificationService.awardXP(
               telegramId,
@@ -4593,20 +4384,17 @@ app.post('/api/admin/confirm-order', async (req, res) => {
               `Заказ #${orderId} подтвержден`
             );
             
-            // Проверяем достижения (теперь total_orders обновлен правильно)
             const achievements = await gamificationService.checkOrderAchievements(
               telegramId,
               orderId,
               orderHour
             );
             
-            // Уведомления о level up и достижениях
             if (xpResult.leveledUp) {
               const levelUpMsg = `🎊 <b>Поздравляем!</b>\n\n` +
                 `Вы достигли уровня <b>${xpResult.currentLevel}</b>! 🏆\n\n` +
                 `🎁 <b>Награды:</b>\n${xpResult.rewards.description}\n\n` +
                 `✨ Всего XP: ${xpResult.totalXP}`;
-              // Включаем уведомления для продакшена
               await sendTelegramMessage(telegramId, levelUpMsg);
             }
             
@@ -4621,64 +4409,11 @@ app.post('/api/admin/confirm-order', async (req, res) => {
                   achievementMsg += `\n✨ Бонус: ${achievement.achievement.additionalReward}`;
                 }
                 
-                // Для dragon_summoner достижение разблокируется у РЕФЕРЕРА, а не у реферала
-                // Поэтому уведомление отправляем рефереру
                 const recipientId = achievement.unlockedFor || telegramId;
-                // Включаем уведомления для продакшена
                 await sendTelegramMessage(recipientId, achievementMsg);
               }
             }
-          } else if (type === 'yuan') {
-            // Покупка юаней подтверждена - даем XP (1 за 100₽)
-            const [yuanData] = await dbConnection.execute(
-              'SELECT amount_rub FROM yuan_purchases WHERE purchase_id = ?',
-              [orderId]
-            );
-            
-            if (yuanData.length > 0) {
-              const amountRub = yuanData[0].amount_rub;
-              const xpAmount = Math.floor(amountRub / 100);
-              
-              if (xpAmount > 0) {
-                const xpResult = await gamificationService.awardXP(
-                  telegramId,
-                  xpAmount,
-                  'yuan_purchase',
-                  orderId,
-                  `Покупка юаней подтверждена`
-                );
-                
-                // Проверяем достижения
-                const achievements = await gamificationService.checkYuanAchievements(telegramId, amountRub);
-                
-                if (xpResult.leveledUp) {
-                  const levelUpMsg = `🎊 <b>Поздравляем!</b>\n\n` +
-                    `Вы достигли уровня <b>${xpResult.currentLevel}</b>! 🏆\n\n` +
-                    `🎁 <b>Награды:</b>\n${xpResult.rewards.description}\n\n` +
-                    `✨ Всего XP: ${xpResult.totalXP}`;
-                  // Включаем уведомления для продакшена
-              await sendTelegramMessage(telegramId, levelUpMsg);
-                }
-                
-                for (const achievement of achievements) {
-                  if (!achievement.alreadyUnlocked && achievement.achievement) {
-                    let achievementMsg = `🏆 <b>Достижение разблокировано!</b>\n\n` +
-                      `${achievement.achievement.icon} <b>${achievement.achievement.name}</b>\n` +
-                      `📝 ${achievement.achievement.description}\n\n` +
-                      `🎁 Награда: +${achievement.achievement.xpReward} XP`;
-                    
-                    if (achievement.achievement.additionalReward) {
-                      achievementMsg += `\n✨ Бонус: ${achievement.achievement.additionalReward}`;
-                    }
-                    
-                    // Включаем уведомления для продакшена
-                    await sendTelegramMessage(telegramId, achievementMsg);
-                  }
-                }
-              }
-            }
-          }
-          // Проверяем достижения по экономии (2 000₽, 50 000₽) — после подтверждения заказа или юаней
+          // Проверяем достижения по экономии (2 000₽, 50 000₽) после подтверждения заказа
           const savingsAchievements = await gamificationService.checkSavingsAchievements(telegramId);
           for (const sa of savingsAchievements) {
             if (!sa.alreadyUnlocked && sa.achievement) {
@@ -4708,24 +4443,19 @@ app.post('/api/admin/confirm-order', async (req, res) => {
 app.post('/api/admin/cancel-order', async (req, res) => {
   try {
     await ensureDBConnection();
-    const { orderId, type } = req.body; // type: 'order' или 'yuan'
-
-    // В ВКР-приложении полностью отключена функциональность покупки юаней.
-    if (type === 'yuan') {
-      return res.status(410).json({ success: false, message: 'Yuan purchases are disabled in VKR app.' });
+    const { orderId, type } = req.body;
+    if (type && type !== 'order') {
+      return res.status(400).json({ success: false, message: 'Поддерживается только отмена заказа' });
     }
     
-    if (type === 'order') {
-      await dbConnection.execute(
-        'UPDATE orders SET status = ? WHERE order_id = ?',
-        ['cancelled', orderId]
-      );
-    }
+    await dbConnection.execute(
+      'UPDATE orders SET status = ? WHERE order_id = ?',
+      ['cancelled', orderId]
+    );
     
-    // Отправляем уведомление пользователю
-    const telegramId = await getTelegramIdByOrderId(orderId, type);
+    const telegramId = await getTelegramIdByOrderId(orderId);
     if (telegramId) {
-      await sendUserNotification(telegramId, 'cancel', type, orderId);
+      await sendUserNotification(telegramId, 'cancel', orderId);
     }
     
     res.json({ success: true, message: 'Заказ отменен' });
@@ -4736,28 +4466,20 @@ app.post('/api/admin/cancel-order', async (req, res) => {
 });
 
 // Вспомогательные функции
-async function getTelegramIdByOrderId(orderId, type) {
+async function getTelegramIdByOrderId(orderId) {
   try {
-    if (type === 'order') {
-      const [result] = await dbConnection.execute(
-        'SELECT telegram_id FROM orders WHERE order_id = ?',
-        [orderId]
-      );
-      return result[0]?.telegram_id;
-    } else if (type === 'yuan') {
-      const [result] = await dbConnection.execute(
-        'SELECT telegram_id FROM yuan_purchases WHERE purchase_id = ?',
-        [orderId]
-      );
-      return result[0]?.telegram_id;
-    }
+    const [result] = await dbConnection.execute(
+      'SELECT telegram_id FROM orders WHERE order_id = ?',
+      [orderId]
+    );
+    return result[0]?.telegram_id;
   } catch (error) {
     console.error('Ошибка получения Telegram ID:', error);
     return null;
   }
 }
 
-async function sendUserNotification(telegramId, action, type, orderId) {
+async function sendUserNotification(telegramId, action, orderId) {
   try {
     const botToken = process.env.BOT_TOKEN;
     
@@ -4768,11 +4490,7 @@ async function sendUserNotification(telegramId, action, type, orderId) {
     
     let message = '';
     if (action === 'confirm') {
-      if (type === 'order') {
-        message = `🎉 Отличные новости! Ваш заказ #${orderId} успешно подтвержден и оплачен. Мы приступили к его обработке. Спасибо за покупку!`;
-      } else {
-        message = `💰 Ваша покупка юаней #${orderId} подтверждена! Средства поступят на ваш счет в течение 24 часов. Спасибо за доверие!`;
-      }
+      message = `🎉 Отличные новости! Ваш заказ #${orderId} успешно подтвержден и оплачен. Мы приступили к его обработке. Спасибо за покупку!`;
     } else if (action === 'cancel') {
       message = `😔 К сожалению, ваш заказ #${orderId} был отменен. Очень жаль, надеемся в следующий раз закажете еще! Если у вас есть вопросы, обращайтесь к нашему менеджеру.`;
     }
@@ -4823,45 +4541,20 @@ async function sendUserNotification(telegramId, action, type, orderId) {
 }
 
 // Функция для обновления статистики пользователя после подтверждения заказа
-async function updateUserStatsAfterConfirmation(telegramId, orderId, type) {
+async function updateUserStatsAfterConfirmation(telegramId, orderId) {
   try {
-    if (type === 'order') {
-      // Получаем данные заказа
-      const [orderData] = await dbConnection.execute(`
+    const [orderData] = await dbConnection.execute(`
         SELECT estimated_savings FROM orders WHERE order_id = ? AND telegram_id = ?
       `, [orderId, telegramId]);
       
-      if (orderData.length > 0) {
-        const savings = orderData[0].estimated_savings || 0;
-        
-        // Обновляем статистику пользователя
-        await dbConnection.execute(`
+    if (orderData.length > 0) {
+      const savings = orderData[0].estimated_savings || 0;
+      await dbConnection.execute(`
           UPDATE users 
           SET total_savings = total_savings + ?,
               last_activity = NOW()
           WHERE telegram_id = ?
         `, [savings, telegramId]);
-      }
-    } else if (type === 'yuan') {
-      // Получаем данные покупки юаней
-      const [yuanData] = await dbConnection.execute(`
-        SELECT savings FROM yuan_purchases WHERE purchase_id = ? AND telegram_id = ?
-      `, [orderId, telegramId]);
-      
-      if (yuanData.length > 0) {
-        const savings = yuanData[0].savings || 0;
-        
-        // Обновляем статистику пользователя
-        await dbConnection.execute(`
-          UPDATE users 
-          SET total_savings = total_savings + ?,
-              last_activity = NOW()
-          WHERE telegram_id = ?
-        `, [savings, telegramId]);
-
-        // Уровень и достижения обновляются через gamification (XP-based) в confirm-order
-        // Здесь только обновляем total_savings — не перезаписываем current_level по заказам
-      }
     }
   } catch (error) {
     console.error('❌ Ошибка обновления статистики пользователя:', error);
@@ -5005,11 +4698,9 @@ app.get('/api/admin/users-list', async (req, res) => {
             u.username,
             u.full_name,
             u.created_at,
-            COUNT(DISTINCT o.order_id) as orders_count,
-            COUNT(DISTINCT yp.id) as yuan_purchases_count
+            COUNT(DISTINCT o.order_id) as orders_count
           FROM users u
           LEFT JOIN orders o ON u.telegram_id = o.telegram_id AND o.status = 'completed'
-          LEFT JOIN yuan_purchases yp ON u.telegram_id = yp.telegram_id AND yp.status = 'completed'
           WHERE u.telegram_id != 0
           GROUP BY u.telegram_id, u.username, u.full_name, u.created_at
           ORDER BY u.created_at DESC
@@ -5017,13 +4708,12 @@ app.get('/api/admin/users-list', async (req, res) => {
 
         res.json({ 
           success: true, 
-          users: users.map(user => ({
+          users: users.map((user) => ({
             telegram_id: user.telegram_id,
             username: user.username,
             full_name: user.full_name,
             created_at: user.created_at,
             orders_count: user.orders_count,
-            yuan_purchases_count: user.yuan_purchases_count,
             display_name: user.full_name || user.username || `ID: ${user.telegram_id}`
           }))
         });
@@ -5243,12 +4933,9 @@ app.get('/api/admin/user-history/:telegramId', async (req, res) => {
             u.created_at,
             u.referred_by,
             COUNT(DISTINCT o.order_id) as total_orders,
-            COUNT(DISTINCT yp.id) as total_yuan_purchases,
-            COALESCE(SUM(CASE WHEN o.status = 'completed' THEN o.estimated_savings ELSE 0 END), 0) as total_savings_orders,
-            COALESCE(SUM(CASE WHEN yp.status = 'completed' THEN yp.savings ELSE 0 END), 0) as total_savings_yuan
+            COALESCE(SUM(CASE WHEN o.status = 'completed' THEN o.estimated_savings ELSE 0 END), 0) as total_savings_orders
           FROM users u
           LEFT JOIN orders o ON u.telegram_id = o.telegram_id
-          LEFT JOIN yuan_purchases yp ON u.telegram_id = yp.telegram_id
           WHERE u.telegram_id = ?
           GROUP BY u.telegram_id, u.username, u.full_name, u.commission, u.created_at, u.referred_by
         `, [telegramId]);
@@ -5273,20 +4960,6 @@ app.get('/api/admin/user-history/:telegramId', async (req, res) => {
             username,
             full_name
           FROM orders 
-          WHERE telegram_id = ? 
-          ORDER BY created_at DESC
-        `, [telegramId]);
-
-        // Получаем историю покупок юаней
-        const [yuanPurchases] = await dbConnection.execute(`
-          SELECT 
-            id,
-            amount_rub,
-            amount_cny,
-            savings,
-            status,
-            created_at
-          FROM yuan_purchases 
           WHERE telegram_id = ? 
           ORDER BY created_at DESC
         `, [telegramId]);
@@ -5316,7 +4989,6 @@ app.get('/api/admin/user-history/:telegramId', async (req, res) => {
         const responseData = {
           user: user,
           orders: orders,
-          yuanPurchases: yuanPurchases,
           activity: activity,
           achievements: achievements
         };
@@ -5399,20 +5071,6 @@ app.get('/api/admin/sales-analytics', async (req, res) => {
           ORDER BY date ASC
         `);
 
-        // Статистика покупок юаней
-        const [yuanStats] = await dbConnection.execute(`
-          SELECT 
-            DATE(created_at) as date,
-            COUNT(*) as purchases_count,
-            SUM(amount_rub) as total_amount_rub,
-            SUM(amount_cny) as total_amount_cny,
-            SUM(savings) as total_savings
-          FROM yuan_purchases 
-          WHERE ${dateFilter} AND status = 'completed'
-          GROUP BY DATE(created_at)
-          ORDER BY date ASC
-        `);
-
         // Статистика новых пользователей
         const [newUsersStats] = await dbConnection.execute(`
           SELECT 
@@ -5444,14 +5102,6 @@ app.get('/api/admin/sales-analytics', async (req, res) => {
           WHERE ${dateFilter} AND status = 'completed'
         `);
 
-        const [yuanTotalStats] = await dbConnection.execute(`
-          SELECT 
-            COUNT(*) as total_yuan_purchases,
-            COALESCE(SUM(amount_rub), 0) as total_yuan_amount
-          FROM yuan_purchases 
-          WHERE ${dateFilter} AND status = 'completed'
-        `);
-
         const [newUsersTotalStats] = await dbConnection.execute(`
           SELECT 
             COUNT(*) as total_new_users
@@ -5470,8 +5120,6 @@ app.get('/api/admin/sales-analytics', async (req, res) => {
 
         const totalStats = {
           total_orders: ordersTotalStats[0]?.total_orders || 0,
-          total_yuan_purchases: yuanTotalStats[0]?.total_yuan_purchases || 0,
-          total_yuan_amount: yuanTotalStats[0]?.total_yuan_amount || 0,
           total_new_users: newUsersTotalStats[0]?.total_new_users || 0,
           total_profit_calculations: profitTotalStats[0]?.total_profit_calculations || 0,
           total_profit: profitTotalStats[0]?.total_profit || 0
@@ -5484,14 +5132,6 @@ app.get('/api/admin/sales-analytics', async (req, res) => {
             SELECT 
               COUNT(*) as total_orders
             FROM orders 
-            WHERE ${previousDateFilter} AND status = 'completed'
-          `);
-
-          const [prevYuanStats] = await dbConnection.execute(`
-            SELECT 
-              COUNT(*) as total_yuan_purchases,
-              COALESCE(SUM(amount_rub), 0) as total_yuan_amount
-            FROM yuan_purchases 
             WHERE ${previousDateFilter} AND status = 'completed'
           `);
 
@@ -5512,8 +5152,6 @@ app.get('/api/admin/sales-analytics', async (req, res) => {
 
           previousStats = {
             total_orders: prevOrdersStats[0]?.total_orders || 0,
-            total_yuan_purchases: prevYuanStats[0]?.total_yuan_purchases || 0,
-            total_yuan_amount: prevYuanStats[0]?.total_yuan_amount || 0,
             total_new_users: prevNewUsersStats[0]?.total_new_users || 0,
             total_profit_calculations: prevProfitStats[0]?.total_profit_calculations || 0,
             total_profit: prevProfitStats[0]?.total_profit || 0
@@ -5527,7 +5165,6 @@ app.get('/api/admin/sales-analytics', async (req, res) => {
             startDate,
             endDate,
             ordersStats,
-            yuanStats,
             newUsersStats,
             profitStats,
             totalStats: totalStats,
@@ -6171,7 +5808,7 @@ app.get('/api/gamification/:telegramId', async (req, res) => {
     
     // Получаем данные пользователя
     const [users] = await dbConnection.query(
-      'SELECT xp, current_level, login_streak, total_savings, total_orders, total_yuan_bought, total_referrals FROM users WHERE telegram_id = ?',
+      'SELECT xp, current_level, login_streak, total_savings, total_orders, total_referrals FROM users WHERE telegram_id = ?',
       [telegramId]
     );
     
@@ -6221,7 +5858,6 @@ app.get('/api/gamification/:telegramId', async (req, res) => {
       user: {
         total_savings: user.total_savings || 0,
         total_orders: user.total_orders || 0,
-        total_yuan_bought: user.total_yuan_bought || 0,
         total_referrals: user.total_referrals || 0
       }
     });

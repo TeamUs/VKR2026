@@ -36,15 +36,14 @@ const LEVEL_REWARDS = {
     benefits: ['commission_400']
   },
   'Diamond': {
-    description: 'Комиссия 0₽ навсегда (полное освобождение) + специальные предложения на юань + повышенные бонусы для рефералов',
-    benefits: ['commission_0', 'special_yuan_offers', 'enhanced_referral_bonuses']
+    description: 'Комиссия 0₽ навсегда (полное освобождение) + приоритетная поддержка и повышенные бонусы для рефералов',
+    benefits: ['commission_0', 'priority_support', 'enhanced_referral_bonuses']
   }
 };
 
 // XP Accrual Rules
 const XP_RULES = {
   ORDER_COMPLETE: 100,           // 100 XP per completed order
-  YUAN_PER_100RUB: 1,           // 1 XP per 100₽ spent on yuan
   REFERRAL_REGISTRATION: 50,     // 50 XP per referral registration
   ACHIEVEMENT_UNLOCK: 'varies'  // Depends on achievement
 };
@@ -65,7 +64,7 @@ class GamificationService {
    * Award XP to a user
    * @param {number} telegramId - User's Telegram ID
    * @param {number} xpAmount - Amount of XP to award
-   * @param {string} source - Source of XP (order, yuan_purchase, referral, achievement)
+   * @param {string} source - Source of XP (order, referral, achievement)
    * @param {number|null} sourceId - ID of the source
    * @param {string|null} description - Optional description
    * @returns {Promise<Object>} Result with level up info if applicable
@@ -229,7 +228,6 @@ class GamificationService {
     try {
       await connection.beginTransaction();
 
-      // Check if already unlocked (поддержка telegram_id/achievement_key или user_id/achievement_id)
       let existing = [];
       try {
         [existing] = await connection.query(
@@ -784,18 +782,6 @@ class GamificationService {
   }
 
   /**
-   * Check achievements after yuan purchase
-   * @param {number} telegramId - User's Telegram ID
-   * @param {number} amountRub - Amount spent in rubles
-   * @returns {Promise<Array>} Unlocked achievements
-   */
-  async checkYuanAchievements(telegramId, amountRub) {
-    // Yuan purchases are fully disabled in the VKR mini-app.
-    // Returning an empty list prevents XP/achievement unlocking tied to yuan spending.
-    return [];
-  }
-
-  /**
    * Проверяет достижения по активности
    */
   async checkActivityAchievements(telegramId) {
@@ -889,14 +875,11 @@ class GamificationService {
       if (!result.alreadyUnlocked) unlocked.push(result);
     }
 
-    // Дракон-сберегатель и Имперская экономия — считаем экономию так же, как в профиле:
-    // yuan_purchases.savings (completed) + orders.estimated_savings (paid/completed)
-    // users.total_savings может быть не синхронизирована со старыми данными
+    // Дракон-сберегатель и Имперская экономия — только экономия по заказам (paid/completed)
     const [savingsRows] = await this.pool.query(`
       SELECT 
-        (SELECT COALESCE(SUM(savings), 0) FROM yuan_purchases WHERE telegram_id = ? AND status = 'completed') +
         (SELECT COALESCE(SUM(estimated_savings), 0) FROM orders WHERE telegram_id = ? AND status IN ('paid', 'completed')) as total_savings
-    `, [telegramId, telegramId]);
+    `, [telegramId]);
     const realTotalSavings = parseFloat(savingsRows[0]?.total_savings) || 0;
 
     if (realTotalSavings >= 2000) {
@@ -976,7 +959,7 @@ class GamificationService {
     await this.init();
 
     const [userData] = await this.pool.query(
-      'SELECT xp, current_level, login_streak, total_savings, total_orders, total_yuan_bought, total_referrals, calculation_count FROM users WHERE telegram_id = ?',
+      'SELECT xp, current_level, login_streak, total_savings, total_orders, total_referrals, calculation_count FROM users WHERE telegram_id = ?',
       [telegramId]
     );
 
@@ -987,7 +970,6 @@ class GamificationService {
         loginStreak: 0,
         totalSavings: 0,
         totalOrders: 0,
-        totalYuanBought: 0,
         totalReferrals: 0,
         calculationCount: 0
       };
@@ -1000,7 +982,6 @@ class GamificationService {
       loginStreak: user.login_streak || 0,
       totalSavings: parseFloat(user.total_savings) || 0,
       totalOrders: user.total_orders || 0,
-      totalYuanBought: parseFloat(user.total_yuan_bought) || 0,
       totalReferrals: user.total_referrals || 0,
       calculationCount: user.calculation_count || 0
     };

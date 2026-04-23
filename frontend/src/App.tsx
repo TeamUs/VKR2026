@@ -1265,8 +1265,6 @@ const App: React.FC = () => {
           </Suspense>
         )}
 
-        {/* Покупка юаней удалена из ВКР-приложения */}
-
       </AppContainer>
       
       {/* Bottom Navigation - Fixed to screen bottom */}
