@@ -1,7 +1,3 @@
-/**
- * Сгенерировать ADMIN_PASSWORD_HASH в формате scrypt$16384$8$1$<saltB64>$<hashB64>
- * Использование: node hashAdminScrypt.cjs "ваш_секретный_пароль"
- */
 const crypto = require('crypto');
 const password = process.argv[2];
 if (!password) {
